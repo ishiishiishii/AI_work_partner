@@ -1,10 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import health
+from app.db import close_pool, init_pool
+from app.routers import health, mvp
 
-app = FastAPI(title="AI Work Partner API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_pool()
+    yield
+    close_pool()
+
+
+app = FastAPI(
+    title="AI Work Partner API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,3 +30,4 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(mvp.router)

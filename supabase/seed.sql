@@ -1,3 +1,75 @@
--- Seed data for local development.
--- Runs after migrations when `supabase db reset` / `supabase start` seeds.
--- Add INSERT statements here as the schema grows.
+-- Demo seed for backend skeleton.
+
+insert into public.sales_rep (rep_id, rep_name, coverage_area)
+values
+  ('11111111-1111-1111-1111-111111111111', '山田 太郎', '関東・製造業寄り');
+
+insert into public.sales_target (rep_id, target_month, target_amount, target_deal_count)
+values
+  ('11111111-1111-1111-1111-111111111111', '2026-08', 10000000, 3);
+
+insert into public.customer (
+  customer_id, customer_name, industry, location,
+  estimated_amount, win_probability, primary_rep_id, status
+) values
+  (
+    '22222222-2222-2222-2222-222222222201',
+    'A製作所',
+    '製造業',
+    '埼玉県',
+    3000000,
+    70,
+    '11111111-1111-1111-1111-111111111111',
+    'prospect'
+  ),
+  (
+    '22222222-2222-2222-2222-222222222202',
+    'B商事',
+    '卸売業',
+    '東京都',
+    2000000,
+    55,
+    '11111111-1111-1111-1111-111111111111',
+    'prospect'
+  ),
+  (
+    '22222222-2222-2222-2222-222222222203',
+    'Cテック',
+    '製造業',
+    '神奈川県',
+    4500000,
+    40,
+    '11111111-1111-1111-1111-111111111111',
+    'active'
+  );
+
+insert into public.deal (
+  deal_id, customer_id, rep_id, estimated_amount, win_probability, result_status, opened_date
+) values
+  (
+    '33333333-3333-3333-3333-333333333301',
+    '22222222-2222-2222-2222-222222222201',
+    '11111111-1111-1111-1111-111111111111',
+    3000000,
+    70,
+    'open',
+    '2026-08-01'
+  ),
+  (
+    '33333333-3333-3333-3333-333333333302',
+    '22222222-2222-2222-2222-222222222202',
+    '11111111-1111-1111-1111-111111111111',
+    2000000,
+    55,
+    'open',
+    '2026-08-03'
+  ),
+  (
+    '33333333-3333-3333-3333-333333333303',
+    '22222222-2222-2222-2222-222222222203',
+    '11111111-1111-1111-1111-111111111111',
+    4500000,
+    40,
+    'open',
+    '2026-08-05'
+  );
