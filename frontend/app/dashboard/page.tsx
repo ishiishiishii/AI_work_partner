@@ -14,13 +14,15 @@ import {
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockRepAffinities, mockSalesRep } from "@/lib/mockData";
+import { mockAlternativeCandidates, mockDailyTasks, mockRepAffinities } from "@/lib/mockData";
+import { useRep } from "@/lib/repContext";
 import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
 
-const REP_ID = mockSalesRep.rep_id;
 const TARGET_MONTH = "2026-08";
 
 export default function DashboardPage() {
+  const { selectedRep } = useRep();
+  const REP_ID = selectedRep.rep_id;
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
@@ -68,7 +70,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [REP_ID]);
 
   async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
     const updated = await saveSalesTarget(REP_ID, TARGET_MONTH, input);
@@ -88,7 +90,7 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleResultChange(planId: number, status: DealResultStatus) {
+  async function handleResultChange(planId: number, status: DealResultStatus, activityTypeName: string) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target) return;
 
@@ -102,12 +104,25 @@ export default function DashboardPage() {
     }
 
     const updatedPlans = plans.map((plan) =>
-      plan.plan_id === planId ? { ...plan, result_status: status } : plan,
+      plan.plan_id === planId
+        ? { ...plan, result_status: status, activity_type_name: activityTypeName }
+        : plan,
     );
     setPlans(updatedPlans);
 
+    // 「対応が難しい」で差し替えたローカル専用の計画には実在する deal_id が無いため、
+    // バックエンドへは送信せず表示のみ更新する
+    if (!changedPlan.deal_id) {
+      return;
+    }
+
     try {
-      await postActivityResult(REP_ID, changedPlan, status as Exclude<DealResultStatus, "pending">);
+      await postActivityResult(
+        REP_ID,
+        changedPlan,
+        status as Exclude<DealResultStatus, "pending">,
+        activityTypeName,
+      );
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
       setPlans(plans); // ロールバック
@@ -129,6 +144,27 @@ export default function DashboardPage() {
         setLoadError(error instanceof Error ? error.message : "再計画に失敗しました");
       }
     }
+  }
+
+  function handleRequestAlternative(planId: number) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    if (!changedPlan || !target) return;
+
+    const candidate = mockAlternativeCandidates.find(
+      (item) => !plans.some((plan) => plan.plan_id === item.plan_id),
+    );
+    if (!candidate) return;
+
+    const before = calcAchievementRate(plans, target.target_amount);
+    const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
+    const after = calcAchievementRate(nextPlans, target.target_amount);
+
+    setPlans(nextPlans);
+    setReplan({
+      before_achievement_rate: before,
+      after_achievement_rate: after,
+      reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが${candidate.customer_name}への提案に差し替えました`,
+    });
   }
 
   if (isLoading) {
@@ -154,12 +190,13 @@ export default function DashboardPage() {
 
   const forecastAmount = calcForecastAmount(plans);
   const achievementRate = calcAchievementRate(plans, target.target_amount);
+  const repAffinities = mockRepAffinities.filter((affinity) => affinity.rep_id === REP_ID);
 
   return (
     <main>
       <h1>営業ダッシュボード</h1>
       <GoalCard
-        rep={mockSalesRep}
+        rep={selectedRep}
         target={target}
         forecastAmount={forecastAmount}
         achievementRate={achievementRate}
@@ -176,8 +213,13 @@ export default function DashboardPage() {
           {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
         </button>
       </div>
-      <ActivityPlanList plans={plans} onResultChange={handleResultChange} />
-      <AiReasoningPanel plans={plans} affinities={mockRepAffinities} />
+      <ActivityPlanList
+        plans={plans}
+        dailyTasks={mockDailyTasks}
+        onResultChange={handleResultChange}
+        onRequestAlternative={handleRequestAlternative}
+      />
+      <AiReasoningPanel plans={plans} affinities={repAffinities} />
     </main>
   );
 }
