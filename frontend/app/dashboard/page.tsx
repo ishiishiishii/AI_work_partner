@@ -4,10 +4,12 @@ import { useState } from "react";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
+import { PlanVariantSelector } from "@/components/dashboard/PlanVariantSelector";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { updateSalesTarget } from "@/lib/api";
+import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
 import {
-  mockActivityPlans,
+  mockPlanVariants,
   mockRepAffinities,
   mockReplacementCandidates,
   mockSalesRep,
@@ -15,22 +17,14 @@ import {
 } from "@/lib/mockData";
 import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
 
-function calcForecastAmount(plans: ActivityPlan[]): number {
-  return plans.reduce((sum, plan) => {
-    if (plan.result_status === "won") return sum + plan.expected_amount;
-    if (plan.result_status === "lost") return sum;
-    return sum + plan.expected_amount * (plan.expected_probability / 100);
-  }, 0);
-}
-
-function calcAchievementRate(plans: ActivityPlan[], targetAmount: number): number {
-  if (targetAmount <= 0) return 0;
-  return (calcForecastAmount(plans) / targetAmount) * 100;
-}
+const DEFAULT_VARIANT_ID = "A";
 
 export default function DashboardPage() {
   const [target, setTarget] = useState<SalesTarget>(mockSalesTarget);
-  const [plans, setPlans] = useState<ActivityPlan[]>(mockActivityPlans);
+  const [activeVariantId, setActiveVariantId] = useState(DEFAULT_VARIANT_ID);
+  const [plans, setPlans] = useState<ActivityPlan[]>(
+    mockPlanVariants.find((variant) => variant.variant_id === DEFAULT_VARIANT_ID)?.plans ?? [],
+  );
   const [candidates, setCandidates] = useState<ActivityPlan[]>(mockReplacementCandidates);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   // 再計画で「どの計画の結果をきっかけに、どの計画を追加したか」を覚えておく（取り消し用）
@@ -42,6 +36,17 @@ export default function DashboardPage() {
   async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
     const updated = await updateSalesTarget(mockSalesRep.rep_id, target.target_month, input);
     setTarget(updated);
+  }
+
+  function handleSelectVariant(variantId: string) {
+    const variant = mockPlanVariants.find((item) => item.variant_id === variantId);
+    if (!variant) return;
+
+    setActiveVariantId(variantId);
+    setPlans(variant.plans);
+    setCandidates(mockReplacementCandidates);
+    setReplanLinks({});
+    setReplan(null);
   }
 
   function handleResultChange(planId: number, status: DealResultStatus) {
@@ -125,8 +130,14 @@ export default function DashboardPage() {
         achievementRate={achievementRate}
         onSave={handleTargetSave}
       />
+      <PlanVariantSelector
+        variants={mockPlanVariants}
+        activeVariantId={activeVariantId}
+        targetAmount={target.target_amount}
+        onSelect={handleSelectVariant}
+      />
       {replan && <ReplanBanner info={replan} />}
-      <ActivityPlanList plans={plans} onResultChange={handleResultChange} />
+      <ActivityPlanList key={activeVariantId} plans={plans} onResultChange={handleResultChange} />
       <AiReasoningPanel plans={plans} affinities={mockRepAffinities} />
     </main>
   );

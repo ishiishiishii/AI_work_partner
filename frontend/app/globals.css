@@ -227,9 +227,71 @@ a {
   cursor: not-allowed;
 }
 
-.activity-plan-list h2 {
-  margin: 0 0 0.75rem;
+.activity-plan-list__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.activity-plan-list__header h2 {
+  margin: 0;
   font-size: 1.1rem;
+}
+
+.activity-plan-list__tabs {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.15rem;
+}
+
+.activity-plan-list__tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-family: inherit;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.activity-plan-list__tab.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.activity-plan-list__nav {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.activity-plan-list__nav button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.activity-plan-list__nav button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.activity-plan-list__empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 1rem 0;
 }
 
 .activity-plan-list__items {
@@ -273,9 +335,46 @@ a {
 }
 
 .activity-plan-list__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   color: var(--muted);
   font-size: 0.85rem;
   margin-top: 0.15rem;
+}
+
+.activity-plan-list__type {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+}
+
+.activity-plan-list__type--visit {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.activity-plan-list__type--call {
+  background: color-mix(in srgb, #7c3aed 15%, transparent);
+  color: #7c3aed;
+}
+
+.activity-plan-list__type--email {
+  background: color-mix(in srgb, #0369a1 15%, transparent);
+  color: #0369a1;
+}
+
+.activity-plan-list__type--online {
+  background: color-mix(in srgb, #be185d 15%, transparent);
+  color: #be185d;
+}
+
+.activity-plan-list__type--default {
+  background: var(--line);
+  color: var(--muted);
 }
 
 .activity-plan-list__amount {
@@ -414,6 +513,22 @@ a {
   border-color: var(--muted);
 }
 
+.activity-plan-list__undo-button {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.activity-plan-list__undo-button:hover {
+  border-color: var(--muted);
+  color: var(--ink);
+}
+
 .replan-banner {
   border-color: var(--ai);
   background: color-mix(in srgb, var(--ai) 6%, var(--card));
@@ -447,4 +562,77 @@ a {
 
 .replan-banner__after {
   color: var(--ai);
+}
+
+.plan-variant-selector h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.plan-variant-selector__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.plan-variant-selector__card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  gap: 0.6rem;
+}
+
+.plan-variant-selector__card.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+}
+
+.plan-variant-selector__label {
+  font-weight: 700;
+}
+
+.plan-variant-selector__description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.plan-variant-selector__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.plan-variant-selector__stats dt {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin: 0 0 0.1rem;
+}
+
+.plan-variant-selector__stats dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.plan-variant-selector__select {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.plan-variant-selector__select:disabled {
+  background: transparent;
+  color: var(--accent);
+  cursor: default;
 }

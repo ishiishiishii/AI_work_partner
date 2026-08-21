@@ -51,3 +51,10 @@ export type ReplanInfo = {
   after_achievement_rate: number;
   reason: string;
 };
+
+export type PlanVariant = {
+  variant_id: string;
+  label: string;
+  description: string;
+  plans: ActivityPlan[];
+};
