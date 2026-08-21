@@ -70,46 +70,6 @@ export const mockSalesReps: SalesRep[] = [
 
 export const mockSalesRep: SalesRep = mockSalesReps[0];
 
-// 「対応が難しい」を押した際にAIが差し替える候補。
-// customer_id/deal_id が無い(実在の顧客ではない)ため、この計画に結果を記録してもバックエンドには送信されない。
-// plan_id はバックエンドの連番と衝突しないよう、大きな番号を割り当てている。
-export const mockAlternativeCandidates: ActivityPlan[] = [
-  {
-    plan_id: 900001,
-    rep_id: 1,
-    plan_date: "2026-08-10",
-    start_time: null,
-    customer_id: null,
-    customer_name: "東西システムズ",
-    deal_id: null,
-    product_name: null,
-    activity_type_name: "Web会議",
-    priority: 3,
-    expected_amount: 520000,
-    expected_probability: 50,
-    is_ai_generated: true,
-    reasoning_text: "対応が難しいとのことなので、負担の少ないWeb会議から始められる案件に差し替えました。",
-    result_status: "pending",
-  },
-  {
-    plan_id: 900002,
-    rep_id: 1,
-    plan_date: "2026-08-17",
-    start_time: null,
-    customer_id: null,
-    customer_name: "北陸精密",
-    deal_id: null,
-    product_name: null,
-    activity_type_name: "メール",
-    priority: 4,
-    expected_amount: 380000,
-    expected_probability: 45,
-    is_ai_generated: true,
-    reasoning_text: "対応が難しいとのことなので、まずはメールでの軽い接点から関係構築できる案件を提案しました。",
-    result_status: "pending",
-  },
-];
-
 // 「日」表示用の1日のスケジュール。資料作成・新規開拓など、
 // 顧客・商談に紐づかない活動もここでは扱う（customer_id/deal_idは無し）。
 // 実データが来るまでの仮データ。バックエンドの実案件がある2026-08-01を基準にしている。
