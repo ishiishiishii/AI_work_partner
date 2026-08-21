@@ -4,6 +4,7 @@ from decimal import Decimal
 from psycopg import Connection
 
 from app.schemas.models import PlanOut
+from app.services import affinity
 
 
 def _month_to_date(target_month: str) -> date:
@@ -111,6 +112,82 @@ def create_customer(
                   location, primary_rep_id
         """,
         (customer_name, industry_id, company_size_id, location, primary_rep_id),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
+    if rep_id:
+        rows = conn.execute(
+            """
+            select deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
+                   product_id, estimated_amount, win_probability, expected_visit_count,
+                   expected_effort_hours, deal_start_date, contract_date
+            from deal
+            where rep_id = %s
+            order by deal_start_date desc, deal_id desc
+            """,
+            (rep_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            select deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
+                   product_id, estimated_amount, win_probability, expected_visit_count,
+                   expected_effort_hours, deal_start_date, contract_date
+            from deal
+            order by deal_start_date desc, deal_id desc
+            """
+        ).fetchall()
+    return list(rows)
+
+
+def create_deal(
+    conn: Connection,
+    *,
+    customer_id: int,
+    rep_id: int,
+    product_id: int,
+    deal_phase_id: int,
+    estimated_amount: Decimal,
+    win_probability: int,
+    expected_visit_count: int,
+    expected_effort_hours: Decimal,
+    deal_start_date: date,
+) -> dict:
+    # deal_id has no owning sequence (AGENTS.md: it preserves the imported CSV's
+    # ids), so newly registered deals continue the max+1 by hand. New deals always
+    # start 'ongoing' with no contract_date; won/lost is set later via /results,
+    # which is the only place the contract_date trigger constraint is satisfied.
+    row = conn.execute(
+        """
+        insert into deal (
+          deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
+          product_id, estimated_amount, win_probability, expected_visit_count,
+          expected_effort_hours, deal_start_date, contract_date
+        )
+        values (
+          (select coalesce(max(deal_id), 0) + 1 from deal),
+          %s, %s, %s,
+          (select deal_result_status_id from deal_result_status where status_code = 'ongoing'),
+          %s, %s, %s, %s, %s, %s, null
+        )
+        returning deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
+                  product_id, estimated_amount, win_probability, expected_visit_count,
+                  expected_effort_hours, deal_start_date, contract_date
+        """,
+        (
+            customer_id,
+            rep_id,
+            deal_phase_id,
+            product_id,
+            estimated_amount,
+            win_probability,
+            expected_visit_count,
+            expected_effort_hours,
+            deal_start_date,
+        ),
     ).fetchone()
     conn.commit()
     return dict(row)
@@ -278,6 +355,8 @@ def create_result(
             """,
             (outcome, contract_date, deal_id, rep_id),
         )
+        # deal just closed (won/lost) -> this rep's track record changed.
+        affinity.recalculate_rep_affinity(conn, rep_id)
 
     if plan_id:
         conn.execute(

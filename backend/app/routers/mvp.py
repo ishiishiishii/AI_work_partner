@@ -6,18 +6,21 @@ from app.db import get_connection
 from app.schemas.models import (
     CustomerCreate,
     CustomerOut,
+    DealCreate,
+    DealOut,
     ForecastOut,
     PlanGenerateRequest,
     PlanGenerateResponse,
     PlanOut,
     ProductOut,
+    RepAffinityOut,
     ReplanRequest,
     ResultCreate,
     ResultOut,
     TargetCreate,
     TargetOut,
 )
-from app.services import planning
+from app.services import affinity, planning
 
 router = APIRouter(prefix="/api", tags=["mvp"])
 
@@ -64,6 +67,48 @@ def post_customer(body: CustomerCreate) -> CustomerOut:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CustomerOut.model_validate(row)
+
+
+@router.get("/deals", response_model=list[DealOut])
+def get_deals(rep_id: int | None = None) -> list[DealOut]:
+    with get_connection() as conn:
+        rows = planning.list_deals(conn, rep_id)
+    return [DealOut.model_validate(row) for row in rows]
+
+
+@router.post("/deals", response_model=DealOut)
+def post_deal(body: DealCreate) -> DealOut:
+    with get_connection() as conn:
+        try:
+            row = planning.create_deal(
+                conn,
+                customer_id=body.customer_id,
+                rep_id=body.rep_id,
+                product_id=body.product_id,
+                deal_phase_id=body.deal_phase_id,
+                estimated_amount=body.estimated_amount,
+                win_probability=body.win_probability,
+                expected_visit_count=body.expected_visit_count,
+                expected_effort_hours=body.expected_effort_hours,
+                deal_start_date=body.deal_start_date or date.today(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DealOut.model_validate(row)
+
+
+@router.get("/reps/{rep_id}/affinity", response_model=list[RepAffinityOut])
+def get_rep_affinity(rep_id: int) -> list[RepAffinityOut]:
+    with get_connection() as conn:
+        rows = affinity.list_rep_affinity(conn, rep_id)
+    return [RepAffinityOut.model_validate(row) for row in rows]
+
+
+@router.post("/reps/affinity/recalculate", response_model=list[RepAffinityOut])
+def post_rep_affinity_recalculate(rep_id: int | None = None) -> list[RepAffinityOut]:
+    with get_connection() as conn:
+        rows = affinity.recalculate_rep_affinity(conn, rep_id)
+    return [RepAffinityOut.model_validate(row) for row in rows]
 
 
 @router.get("/products", response_model=list[ProductOut])

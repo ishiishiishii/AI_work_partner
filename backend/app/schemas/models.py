@@ -44,6 +44,46 @@ class CustomerOut(OrmModel):
     primary_rep_id: int | None = None
 
 
+class DealCreate(BaseModel):
+    customer_id: int
+    rep_id: int
+    product_id: int
+    deal_phase_id: int
+    estimated_amount: Decimal = Field(ge=0)
+    win_probability: int = Field(ge=0, le=100)
+    expected_visit_count: int = Field(ge=0)
+    expected_effort_hours: Decimal = Field(ge=0)
+    deal_start_date: date | None = None
+
+
+class DealOut(OrmModel):
+    deal_id: int
+    customer_id: int
+    rep_id: int
+    deal_phase_id: int
+    deal_result_status_id: int
+    product_id: int
+    estimated_amount: Decimal
+    win_probability: Decimal
+    expected_visit_count: int
+    expected_effort_hours: Decimal
+    deal_start_date: date
+    contract_date: date | None = None
+
+
+class RepAffinityOut(OrmModel):
+    rep_id: int
+    industry_id: int
+    category_id: int
+    pattern_id: int
+    deal_count: int
+    won_count: int
+    win_rate: Decimal
+    avg_won_amount: Decimal
+    affinity_score: Decimal
+    calculated_at: datetime | None = None
+
+
 class PlanOut(OrmModel):
     plan_id: int
     rep_id: int
