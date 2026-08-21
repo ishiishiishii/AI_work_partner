@@ -38,3 +38,6 @@ Thumbs.db
 # Supabase
 supabase/.temp/
 supabase/.branches/
+
+# Accidental nested clone
+/AI_work_partner/
