@@ -774,6 +774,15 @@ a {
   gap: 0.9rem;
 }
 
+.login-form__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.login-form__actions button {
+  flex: 1;
+}
+
 .customer-table {
   list-style: none;
   margin: 0;
