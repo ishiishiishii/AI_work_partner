@@ -37,6 +37,15 @@ export type Customer = {
   primary_rep_id: number | null;
 };
 
+export type Product = {
+  product_id: number;
+  product_name: string;
+  subcategory_id: number;
+  subcategory_name: string;
+  category_id: number;
+  category_name: string;
+};
+
 export type DealHistoryStatus = "in_progress" | "won" | "lost" | "postponed";
 
 export type DealHistoryItem = {

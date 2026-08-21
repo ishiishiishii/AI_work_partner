@@ -1,4 +1,4 @@
-import type { ActivityPlan, Customer, DealResultStatus, SalesTarget } from "@/types";
+import type { ActivityPlan, Customer, DealResultStatus, Product, SalesTarget } from "@/types";
 
 export function getApiBaseUrl(): string {
   if (typeof window === "undefined") {
@@ -244,4 +244,12 @@ export async function postActivityResult(
     }),
   });
   if (!res.ok) throw new Error(`結果の登録に失敗しました (HTTP ${res.status})`);
+}
+
+export async function fetchProducts(name?: string): Promise<Product[]> {
+  const base = getApiBaseUrl();
+  const query = name ? `?name=${encodeURIComponent(name)}` : "";
+  const res = await fetch(`${base}/api/products${query}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`商品一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
 }
