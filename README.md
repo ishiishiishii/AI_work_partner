@@ -8,9 +8,9 @@ FastAPI + Next.js + ローカル Supabase のモノレポ開発環境です。�
 | --- | --- | --- |
 | Web | Next.js (App Router) | http://localhost:3000 |
 | API | FastAPI | http://localhost:8000 / docs: http://localhost:8000/docs |
-| Supabase API | Local Supabase | http://127.0.0.1:54321 |
-| Postgres | Supabase 同梱 | `127.0.0.1:54322` |
-| Studio | Supabase Studio | http://127.0.0.1:54323 |
+| Supabase API | Local Supabase | http://127.0.0.1:55321 |
+| Postgres | Supabase 同梱 | `127.0.0.1:55322` |
+| Studio | Supabase Studio | http://127.0.0.1:55323 |
 
 AI（オープンモデル）は後から差し替えできるよう、API の `/api/ai/ping` にプレースホルダのみ置いています。
 
@@ -28,14 +28,21 @@ Browser → web (:3000) → api (:8000)
 
 フロント / バックはコンテナ内で動くため、ホストに Node.js や Python は必須ではありません（ローカル直接実行する場合のみ必要）。
 
-### Supabase CLI（Windows 例）
+### Supabase CLI（Windows）
+
+```powershell
+npm install -g supabase
+```
+
+Scoop を使う場合:
 
 ```powershell
 scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
 scoop install supabase
 ```
 
-または公式ドキュメントのインストール方法に従ってください。
+> このリポジトリのローカル Supabase は、他プロジェクト／Windows 予約ポートとの衝突を避けるため  
+> API `55321` / DB `55322` / Studio `55323` を使います（`supabase/config.toml`）。
 
 ## 初回セットアップ
 
