@@ -38,3 +38,6 @@ Thumbs.db
 # Supabase
 supabase/.temp/
 supabase/.branches/
+
+# Local learning notes (not shared via git)
+docs/

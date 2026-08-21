@@ -1,4 +1,4 @@
-﻿-- Seed data for local development.
+-- Seed data for local development.
 -- Runs after migrations when supabase db reset / supabase start seeds.
 -- Imported from customer.csv / deal_test.csv (see conversation for provenance).
 
@@ -56,7 +56,7 @@ insert into sales_rep (rep_id, rep_name) values
 select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
 
 
-﻿insert into customer (customer_id, customer_name, industry_id, company_size_id, location) values
+insert into customer (customer_id, customer_name, industry_id, company_size_id, location) values
   (1, '桔梗商会株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '埼玉県'),
   (2, 'さくら興業株式会社', (select industry_id from industry where industry_name = '建設業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '宮城県'),
   (3, '白鳥商事株式会社', (select industry_id from industry where industry_name = '金融・保険業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '茨城県'),
@@ -240,7 +240,7 @@ insert into product (product_name, subcategory_id) values
   ('産業用ロボットアーム', (select subcategory_id from product_subcategory where subcategory_name = '産業機械')),
   ('検査装置', (select subcategory_id from product_subcategory where subcategory_name = '産業機械'));
 
-﻿insert into deal (deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id, product_id, estimated_amount, win_probability, expected_visit_count, expected_effort_hours, deal_start_date, contract_date) values
+insert into deal (deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id, product_id, estimated_amount, win_probability, expected_visit_count, expected_effort_hours, deal_start_date, contract_date) values
   (1, (select customer_id from customer where customer_name = '株式会社大東工業'), (select rep_id from sales_rep where rep_name = '井上健太'), (select deal_phase_id from deal_phase where deal_phase_name = '契約交渉'), (select deal_result_status_id from deal_result_status where status_code = 'won'), 18, 210000, 100, 5, 10.3, '2026-01-05', '2026-03-02'),
   (2, (select customer_id from customer where customer_name = '株式会社芙蓉電機'), (select rep_id from sales_rep where rep_name = '小林綾子'), (select deal_phase_id from deal_phase where deal_phase_name = 'ヒアリング'), (select deal_result_status_id from deal_result_status where status_code = 'ongoing'), 31, 570000, 26, 2, 2, '2026-07-14', NULL),
   (3, (select customer_id from customer where customer_name = '株式会社希望システムズ'), (select rep_id from sales_rep where rep_name = '小林綾子'), (select deal_phase_id from deal_phase where deal_phase_name = 'ヒアリング'), (select deal_result_status_id from deal_result_status where status_code = 'ongoing'), 12, 3000000, 16, 2, 3, '2026-08-04', NULL),
@@ -1244,7 +1244,7 @@ insert into product (product_name, subcategory_id) values
 
 
 
-﻿
+
 insert into sales_target (target_id, rep_id, target_month, target_amount) values
   (1, 1, '2026-03-01', 4910000),
   (2, 1, '2026-04-01', 4580000),
