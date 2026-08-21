@@ -25,6 +25,18 @@ export type RepAffinity = {
   score: number; // 0-100
 };
 
+export type CustomerStatus = "prospect" | "active" | "dormant" | "churned";
+
+export type Customer = {
+  customer_id: string;
+  customer_name: string;
+  industry: string | null;
+  location: string | null;
+  estimated_amount: number;
+  win_probability: number; // 0-100
+  status: CustomerStatus;
+};
+
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
 
 export type ActivityPlan = {

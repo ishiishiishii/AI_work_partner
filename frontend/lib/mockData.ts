@@ -1,10 +1,16 @@
 import type { ActivityPlan, RepAffinity, SalesRep } from "@/types";
 
-// 担当者一覧を返すAPIがまだ無いため、supabase/seed.sql の担当者情報を直書きしている
-export const mockSalesRep: SalesRep = {
-  rep_id: "11111111-1111-1111-1111-111111111111",
-  rep_name: "山田 太郎",
-};
+// 担当者一覧を返すAPIがまだ無いため、担当者情報を直書きしている。
+// 「山田 太郎」のみ supabase/seed.sql に実在する担当者で、他はUI確認用の仮の担当者。
+// 仮の担当者は顧客・計画のデータがまだ無い（バックエンドのsales_repテーブルにも存在しない）ため、
+// 顧客の新規登録など、バックエンドに書き込む操作は行えない。
+export const mockSalesReps: SalesRep[] = [
+  { rep_id: "11111111-1111-1111-1111-111111111111", rep_name: "山田 太郎" },
+  { rep_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", rep_name: "佐藤 花子" },
+  { rep_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", rep_name: "鈴木 次郎" },
+];
+
+export const mockSalesRep: SalesRep = mockSalesReps[0];
 
 // rep_affinity（得意分野スコア）はバックエンドにまだ無いテーブルのため、引き続きモック
 export const mockRepAffinities: RepAffinity[] = [

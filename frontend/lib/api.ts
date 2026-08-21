@@ -1,4 +1,4 @@
-import type { ActivityPlan, DealResultStatus, SalesTarget } from "@/types";
+import type { ActivityPlan, Customer, DealResultStatus, SalesTarget } from "@/types";
 
 export function getApiBaseUrl(): string {
   if (typeof window === "undefined") {
@@ -66,12 +66,67 @@ export async function saveSalesTarget(
   return mapTarget(await res.json());
 }
 
-async function fetchCustomerNames(repId: string): Promise<Map<string, string>> {
+type ApiCustomer = {
+  customer_id: string;
+  customer_name: string;
+  industry: string | null;
+  location: string | null;
+  estimated_amount: string | number;
+  win_probability: number;
+  primary_rep_id: string;
+  status: string;
+};
+
+function mapCustomer(row: ApiCustomer): Customer {
+  return {
+    customer_id: row.customer_id,
+    customer_name: row.customer_name,
+    industry: row.industry,
+    location: row.location,
+    estimated_amount: Number(row.estimated_amount),
+    win_probability: row.win_probability,
+    status: row.status as Customer["status"],
+  };
+}
+
+export async function fetchCustomers(repId: string): Promise<Customer[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/customers?rep_id=${repId}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`顧客一覧の取得に失敗しました (HTTP ${res.status})`);
-  const rows: { customer_id: string; customer_name: string }[] = await res.json();
-  return new Map(rows.map((row) => [row.customer_id, row.customer_name]));
+  const rows: ApiCustomer[] = await res.json();
+  return rows.map(mapCustomer);
+}
+
+export async function createCustomer(
+  repId: string,
+  input: {
+    customer_name: string;
+    industry: string;
+    location: string;
+    estimated_amount: number;
+    win_probability: number;
+  },
+): Promise<Customer> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      customer_name: input.customer_name,
+      primary_rep_id: repId,
+      industry: input.industry || null,
+      location: input.location || null,
+      estimated_amount: input.estimated_amount,
+      win_probability: input.win_probability,
+    }),
+  });
+  if (!res.ok) throw new Error(`顧客の登録に失敗しました (HTTP ${res.status})`);
+  return mapCustomer(await res.json());
+}
+
+async function fetchCustomerNames(repId: string): Promise<Map<string, string>> {
+  const customers = await fetchCustomers(repId);
+  return new Map(customers.map((customer) => [customer.customer_id, customer.customer_name]));
 }
 
 type ApiPlan = {

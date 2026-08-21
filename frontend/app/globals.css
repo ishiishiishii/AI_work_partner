@@ -688,3 +688,143 @@ a {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.app-nav {
+  display: flex;
+  gap: 1.25rem;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 0;
+}
+
+.app-nav a {
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-nav a:hover {
+  text-decoration: underline;
+}
+
+.rep-switcher {
+  margin-left: auto;
+  font-size: 0.85rem;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.customer-table {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.customer-table__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.customer-table__row:first-child {
+  border-top: none;
+}
+
+.customer-table__main {
+  flex: 1;
+  min-width: 200px;
+}
+
+.customer-table__name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.customer-table__meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.15rem;
+}
+
+.customer-table__amount {
+  flex-shrink: 0;
+  font-weight: 600;
+  width: 8rem;
+}
+
+.customer-table__probability {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 8rem;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.customer-table__probability-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.customer-table__probability-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.customer-table__status--prospect {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.customer-table__status--active {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+
+.customer-table__status--dormant {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+}
+
+.customer-table__status--churned {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+
+.new-customer-form {
+  margin-top: 1rem;
+}
+
+.new-customer-form h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.new-customer-form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.new-customer-form__error {
+  color: var(--warn);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}

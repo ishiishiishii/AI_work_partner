@@ -14,18 +14,15 @@ import {
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import {
-  mockAlternativeCandidates,
-  mockDailyTasks,
-  mockRepAffinities,
-  mockSalesRep,
-} from "@/lib/mockData";
+import { mockAlternativeCandidates, mockDailyTasks, mockRepAffinities } from "@/lib/mockData";
+import { useRep } from "@/lib/repContext";
 import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
 
-const REP_ID = mockSalesRep.rep_id;
 const TARGET_MONTH = "2026-08";
 
 export default function DashboardPage() {
+  const { selectedRep } = useRep();
+  const REP_ID = selectedRep.rep_id;
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
@@ -73,7 +70,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [REP_ID]);
 
   async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
     const updated = await saveSalesTarget(REP_ID, TARGET_MONTH, input);
@@ -191,7 +188,7 @@ export default function DashboardPage() {
     <main>
       <h1>営業ダッシュボード</h1>
       <GoalCard
-        rep={mockSalesRep}
+        rep={selectedRep}
         target={target}
         forecastAmount={forecastAmount}
         achievementRate={achievementRate}
