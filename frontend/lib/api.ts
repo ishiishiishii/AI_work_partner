@@ -19,7 +19,7 @@ function toActivityTypeName(activityType: string): string {
 }
 
 type ApiTarget = {
-  rep_id: string;
+  rep_id: number;
   target_month: string;
   target_amount: string | number;
   target_deal_count: number;
@@ -35,7 +35,7 @@ function mapTarget(row: ApiTarget): SalesTarget {
 }
 
 export async function fetchSalesTarget(
-  repId: string,
+  repId: number,
   targetMonth: string,
 ): Promise<SalesTarget | null> {
   const base = getApiBaseUrl();
@@ -47,7 +47,7 @@ export async function fetchSalesTarget(
 }
 
 export async function saveSalesTarget(
-  repId: string,
+  repId: number,
   targetMonth: string,
   input: { target_amount: number; target_deal_count: number },
 ): Promise<SalesTarget> {
@@ -66,20 +66,20 @@ export async function saveSalesTarget(
   return mapTarget(await res.json());
 }
 
-async function fetchCustomerNames(repId: string): Promise<Map<string, string>> {
+async function fetchCustomerNames(repId: number): Promise<Map<number, string>> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/customers?rep_id=${repId}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`顧客一覧の取得に失敗しました (HTTP ${res.status})`);
-  const rows: { customer_id: string; customer_name: string }[] = await res.json();
+  const rows: { customer_id: number; customer_name: string }[] = await res.json();
   return new Map(rows.map((row) => [row.customer_id, row.customer_name]));
 }
 
 type ApiPlan = {
-  plan_id: string;
-  rep_id: string;
+  plan_id: number;
+  rep_id: number;
   plan_date: string;
-  customer_id: string | null;
-  deal_id: string | null;
+  customer_id: number | null;
+  deal_id: number | null;
   activity_type: string;
   priority: number;
   expected_amount: string | number;
@@ -91,7 +91,7 @@ type ApiPlan = {
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
 // 取得直後は常に「未入力」として扱う。実際の結果はボタン操作で記録する。
-function mapPlan(row: ApiPlan, customerNames: Map<string, string>): ActivityPlan {
+function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan {
   return {
     plan_id: row.plan_id,
     rep_id: row.rep_id,
@@ -109,7 +109,7 @@ function mapPlan(row: ApiPlan, customerNames: Map<string, string>): ActivityPlan
   };
 }
 
-export async function fetchActivityPlans(repId: string): Promise<ActivityPlan[]> {
+export async function fetchActivityPlans(repId: number): Promise<ActivityPlan[]> {
   const base = getApiBaseUrl();
   const [plansRes, customerNames] = await Promise.all([
     fetch(`${base}/api/plans?rep_id=${repId}`, { cache: "no-store" }),
@@ -121,7 +121,7 @@ export async function fetchActivityPlans(repId: string): Promise<ActivityPlan[]>
 }
 
 export async function generateActivityPlans(
-  repId: string,
+  repId: number,
   targetMonth: string,
 ): Promise<ActivityPlan[]> {
   const base = getApiBaseUrl();
@@ -139,7 +139,7 @@ export async function generateActivityPlans(
 }
 
 export async function replanActivityPlans(
-  repId: string,
+  repId: number,
   targetMonth: string,
 ): Promise<ActivityPlan[]> {
   const base = getApiBaseUrl();
@@ -163,7 +163,7 @@ const RESULT_OUTCOME: Record<Exclude<DealResultStatus, "pending">, string> = {
 };
 
 export async function postActivityResult(
-  repId: string,
+  repId: number,
   plan: ActivityPlan,
   status: Exclude<DealResultStatus, "pending">,
 ): Promise<void> {

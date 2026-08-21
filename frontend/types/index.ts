@@ -1,17 +1,17 @@
 export type SalesRep = {
-  rep_id: string;
+  rep_id: number;
   rep_name: string;
 };
 
 export type SalesTarget = {
-  rep_id: string;
+  rep_id: number;
   target_month: string; // "YYYY-MM"
   target_amount: number;
   target_deal_count: number;
 };
 
 export type Forecast = {
-  rep_id: string;
+  rep_id: number;
   target_month: string;
   target_amount: number;
   forecast_amount: number;
@@ -19,7 +19,7 @@ export type Forecast = {
 };
 
 export type RepAffinity = {
-  rep_id: string;
+  rep_id: number;
   category_id: number;
   category_name: string;
   score: number; // 0-100
@@ -28,12 +28,12 @@ export type RepAffinity = {
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
 
 export type ActivityPlan = {
-  plan_id: string;
-  rep_id: string;
+  plan_id: number;
+  rep_id: number;
   plan_date: string; // "YYYY-MM-DD"
-  customer_id: string | null;
+  customer_id: number | null;
   customer_name: string;
-  deal_id: string | null;
+  deal_id: number | null;
   activity_type_name: string;
   priority: number;
   expected_amount: number;

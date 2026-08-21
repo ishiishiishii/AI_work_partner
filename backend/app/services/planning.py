@@ -1,17 +1,27 @@
 from datetime import date, timedelta
 from decimal import Decimal
-from uuid import UUID
 
 from psycopg import Connection
 
 from app.schemas.models import PlanOut
 
 
-def list_targets(conn: Connection, rep_id: UUID | None = None) -> list[dict]:
+def _month_to_date(target_month: str) -> date:
+    year, month = map(int, target_month.split("-"))
+    return date(year, month, 1)
+
+
+def _format_target(row: dict) -> dict:
+    row = dict(row)
+    row["target_month"] = row["target_month"].strftime("%Y-%m")
+    return row
+
+
+def list_targets(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(
             """
-            select rep_id, target_month, target_amount, target_deal_count
+            select target_id, rep_id, target_month, target_amount, target_deal_count
             from sales_target
             where rep_id = %s
             order by target_month desc
@@ -21,18 +31,18 @@ def list_targets(conn: Connection, rep_id: UUID | None = None) -> list[dict]:
     else:
         rows = conn.execute(
             """
-            select rep_id, target_month, target_amount, target_deal_count
+            select target_id, rep_id, target_month, target_amount, target_deal_count
             from sales_target
             order by target_month desc
             """
         ).fetchall()
-    return list(rows)
+    return [_format_target(row) for row in rows]
 
 
 def upsert_target(
     conn: Connection,
     *,
-    rep_id: UUID,
+    rep_id: int,
     target_month: str,
     target_amount: Decimal,
     target_deal_count: int,
@@ -44,31 +54,37 @@ def upsert_target(
         on conflict (rep_id, target_month) do update
           set target_amount = excluded.target_amount,
               target_deal_count = excluded.target_deal_count
-        returning rep_id, target_month, target_amount, target_deal_count
+        returning target_id, rep_id, target_month, target_amount, target_deal_count
         """,
-        (rep_id, target_month, target_amount, target_deal_count),
+        (rep_id, _month_to_date(target_month), target_amount, target_deal_count),
     ).fetchone()
     conn.commit()
-    return dict(row)
+    return _format_target(row)
 
 
-def list_customers(conn: Connection, rep_id: UUID | None = None) -> list[dict]:
+def list_customers(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
+        # primary_rep_id is rarely set in the imported dataset, so a rep's
+        # customers are the ones they actually have deals with.
         rows = conn.execute(
             """
-            select customer_id, customer_name, industry, location,
-                   estimated_amount, win_probability, primary_rep_id, status
-            from customer
-            where primary_rep_id = %s
-            order by customer_name
+            select distinct c.customer_id, c.customer_name, c.industry_id,
+                   c.company_size_id, c.location, c.primary_rep_id
+            from customer c
+            where c.primary_rep_id = %s
+               or exists (
+                 select 1 from deal d
+                 where d.customer_id = c.customer_id and d.rep_id = %s
+               )
+            order by c.customer_name
             """,
-            (rep_id,),
+            (rep_id, rep_id),
         ).fetchall()
     else:
         rows = conn.execute(
             """
-            select customer_id, customer_name, industry, location,
-                   estimated_amount, win_probability, primary_rep_id, status
+            select customer_id, customer_name, industry_id, company_size_id,
+                   location, primary_rep_id
             from customer
             order by customer_name
             """
@@ -80,32 +96,21 @@ def create_customer(
     conn: Connection,
     *,
     customer_name: str,
-    primary_rep_id: UUID,
-    industry: str | None,
-    location: str | None,
-    estimated_amount: Decimal,
-    win_probability: int,
-    status: str,
+    industry_id: int,
+    company_size_id: int,
+    location: str,
+    primary_rep_id: int | None,
 ) -> dict:
     row = conn.execute(
         """
         insert into customer (
-          customer_name, primary_rep_id, industry, location,
-          estimated_amount, win_probability, status
+          customer_name, industry_id, company_size_id, location, primary_rep_id
         )
-        values (%s, %s, %s, %s, %s, %s, %s)
-        returning customer_id, customer_name, industry, location,
-                  estimated_amount, win_probability, primary_rep_id, status
+        values (%s, %s, %s, %s, %s)
+        returning customer_id, customer_name, industry_id, company_size_id,
+                  location, primary_rep_id
         """,
-        (
-            customer_name,
-            primary_rep_id,
-            industry,
-            location,
-            estimated_amount,
-            win_probability,
-            status,
-        ),
+        (customer_name, industry_id, company_size_id, location, primary_rep_id),
     ).fetchone()
     conn.commit()
     return dict(row)
@@ -114,7 +119,7 @@ def create_customer(
 def list_plans(
     conn: Connection,
     *,
-    rep_id: UUID,
+    rep_id: int,
     from_date: date | None = None,
     to_date: date | None = None,
 ) -> list[dict]:
@@ -141,15 +146,18 @@ def list_plans(
     return list(rows)
 
 
-def _candidate_deals(conn: Connection, rep_id: UUID) -> list[dict]:
+def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
     return list(
         conn.execute(
             """
             select d.deal_id, d.customer_id, d.estimated_amount, d.win_probability,
-                   c.customer_name, c.industry
+                   c.customer_name, i.industry_name
             from deal d
             join customer c on c.customer_id = d.customer_id
-            where d.rep_id = %s and d.result_status = 'open'
+            join industry i on i.industry_id = c.industry_id
+            join deal_result_status drs
+              on drs.deal_result_status_id = d.deal_result_status_id
+            where d.rep_id = %s and drs.status_code = 'ongoing'
             order by (d.estimated_amount * d.win_probability) desc
             """,
             (rep_id,),
@@ -160,7 +168,7 @@ def _candidate_deals(conn: Connection, rep_id: UUID) -> list[dict]:
 def generate_plans(
     conn: Connection,
     *,
-    rep_id: UUID,
+    rep_id: int,
     target_month: str,
     start_date: date | None = None,
 ) -> list[PlanOut]:
@@ -190,7 +198,7 @@ def generate_plans(
         probability = int(deal["win_probability"])
         rationale = (
             f"{deal['customer_name']} は見込み {expected:,.0f} 円・確度 {probability}% "
-            f"（業界: {deal['industry'] or '未設定'}）のため優先しています。"
+            f"（業界: {deal['industry_name'] or '未設定'}）のため優先しています。"
         )
         row = conn.execute(
             """
@@ -224,24 +232,32 @@ def generate_plans(
 def create_result(
     conn: Connection,
     *,
-    rep_id: UUID,
+    rep_id: int,
     outcome: str,
     result_date: date,
-    plan_id: UUID | None,
-    customer_id: UUID | None,
-    deal_id: UUID | None,
+    plan_id: int | None,
+    customer_id: int | None,
+    deal_id: int | None,
     activity_type: str,
     outcome_note: str | None,
 ) -> dict:
-    if deal_id and outcome in {"won", "lost", "deferred"}:
-        status_map = {"won": "won", "lost": "lost", "deferred": "deferred"}
+    # deal_result_status only models progressing / won / lost (AGENTS.md section 9);
+    # "deferred" / "progress" / "other" outcomes are recorded on activity_result
+    # without closing the deal, so it stays a candidate for future plans.
+    if deal_id and outcome in {"won", "lost"}:
+        contract_date = result_date if outcome == "won" else None
         conn.execute(
             """
             update deal
-            set result_status = %s
+            set deal_result_status_id = (
+                  select deal_result_status_id
+                  from deal_result_status
+                  where status_code = %s
+                ),
+                contract_date = %s
             where deal_id = %s and rep_id = %s
             """,
-            (status_map[outcome], deal_id, rep_id),
+            (outcome, contract_date, deal_id, rep_id),
         )
 
     if plan_id:
@@ -279,14 +295,14 @@ def create_result(
     return dict(row)
 
 
-def forecast(conn: Connection, *, rep_id: UUID, target_month: str) -> dict:
+def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     target = conn.execute(
         """
         select target_amount
         from sales_target
         where rep_id = %s and target_month = %s
         """,
-        (rep_id, target_month),
+        (rep_id, _month_to_date(target_month)),
     ).fetchone()
     if not target:
         raise ValueError("target not found")
