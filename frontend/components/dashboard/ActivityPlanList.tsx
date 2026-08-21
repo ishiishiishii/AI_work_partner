@@ -6,6 +6,7 @@ import type { ActivityPlan, DealResultStatus } from "@/types";
 type ActivityPlanListProps = {
   plans: ActivityPlan[];
   onResultChange: (planId: string, status: DealResultStatus) => void;
+  onRequestAlternative: (planId: string) => void;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -84,7 +85,7 @@ function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: strin
   return `${year}年${Number(month)}月の活動計画`;
 }
 
-export function ActivityPlanList({ plans, onResultChange }: ActivityPlanListProps) {
+export function ActivityPlanList({ plans, onResultChange, onRequestAlternative }: ActivityPlanListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
@@ -168,16 +169,25 @@ export function ActivityPlanList({ plans, onResultChange }: ActivityPlanListProp
               <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
               <div className="activity-plan-list__result-buttons">
                 {plan.result_status === "pending" ? (
-                  RESULT_OPTIONS.map((option) => (
+                  <>
+                    {RESULT_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className="activity-plan-list__result-button"
+                        onClick={() => onResultChange(plan.plan_id, option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                     <button
-                      key={option.value}
                       type="button"
-                      className="activity-plan-list__result-button"
-                      onClick={() => onResultChange(plan.plan_id, option.value)}
+                      className="activity-plan-list__alt-button"
+                      onClick={() => onRequestAlternative(plan.plan_id)}
                     >
-                      {option.label}
+                      対応が難しい
                     </button>
-                  ))
+                  </>
                 ) : (
                   <>
                     <span

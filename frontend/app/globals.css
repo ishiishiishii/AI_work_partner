@@ -529,6 +529,22 @@ a {
   color: var(--ink);
 }
 
+.activity-plan-list__alt-button {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  border: 1px dashed var(--muted);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.activity-plan-list__alt-button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
 .replan-banner {
   border-color: var(--ai);
   background: color-mix(in srgb, var(--ai) 6%, var(--card));

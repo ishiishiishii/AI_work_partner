@@ -14,7 +14,7 @@ import {
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockRepAffinities, mockSalesRep } from "@/lib/mockData";
+import { mockAlternativeCandidates, mockRepAffinities, mockSalesRep } from "@/lib/mockData";
 import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
 
 const REP_ID = mockSalesRep.rep_id;
@@ -106,6 +106,12 @@ export default function DashboardPage() {
     );
     setPlans(updatedPlans);
 
+    // 「対応が難しい」で差し替えたローカル専用の計画には実在する deal_id が無いため、
+    // バックエンドへは送信せず表示のみ更新する
+    if (!changedPlan.deal_id) {
+      return;
+    }
+
     try {
       await postActivityResult(REP_ID, changedPlan, status as Exclude<DealResultStatus, "pending">);
     } catch (error) {
@@ -129,6 +135,27 @@ export default function DashboardPage() {
         setLoadError(error instanceof Error ? error.message : "再計画に失敗しました");
       }
     }
+  }
+
+  function handleRequestAlternative(planId: string) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    if (!changedPlan || !target) return;
+
+    const candidate = mockAlternativeCandidates.find(
+      (item) => !plans.some((plan) => plan.plan_id === item.plan_id),
+    );
+    if (!candidate) return;
+
+    const before = calcAchievementRate(plans, target.target_amount);
+    const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
+    const after = calcAchievementRate(nextPlans, target.target_amount);
+
+    setPlans(nextPlans);
+    setReplan({
+      before_achievement_rate: before,
+      after_achievement_rate: after,
+      reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが${candidate.customer_name}への提案に差し替えました`,
+    });
   }
 
   if (isLoading) {
@@ -176,7 +203,11 @@ export default function DashboardPage() {
           {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
         </button>
       </div>
-      <ActivityPlanList plans={plans} onResultChange={handleResultChange} />
+      <ActivityPlanList
+        plans={plans}
+        onResultChange={handleResultChange}
+        onRequestAlternative={handleRequestAlternative}
+      />
       <AiReasoningPanel plans={plans} affinities={mockRepAffinities} />
     </main>
   );
