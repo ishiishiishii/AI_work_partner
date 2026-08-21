@@ -6,6 +6,28 @@ from psycopg import Connection
 from app.schemas.models import PlanOut
 from app.services import affinity
 
+# A customer counts as "stale" (churn-risk, company-wide) with no visit or
+# deal in this many days. Shared by list_stale_customers and the plan
+# generator's priority boost so the two stay in sync.
+STALE_THRESHOLD_DAYS = 60
+
+# Company-wide last contact per customer: any rep's deal start, or any logged
+# activity_result -- so imported historical deals (no activity_result rows)
+# still count.
+_LAST_CONTACT_CTE = """
+with last_contact as (
+  select customer_id, max(contact_date) as last_contact_date
+  from (
+    select customer_id, deal_start_date as contact_date from deal
+    union all
+    select customer_id, result_date as contact_date
+    from activity_result
+    where customer_id is not null
+  ) contacts
+  group by customer_id
+)
+"""
+
 
 def _month_to_date(target_month: str) -> date:
     year, month = map(int, target_month.split("-"))
@@ -115,6 +137,41 @@ def create_customer(
     ).fetchone()
     conn.commit()
     return dict(row)
+
+
+def list_stale_customers(
+    conn: Connection,
+    *,
+    threshold_days: int = STALE_THRESHOLD_DAYS,
+    rep_id: int | None = None,
+) -> list[dict]:
+    """Customers with no company-wide contact in threshold_days (or ever)."""
+    rows = conn.execute(
+        _LAST_CONTACT_CTE
+        + """
+        select c.customer_id, c.customer_name, c.industry_id, c.company_size_id,
+               c.location, c.primary_rep_id,
+               lc.last_contact_date,
+               (current_date - lc.last_contact_date) as days_since_contact
+        from customer c
+        left join last_contact lc on lc.customer_id = c.customer_id
+        where (
+          lc.last_contact_date is null
+          or lc.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
+        )
+        and (
+          %(rep_id)s::int is null
+          or c.primary_rep_id = %(rep_id)s
+          or exists (
+            select 1 from deal d
+            where d.customer_id = c.customer_id and d.rep_id = %(rep_id)s
+          )
+        )
+        order by lc.last_contact_date asc nulls first
+        """,
+        {"threshold_days": threshold_days, "rep_id": rep_id},
+    ).fetchall()
+    return list(rows)
 
 
 def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
@@ -243,20 +300,35 @@ def list_plans(
 
 
 def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
+    # Stale (churn-risk) customers get a priority boost within this rep's own
+    # candidate list -- this only reorders the rep's own deals, it never
+    # reassigns a deal to a different rep (see AGENTS.md: team-wide
+    # assignment optimization is an explicit Later feature, out of MVP scope).
     return list(
         conn.execute(
-            """
+            _LAST_CONTACT_CTE
+            + """
             select d.deal_id, d.customer_id, d.estimated_amount, d.win_probability,
-                   c.customer_name, i.industry_name
+                   c.customer_name, i.industry_name, lc.last_contact_date,
+                   (
+                     lc.last_contact_date is null
+                     or lc.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
+                   ) as is_stale
             from deal d
             join customer c on c.customer_id = d.customer_id
             join industry i on i.industry_id = c.industry_id
             join deal_result_status drs
               on drs.deal_result_status_id = d.deal_result_status_id
-            where d.rep_id = %s and drs.status_code = 'ongoing'
-            order by (d.estimated_amount * d.win_probability) desc
+            left join last_contact lc on lc.customer_id = d.customer_id
+            where d.rep_id = %(rep_id)s and drs.status_code = 'ongoing'
+            order by
+              (case when (
+                 lc.last_contact_date is null
+                 or lc.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
+               ) then 1.5 else 1.0 end)
+              * (d.estimated_amount * d.win_probability) desc
             """,
-            (rep_id,),
+            {"rep_id": rep_id, "threshold_days": STALE_THRESHOLD_DAYS},
         ).fetchall()
     )
 
@@ -296,6 +368,16 @@ def generate_plans(
             f"{deal['customer_name']} は見込み {expected:,.0f} 円・確度 {probability}% "
             f"（業界: {deal['industry_name'] or '未設定'}）のため優先しています。"
         )
+        if deal["is_stale"]:
+            if deal["last_contact_date"]:
+                rationale += (
+                    f" また、前回接点から{STALE_THRESHOLD_DAYS}日以上経過しており"
+                    f"（前回: {deal['last_contact_date']}）、顧客流出リスクの観点からも優先度を上げています。"
+                )
+            else:
+                rationale += (
+                    " また、これまで接点の記録がなく、顧客流出リスクの観点からも優先度を上げています。"
+                )
         row = conn.execute(
             """
             insert into activity_plan (

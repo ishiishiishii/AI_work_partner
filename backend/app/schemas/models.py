@@ -44,6 +44,17 @@ class CustomerOut(OrmModel):
     primary_rep_id: int | None = None
 
 
+class StaleCustomerOut(OrmModel):
+    customer_id: int
+    customer_name: str
+    industry_id: int
+    company_size_id: int
+    location: str
+    primary_rep_id: int | None = None
+    last_contact_date: date | None = None
+    days_since_contact: int | None = None
+
+
 class DealCreate(BaseModel):
     customer_id: int
     rep_id: int
