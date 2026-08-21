@@ -177,6 +177,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (118, '桔梗興業有限会社', (select industry_id from industry where industry_name = '教育'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県'),
   (119, '稲穂製作所株式会社', (select industry_id from industry where industry_name = '医療・福祉'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '福岡県'),
   (120, '若葉製作所株式会社', (select industry_id from industry where industry_name = '卸売業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '兵庫県');
+select setval('customer_customer_id_seq', (select max(customer_id) from customer));
 
 
 insert into product_category (category_name) values
@@ -1353,4 +1354,5 @@ insert into sales_target (target_id, rep_id, target_month, target_amount) values
   (106, 18, '2026-06-01', 3280000),
   (107, 18, '2026-07-01', 3510000),
   (108, 18, '2026-08-01', 3560000);
+select setval('sales_target_target_id_seq', (select max(target_id) from sales_target));
 

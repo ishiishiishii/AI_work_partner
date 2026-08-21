@@ -29,7 +29,7 @@ create table sales_rep (
 );
 
 create table customer (
-  customer_id int primary key,
+  customer_id serial primary key,
   customer_name text not null,
   industry_id int not null references industry (industry_id),
   company_size_id int not null references company_size_master (company_size_id),
