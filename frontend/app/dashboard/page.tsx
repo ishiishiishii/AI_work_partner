@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
+import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
@@ -233,6 +234,12 @@ export default function DashboardPage() {
         onRequestAlternative={handleRequestAlternative}
       />
       <AiReasoningPanel plans={plans} affinities={affinities} />
+      <AiChatPanel
+        target={target}
+        achievementRate={achievementRate}
+        plans={plans}
+        affinities={affinities}
+      />
     </main>
   );
 }
