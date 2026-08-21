@@ -7,16 +7,18 @@ import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
   fetchActivityPlans,
+  fetchRepAffinity,
   fetchSalesTarget,
   generateActivityPlans,
   postActivityResult,
+  recalculateRepAffinity,
   replanActivityPlans,
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockAlternativeCandidates, mockDailyTasks, mockRepAffinities } from "@/lib/mockData";
+import { mockAlternativeCandidates, mockDailyTasks } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
-import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
+import type { ActivityPlan, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
 
 const TARGET_MONTH = "2026-08";
 
@@ -27,6 +29,7 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
+  const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
@@ -48,6 +51,11 @@ export default function DashboardPage() {
           fetchedPlans.length > 0 ? fetchedPlans : await generateActivityPlans(REP_ID, TARGET_MONTH);
         if (cancelled) return;
 
+        // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
+        await recalculateRepAffinity(REP_ID);
+        const fetchedAffinities = await fetchRepAffinity(REP_ID);
+        if (cancelled) return;
+
         setTarget(
           fetchedTarget ?? {
             rep_id: REP_ID,
@@ -57,6 +65,7 @@ export default function DashboardPage() {
           },
         );
         setPlans(resolvedPlans);
+        setAffinities(fetchedAffinities);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -190,7 +199,6 @@ export default function DashboardPage() {
 
   const forecastAmount = calcForecastAmount(plans);
   const achievementRate = calcAchievementRate(plans, target.target_amount);
-  const repAffinities = mockRepAffinities.filter((affinity) => affinity.rep_id === REP_ID);
 
   return (
     <main>
@@ -219,7 +227,7 @@ export default function DashboardPage() {
         onResultChange={handleResultChange}
         onRequestAlternative={handleRequestAlternative}
       />
-      <AiReasoningPanel plans={plans} affinities={repAffinities} />
+      <AiReasoningPanel plans={plans} affinities={affinities} />
     </main>
   );
 }

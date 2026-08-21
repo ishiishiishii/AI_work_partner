@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DealHistoryList } from "@/components/customers/DealHistoryList";
-import { fetchCustomers } from "@/lib/api";
-import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES, mockDealHistoryFor } from "@/lib/mockData";
+import { fetchCustomers, fetchDeals } from "@/lib/api";
+import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
-import type { Customer } from "@/types";
+import type { Customer, Deal } from "@/types";
 
 export default function CustomerDetailPage() {
   const { customerId } = useParams<{ customerId: string }>();
@@ -15,6 +15,7 @@ export default function CustomerDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [deals, setDeals] = useState<Deal[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,9 +25,13 @@ export default function CustomerDetailPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const customers = await fetchCustomers(selectedRep.rep_id);
+        const [customers, repDeals] = await Promise.all([
+          fetchCustomers(selectedRep.rep_id),
+          fetchDeals(selectedRep.rep_id),
+        ]);
         if (cancelled) return;
         setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
+        setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -61,8 +66,6 @@ export default function CustomerDetailPage() {
     );
   }
 
-  const history = mockDealHistoryFor(customer);
-
   return (
     <main>
       <Link href="/customers" className="customer-detail__back">
@@ -92,10 +95,7 @@ export default function CustomerDetailPage() {
 
       <section className="panel">
         <h2>商談履歴</h2>
-        <p className="customer-detail__mock-note">
-          ※ 現在は仮のデータです。バックエンドに商談履歴を取得するAPIが追加され次第、実データに差し替えます。
-        </p>
-        <DealHistoryList items={history} />
+        <DealHistoryList deals={deals} />
       </section>
     </main>
   );
