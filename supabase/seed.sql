@@ -1,0 +1,3 @@
+-- Seed data for local development.
+-- Runs after migrations when `supabase db reset` / `supabase start` seeds.
+-- Add INSERT statements here as the schema grows.
