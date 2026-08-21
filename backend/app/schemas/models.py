@@ -57,6 +57,8 @@ class PlanOut(OrmModel):
     plan_status: str
     is_ai_generated: bool
     rationale: str | None = None
+    product_id: int | None = None
+    product_name: str | None = None
 
 
 class PlanGenerateRequest(BaseModel):

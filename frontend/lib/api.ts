@@ -148,6 +148,8 @@ type ApiPlan = {
   plan_status: string;
   is_ai_generated: boolean;
   rationale: string | null;
+  product_id: number | null;
+  product_name: string | null;
 };
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
@@ -161,6 +163,7 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     customer_id: row.customer_id,
     customer_name: (row.customer_id && customerNames.get(row.customer_id)) || "(顧客不明)",
     deal_id: row.deal_id,
+    product_name: row.product_name,
     activity_type_name: toActivityTypeName(row.activity_type),
     priority: row.priority,
     expected_amount: Number(row.expected_amount),

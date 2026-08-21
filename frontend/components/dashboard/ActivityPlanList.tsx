@@ -182,6 +182,9 @@ export function ActivityPlanList({
                   {plan.customer_name}
                   {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
                 </div>
+                {plan.product_name && (
+                  <div className="activity-plan-list__product">商品: {plan.product_name}</div>
+                )}
                 <div className="activity-plan-list__meta">
                   <span
                     className={`activity-plan-list__type ${

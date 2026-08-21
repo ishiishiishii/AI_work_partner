@@ -67,6 +67,7 @@ export type ActivityPlan = {
   customer_id: number | null;
   customer_name: string;
   deal_id: number | null;
+  product_name: string | null;
   activity_type_name: string;
   priority: number;
   expected_amount: number;

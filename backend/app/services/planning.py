@@ -142,23 +142,26 @@ def list_plans(
     from_date: date | None = None,
     to_date: date | None = None,
 ) -> list[dict]:
-    clauses = ["rep_id = %s"]
+    clauses = ["ap.rep_id = %s"]
     params: list[object] = [rep_id]
     if from_date:
-        clauses.append("plan_date >= %s")
+        clauses.append("ap.plan_date >= %s")
         params.append(from_date)
     if to_date:
-        clauses.append("plan_date <= %s")
+        clauses.append("ap.plan_date <= %s")
         params.append(to_date)
     where = " and ".join(clauses)
     rows = conn.execute(
         f"""
-        select plan_id, rep_id, plan_date, customer_id, deal_id, activity_type,
-               priority, expected_amount, expected_probability, plan_status,
-               is_ai_generated, rationale
-        from activity_plan
+        select ap.plan_id, ap.rep_id, ap.plan_date, ap.customer_id, ap.deal_id,
+               ap.activity_type, ap.priority, ap.expected_amount, ap.expected_probability,
+               ap.plan_status, ap.is_ai_generated, ap.rationale,
+               p.product_id, p.product_name
+        from activity_plan ap
+        left join deal d on d.deal_id = ap.deal_id
+        left join product p on p.product_id = d.product_id
         where {where}
-        order by plan_date, priority
+        order by ap.plan_date, ap.priority
         """,
         params,
     ).fetchall()
@@ -170,12 +173,14 @@ def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
         conn.execute(
             """
             select d.deal_id, d.customer_id, d.estimated_amount, d.win_probability,
-                   c.customer_name, i.industry_name
+                   c.customer_name, i.industry_name,
+                   p.product_id, p.product_name
             from deal d
             join customer c on c.customer_id = d.customer_id
             join industry i on i.industry_id = c.industry_id
             join deal_result_status drs
               on drs.deal_result_status_id = d.deal_result_status_id
+            join product p on p.product_id = d.product_id
             where d.rep_id = %s and drs.status_code = 'ongoing'
             order by (d.estimated_amount * d.win_probability) desc
             """,
@@ -217,7 +222,7 @@ def generate_plans(
         probability = int(deal["win_probability"])
         rationale = (
             f"{deal['customer_name']} は見込み {expected:,.0f} 円・確度 {probability}% "
-            f"（業界: {deal['industry_name'] or '未設定'}）のため優先しています。"
+            f"（業界: {deal['industry_name'] or '未設定'}、商品: {deal['product_name']}）のため優先しています。"
         )
         row = conn.execute(
             """
@@ -242,7 +247,10 @@ def generate_plans(
                 rationale,
             ),
         ).fetchone()
-        created.append(PlanOut.model_validate(dict(row)))
+        plan_data = dict(row)
+        plan_data["product_id"] = deal["product_id"]
+        plan_data["product_name"] = deal["product_name"]
+        created.append(PlanOut.model_validate(plan_data))
 
     conn.commit()
     return created

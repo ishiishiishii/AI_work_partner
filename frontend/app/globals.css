@@ -334,6 +334,12 @@ a {
   font-weight: 600;
 }
 
+.activity-plan-list__product {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.1rem;
+}
+
 .activity-plan-list__meta {
   display: flex;
   align-items: center;
