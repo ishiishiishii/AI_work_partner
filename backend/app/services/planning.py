@@ -116,6 +116,25 @@ def create_customer(
     return dict(row)
 
 
+def search_products(conn: Connection, name: str | None = None) -> list[dict]:
+    where = "where p.product_name ilike %s" if name else ""
+    params = (f"%{name}%",) if name else ()
+    rows = conn.execute(
+        f"""
+        select p.product_id, p.product_name,
+               ps.subcategory_id, ps.subcategory_name,
+               pc.category_id, pc.category_name
+        from product p
+        join product_subcategory ps on ps.subcategory_id = p.subcategory_id
+        join product_category pc on pc.category_id = ps.category_id
+        {where}
+        order by p.product_name
+        """,
+        params,
+    ).fetchall()
+    return list(rows)
+
+
 def list_plans(
     conn: Connection,
     *,

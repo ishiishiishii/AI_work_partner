@@ -10,6 +10,7 @@ from app.schemas.models import (
     PlanGenerateRequest,
     PlanGenerateResponse,
     PlanOut,
+    ProductOut,
     ReplanRequest,
     ResultCreate,
     ResultOut,
@@ -63,6 +64,13 @@ def post_customer(body: CustomerCreate) -> CustomerOut:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CustomerOut.model_validate(row)
+
+
+@router.get("/products", response_model=list[ProductOut])
+def get_products(name: str | None = None) -> list[ProductOut]:
+    with get_connection() as conn:
+        rows = planning.search_products(conn, name)
+    return [ProductOut.model_validate(row) for row in rows]
 
 
 @router.get("/plans", response_model=list[PlanOut])
