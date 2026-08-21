@@ -8,7 +8,9 @@ async function fetchHealth() {
     if (!res.ok) {
       return { ok: false as const, body: `HTTP ${res.status}` };
     }
-    return { ok: true as const, body: await res.json() };
+    const body = await res.json();
+    const ok = typeof body === "object" && body !== null && body.status === "ok";
+    return { ok, body };
   } catch (error) {
     return {
       ok: false as const,
@@ -45,8 +47,9 @@ export default async function HomePage() {
     <main>
       <h1>AI Work Partner</h1>
       <p>
-        FastAPI + Next.js + Supabase のローカル開発環境です。API の疎通と
-        Supabase クライアント設定をここで確認できます。
+        FastAPI + Next.js + Supabase のローカル開発環境です。営業ダッシュボードは
+        <a href="/dashboard">/dashboard</a>
+        です。このページでは API の疎通と Supabase 設定を確認できます。
       </p>
 
       <StatusPanel

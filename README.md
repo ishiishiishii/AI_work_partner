@@ -6,7 +6,7 @@ FastAPI + Next.js + ローカル Supabase のモノレポ開発環境です。�
 
 | サービス | 技術 | URL |
 | --- | --- | --- |
-| Web | Next.js (App Router) | http://localhost:3000 |
+| Web | Next.js (App Router) | http://localhost:3000 （ダッシュボード: http://localhost:3000/dashboard） |
 | API | FastAPI | http://localhost:8000 / docs: http://localhost:8000/docs |
 | Supabase API | Local Supabase | http://127.0.0.1:55321 |
 | Postgres | Supabase 同梱 | `127.0.0.1:55322` |
@@ -44,7 +44,24 @@ scoop install supabase
 > このリポジトリのローカル Supabase は、他プロジェクト／Windows 予約ポートとの衝突を避けるため  
 > API `55321` / DB `55322` / Studio `55323` を使います（`supabase/config.toml`）。
 
-## 初回セットアップ
+## いちばん簡単な起動（Windows）
+
+Docker Desktop を起動した状態で、リポジトリのルートで:
+
+```powershell
+copy .env.example .env   # 初回だけ
+.\start-dev.cmd
+```
+
+スクリプトが Supabase（DB）と `api` / `web` を起動します。表が古い場合は自動で `supabase db reset` します。
+
+起動後にブラウザで開くもの:
+
+- 営業ダッシュボード: http://localhost:3000/dashboard
+- 疎通確認: http://localhost:3000
+- API OpenAPI: http://localhost:8000/docs
+
+## 初回セットアップ（手動）
 
 ```powershell
 git clone https://github.com/ishiishiishii/AI_work_partner.git
@@ -52,23 +69,21 @@ cd AI_work_partner
 copy .env.example .env
 ```
 
-### 1. ローカル Supabase を起動
+`.env.example` にはローカル Supabase の公開デモ JWT が入っています。`jwt_secret` を変えたときだけ `supabase status` の値で上書きしてください。
 
-リポジトリルートで:
+Docker 内の API / Web からホスト上の Supabase へ繋ぐため、`.env.example` の `SUPABASE_URL_DOCKER` / `DATABASE_URL_DOCKER`（`host.docker.internal`）はそのまま使えます。
+
+### 1. ローカル Supabase を起動
 
 ```powershell
 supabase start
-supabase status
 ```
 
-`supabase status` に表示される次の値を `.env` に反映してください。
+スキーマを最新のマイグレーション＋シードに揃える（既存のローカルデータは消えます）:
 
-- `API URL` → `SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_URL`
-- `anon key` → `SUPABASE_ANON_KEY` と `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `service_role key` → `SUPABASE_SERVICE_ROLE_KEY`
-- `DB URL` → `DATABASE_URL`（ホストから接続する場合）
-
-Docker 内の API / Web からホスト上の Supabase へ繋ぐため、`.env.example` の `SUPABASE_URL_DOCKER` / `DATABASE_URL_DOCKER`（`host.docker.internal`）はそのまま使えます。
+```powershell
+supabase db reset --yes --local
+```
 
 ### 2. アプリを起動
 
@@ -76,15 +91,13 @@ Docker 内の API / Web からホスト上の Supabase へ繋ぐため、`.env.e
 docker compose up --build
 ```
 
-起動後:
-
-- フロント: http://localhost:3000
-- API OpenAPI: http://localhost:8000/docs
-
 ## 日常の起動 / 停止
 
 ```powershell
-# 起動
+# 起動（推奨）
+.\start-dev.cmd
+
+# または手動
 supabase start
 docker compose up
 
@@ -112,6 +125,8 @@ supabase stop
 │   └── package.json
 ├── supabase/         # Local Supabase (config / migrations / seed)
 ├── docker-compose.yml
+├── start-dev.cmd      # Windows: DB + アプリをまとめて起動
+├── start-dev.ps1
 ├── .env.example
 └── README.md
 ```
@@ -125,6 +140,8 @@ supabase stop
 
 ## トラブルシュート
 
+- **ダッシュボードが「データの取得に失敗」になる / API が 500**: コンテナ不足ではなく、**DB の表がコードより古い**ことが多いです。ホストで `supabase db reset --yes --local` のあと、`docker compose restart api` してください。
+- **コンテナに入らないと動かない？**: 入りません。`docker compose exec` は pytest などの作業用です。アプリはブラウザの URL で使います。
 - **API が Supabase に繋がらない**: Docker Desktop が起動していること、`supabase start` 済みであること、`.env` のキーが `supabase status` と一致していることを確認。
 - **フロントで API が失敗する**: ブラウザからは `NEXT_PUBLIC_API_URL=http://localhost:8000` を使います（コンテナ名 `api` はブラウザから解決できません）。
 - **Windows でファイル変更が検知されない**: `WATCHPACK_POLLING=true` を compose に設定済みです。
