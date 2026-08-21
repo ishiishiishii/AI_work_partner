@@ -3,20 +3,18 @@
 import { useRep } from "@/lib/repContext";
 
 export function RepSwitcher() {
-  const { reps, selectedRep, setSelectedRepId } = useRep();
+  const { selectedRep, signOut } = useRep();
+
+  if (!selectedRep) {
+    return null;
+  }
 
   return (
-    <select
-      className="rep-switcher"
-      value={selectedRep.rep_id}
-      onChange={(event) => setSelectedRepId(Number(event.target.value))}
-      aria-label="担当者を切り替える"
-    >
-      {reps.map((rep) => (
-        <option key={rep.rep_id} value={rep.rep_id}>
-          {rep.rep_name}
-        </option>
-      ))}
-    </select>
+    <div className="rep-switcher">
+      <span className="rep-switcher__name">{selectedRep.rep_name}さん</span>
+      <button type="button" className="rep-switcher__signout" onClick={() => void signOut()}>
+        ログアウト
+      </button>
+    </div>
   );
 }

@@ -7,30 +7,35 @@ import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
   fetchActivityPlans,
+  fetchRepAffinity,
   fetchSalesTarget,
   generateActivityPlans,
   postActivityResult,
+  recalculateRepAffinity,
   replanActivityPlans,
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockAlternativeCandidates, mockDailyTasks, mockRepAffinities } from "@/lib/mockData";
+import { mockAlternativeCandidates, mockDailyTasks } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
-import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
+import type { ActivityPlan, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
 
 const TARGET_MONTH = "2026-08";
 
 export default function DashboardPage() {
   const { selectedRep } = useRep();
-  const REP_ID = selectedRep.rep_id;
+  const REP_ID = selectedRep?.rep_id ?? null;
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
+  const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
   useEffect(() => {
+    if (REP_ID === null) return;
+    const repId = REP_ID;
     let cancelled = false;
 
     async function load() {
@@ -38,25 +43,31 @@ export default function DashboardPage() {
         setIsLoading(true);
         setLoadError(null);
         const [fetchedTarget, fetchedPlans] = await Promise.all([
-          fetchSalesTarget(REP_ID, TARGET_MONTH),
-          fetchActivityPlans(REP_ID),
+          fetchSalesTarget(repId, TARGET_MONTH),
+          fetchActivityPlans(repId),
         ]);
         if (cancelled) return;
 
         // 計画が1件も無ければ、初回だけAIに作ってもらう
         const resolvedPlans =
-          fetchedPlans.length > 0 ? fetchedPlans : await generateActivityPlans(REP_ID, TARGET_MONTH);
+          fetchedPlans.length > 0 ? fetchedPlans : await generateActivityPlans(repId, TARGET_MONTH);
+        if (cancelled) return;
+
+        // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
+        await recalculateRepAffinity(repId);
+        const fetchedAffinities = await fetchRepAffinity(repId);
         if (cancelled) return;
 
         setTarget(
           fetchedTarget ?? {
-            rep_id: REP_ID,
+            rep_id: repId,
             target_month: TARGET_MONTH,
             target_amount: 0,
             target_deal_count: 0,
           },
         );
         setPlans(resolvedPlans);
+        setAffinities(fetchedAffinities);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -73,14 +84,17 @@ export default function DashboardPage() {
   }, [REP_ID]);
 
   async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
+    if (REP_ID === null) return;
     const updated = await saveSalesTarget(REP_ID, TARGET_MONTH, input);
     setTarget(updated);
   }
 
   async function handleRegenerate() {
+    if (REP_ID === null) return;
+    const repId = REP_ID;
     setIsRegenerating(true);
     try {
-      const fresh = await generateActivityPlans(REP_ID, TARGET_MONTH);
+      const fresh = await generateActivityPlans(repId, TARGET_MONTH);
       setPlans(fresh);
       setReplan(null);
     } catch (error) {
@@ -92,7 +106,7 @@ export default function DashboardPage() {
 
   async function handleResultChange(planId: number, status: DealResultStatus, activityTypeName: string) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
-    if (!changedPlan || !target) return;
+    if (!changedPlan || !target || REP_ID === null) return;
 
     // 同じ結果をもう一度押したら、表示だけ取り消し
     // （バックエンドに送信済みの記録は削除されません。取り消しAPIはまだ無いためです）
@@ -167,7 +181,7 @@ export default function DashboardPage() {
     });
   }
 
-  if (isLoading) {
+  if (!selectedRep || isLoading) {
     return (
       <main>
         <h1>営業ダッシュボード</h1>
@@ -190,7 +204,6 @@ export default function DashboardPage() {
 
   const forecastAmount = calcForecastAmount(plans);
   const achievementRate = calcAchievementRate(plans, target.target_amount);
-  const repAffinities = mockRepAffinities.filter((affinity) => affinity.rep_id === REP_ID);
 
   return (
     <main>
@@ -219,7 +232,7 @@ export default function DashboardPage() {
         onResultChange={handleResultChange}
         onRequestAlternative={handleRequestAlternative}
       />
-      <AiReasoningPanel plans={plans} affinities={repAffinities} />
+      <AiReasoningPanel plans={plans} affinities={affinities} />
     </main>
   );
 }

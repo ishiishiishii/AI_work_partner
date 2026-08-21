@@ -9,19 +9,21 @@ import type { Customer } from "@/types";
 
 export default function CustomersPage() {
   const { selectedRep } = useRep();
-  const REP_ID = selectedRep.rep_id;
+  const REP_ID = selectedRep?.rep_id ?? null;
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
 
   useEffect(() => {
+    if (REP_ID === null) return;
+    const repId = REP_ID;
     let cancelled = false;
 
     async function load() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const fetched = await fetchCustomers(REP_ID);
+        const fetched = await fetchCustomers(repId);
         if (!cancelled) setCustomers(fetched);
       } catch (error) {
         if (!cancelled) {
@@ -44,8 +46,18 @@ export default function CustomersPage() {
     company_size_id: number;
     location: string;
   }) {
+    if (REP_ID === null) return;
     const created = await createCustomer(REP_ID, input);
     setCustomers((prev) => [...prev, created]);
+  }
+
+  if (!selectedRep) {
+    return (
+      <main>
+        <h1>顧客一覧</h1>
+        <p>読み込み中...</p>
+      </main>
+    );
   }
 
   return (

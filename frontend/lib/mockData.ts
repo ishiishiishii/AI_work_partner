@@ -1,8 +1,8 @@
-import type { ActivityPlan, Customer, DealHistoryItem, RepAffinity, SalesRep } from "@/types";
+import type { ActivityPlan, SalesRep } from "@/types";
 
-// industry/company_size のマスタ名を返すAPIがまだ無いため、
-// supabase/seed.sql の投入順(= serial の採番順)を前提にハードコードしている。
-// マスタの並びが変わるとズレるため、名称解決APIが追加され次第そちらに差し替える。
+// industry/company_size/deal_phase/deal_result_status/deal_pattern の名称を返すAPIが
+// まだ無いため、supabase/seed.sql・migration の投入順(= serial の採番順)を前提に
+// ハードコードしている。マスタの並びが変わるとズレるため、名称解決APIが追加され次第そちらに差し替える。
 export const INDUSTRY_NAMES: Record<number, string> = {
   1: "製造業",
   2: "建設業",
@@ -24,75 +24,51 @@ export const COMPANY_SIZE_NAMES: Record<number, string> = {
   3: "大企業",
 };
 
-// 担当者一覧を返すAPIがまだ無いため、担当者情報を直書きしている。
-// rep_id: 1(石川次郎)のみ supabase/seed.sql に実在する担当者で、他はUI確認用の仮の担当者。
-// 仮の担当者は顧客・計画のデータがまだ無い（バックエンドのsales_repテーブルにも存在しない）ため、
-// 顧客の新規登録など、バックエンドに書き込む操作は行えない。
+export const DEAL_PHASE_NAMES: Record<number, string> = {
+  1: "初回接触",
+  2: "ヒアリング",
+  3: "提案",
+  4: "見積",
+  5: "契約交渉",
+};
+
+export const DEAL_RESULT_STATUS_NAMES: Record<number, string> = {
+  1: "進行中",
+  2: "成約",
+  3: "失注",
+};
+
+export const DEAL_PATTERN_NAMES: Record<number, string> = {
+  1: "新規開拓・大型",
+  2: "新規開拓・小口",
+  3: "既存深耕・大型",
+  4: "既存深耕・小口",
+};
+
+// 担当者一覧を返すAPIがまだ無いため、supabase/seed.sql に実在する18人を直書きしている。
+// 名称解決APIが追加され次第、GET /api/sales-reps 相当のAPI呼び出しに差し替える。
 export const mockSalesReps: SalesRep[] = [
   { rep_id: 1, rep_name: "石川次郎" },
-  { rep_id: 9001, rep_name: "佐藤 花子" },
-  { rep_id: 9002, rep_name: "鈴木 次郎" },
+  { rep_id: 2, rep_name: "村上花子" },
+  { rep_id: 3, rep_name: "小林綾子" },
+  { rep_id: 4, rep_name: "木村さゆり" },
+  { rep_id: 5, rep_name: "加藤拓也" },
+  { rep_id: 6, rep_name: "遠藤直樹" },
+  { rep_id: 7, rep_name: "近藤拓也" },
+  { rep_id: 8, rep_name: "井上愛" },
+  { rep_id: 9, rep_name: "吉田直樹" },
+  { rep_id: 10, rep_name: "高橋健二" },
+  { rep_id: 11, rep_name: "林慎一" },
+  { rep_id: 12, rep_name: "井上健太" },
+  { rep_id: 13, rep_name: "林麻衣" },
+  { rep_id: 14, rep_name: "岡田健二" },
+  { rep_id: 15, rep_name: "吉田陽子" },
+  { rep_id: 16, rep_name: "石川大輔" },
+  { rep_id: 17, rep_name: "岡本裕子" },
+  { rep_id: 18, rep_name: "後藤大輔" },
 ];
 
 export const mockSalesRep: SalesRep = mockSalesReps[0];
-
-// rep_affinity（得意分野スコア）はバックエンドにまだ無いテーブルのため、引き続きモック
-export const mockRepAffinities: RepAffinity[] = [
-  {
-    rep_id: 1,
-    category_id: 1,
-    category_name: "製造業",
-    score: 82,
-  },
-  {
-    rep_id: 1,
-    category_id: 2,
-    category_name: "卸売業",
-    score: 55,
-  },
-  {
-    rep_id: 1,
-    category_id: 3,
-    category_name: "小売業",
-    score: 30,
-  },
-  {
-    rep_id: 9001,
-    category_id: 1,
-    category_name: "情報通信業",
-    score: 75,
-  },
-  {
-    rep_id: 9001,
-    category_id: 2,
-    category_name: "卸売業",
-    score: 60,
-  },
-  {
-    rep_id: 9001,
-    category_id: 3,
-    category_name: "小売業",
-    score: 35,
-  },
-  {
-    rep_id: 9002,
-    category_id: 1,
-    category_name: "建設業",
-    score: 70,
-  },
-  {
-    rep_id: 9002,
-    category_id: 2,
-    category_name: "製造業",
-    score: 65,
-  },
-  {
-    rep_id: 9002,
-    category_id: 3,
-    category_name: "小売業",
-    score: 20,
-  },
-];
 
 // 「対応が難しい」を押した際にAIが差し替える候補。
 // customer_id/deal_id が無い(実在の顧客ではない)ため、この計画に結果を記録してもバックエンドには送信されない。
@@ -207,41 +183,3 @@ export const mockDailyTasks: ActivityPlan[] = [
     result_status: "pending",
   },
 ];
-
-// 顧客詳細ページの「商談履歴」用の仮データ。
-// バックエンドに商談履歴を取得するAPI(GET /api/deals・GET /api/results 相当)がまだ無いため、
-// 顧客IDを元にそれらしい履歴を組み立てている(customer.estimated_amount 等は正規化により
-// customer から deal 側へ移ったため、ここでは参照できない)。
-export function mockDealHistoryFor(customer: Customer): DealHistoryItem[] {
-  const baseAmount = 300000 + (customer.customer_id % 15) * 200000;
-  const isWon = customer.customer_id % 4 === 0;
-
-  return [
-    {
-      history_id: `${customer.customer_id}-h1`,
-      date: "2026-07-05",
-      activity_type_name: "訪問",
-      status: "in_progress",
-      amount: baseAmount,
-      note: `${customer.customer_name}へ初回提案を実施。反応は前向きだった。`,
-    },
-    {
-      history_id: `${customer.customer_id}-h2`,
-      date: "2026-07-20",
-      activity_type_name: "電話",
-      status: "in_progress",
-      amount: baseAmount,
-      note: "見積内容についてフォロー連絡。社内稟議中とのこと。",
-    },
-    {
-      history_id: `${customer.customer_id}-h3`,
-      date: "2026-08-01",
-      activity_type_name: "メール",
-      status: isWon ? "won" : "in_progress",
-      amount: isWon ? baseAmount : Math.round(baseAmount * 0.6),
-      note: isWon
-        ? "契約締結。次回更新提案に向けて関係構築中。"
-        : "追加資料を送付し、次回訪問の日程を調整中。",
-    },
-  ];
-}
