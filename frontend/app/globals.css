@@ -636,3 +636,29 @@ a {
   color: var(--accent);
   cursor: default;
 }
+
+.regenerate-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.regenerate-button {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.regenerate-button:hover {
+  border-color: var(--accent);
+}
+
+.regenerate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

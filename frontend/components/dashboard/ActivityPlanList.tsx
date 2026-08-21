@@ -5,7 +5,7 @@ import type { ActivityPlan, DealResultStatus } from "@/types";
 
 type ActivityPlanListProps = {
   plans: ActivityPlan[];
-  onResultChange: (planId: number, status: DealResultStatus) => void;
+  onResultChange: (planId: string, status: DealResultStatus) => void;
 };
 
 type ViewMode = "day" | "week" | "month";
