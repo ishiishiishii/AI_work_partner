@@ -1046,3 +1046,59 @@ a {
   border-radius: 999px;
   background: var(--card);
 }
+
+.ai-chat h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.ai-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-bottom: 0.75rem;
+  padding-right: 0.25rem;
+}
+
+.ai-chat__message {
+  max-width: 80%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.ai-chat__message--ai {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--ai) 10%, var(--card));
+  border: 1px solid var(--line);
+}
+
+.ai-chat__message--user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+}
+
+.ai-chat__message--thinking {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.ai-chat__form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ai-chat__form input {
+  flex: 1;
+  font-size: 0.9rem;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--card);
+  color: var(--ink);
+}

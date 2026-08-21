@@ -288,9 +288,10 @@ type ApiDeal = {
 
 export async function fetchDeals(repId: number): Promise<Deal[]> {
   const base = getApiBaseUrl();
-  const [dealsRes, products] = await Promise.all([
+  const [dealsRes, products, customerNames] = await Promise.all([
     fetch(`${base}/api/deals?rep_id=${repId}`, { cache: "no-store" }),
     fetchProducts(),
+    fetchCustomerNames(repId),
   ]);
   if (!dealsRes.ok) throw new Error(`商談一覧の取得に失敗しました (HTTP ${dealsRes.status})`);
   const rows: ApiDeal[] = await dealsRes.json();
@@ -299,6 +300,7 @@ export async function fetchDeals(repId: number): Promise<Deal[]> {
   return rows.map((row) => ({
     deal_id: row.deal_id,
     customer_id: row.customer_id,
+    customer_name: customerNames.get(row.customer_id) ?? "(顧客不明)",
     rep_id: row.rep_id,
     deal_phase_id: row.deal_phase_id,
     deal_phase_name: DEAL_PHASE_NAMES[row.deal_phase_id] ?? "不明",
