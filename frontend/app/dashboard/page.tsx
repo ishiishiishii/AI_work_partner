@@ -90,7 +90,7 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleResultChange(planId: string, status: DealResultStatus) {
+  async function handleResultChange(planId: number, status: DealResultStatus) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target) return;
 
@@ -139,7 +139,7 @@ export default function DashboardPage() {
     }
   }
 
-  function handleRequestAlternative(planId: string) {
+  function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target) return;
 

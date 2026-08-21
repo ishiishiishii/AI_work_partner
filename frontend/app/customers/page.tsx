@@ -40,10 +40,9 @@ export default function CustomersPage() {
 
   async function handleCreate(input: {
     customer_name: string;
-    industry: string;
+    industry_id: number;
+    company_size_id: number;
     location: string;
-    estimated_amount: number;
-    win_probability: number;
   }) {
     const created = await createCustomer(REP_ID, input);
     setCustomers((prev) => [...prev, created]);

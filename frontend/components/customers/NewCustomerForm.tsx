@@ -1,23 +1,25 @@
 "use client";
 
 import { useState } from "react";
+import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES } from "@/lib/mockData";
 
 type NewCustomerFormProps = {
   onCreate: (input: {
     customer_name: string;
-    industry: string;
+    industry_id: number;
+    company_size_id: number;
     location: string;
-    estimated_amount: number;
-    win_probability: number;
   }) => Promise<void>;
 };
 
+const industryOptions = Object.entries(INDUSTRY_NAMES);
+const companySizeOptions = Object.entries(COMPANY_SIZE_NAMES);
+
 const initialDraft = {
   customer_name: "",
-  industry: "",
+  industry_id: industryOptions[0][0],
+  company_size_id: companySizeOptions[0][0],
   location: "",
-  estimated_amount: "",
-  win_probability: "50",
 };
 
 export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
@@ -25,15 +27,7 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const amountValue = Number(draft.estimated_amount);
-  const probabilityValue = Number(draft.win_probability);
-  const isValid =
-    draft.customer_name.trim().length > 0 &&
-    Number.isFinite(amountValue) &&
-    amountValue >= 0 &&
-    Number.isFinite(probabilityValue) &&
-    probabilityValue >= 0 &&
-    probabilityValue <= 100;
+  const isValid = draft.customer_name.trim().length > 0 && draft.location.trim().length > 0;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -44,10 +38,9 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
     try {
       await onCreate({
         customer_name: draft.customer_name.trim(),
-        industry: draft.industry.trim(),
+        industry_id: Number(draft.industry_id),
+        company_size_id: Number(draft.company_size_id),
         location: draft.location.trim(),
-        estimated_amount: amountValue,
-        win_probability: probabilityValue,
       });
       setDraft(initialDraft);
     } catch (err) {
@@ -67,17 +60,34 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
             type="text"
             value={draft.customer_name}
             onChange={(event) => setDraft({ ...draft, customer_name: event.target.value })}
-            placeholder="例: D工業"
+            placeholder="例: D工業株式会社"
           />
         </label>
         <label className="goal-card__field">
           <span>業種</span>
-          <input
-            type="text"
-            value={draft.industry}
-            onChange={(event) => setDraft({ ...draft, industry: event.target.value })}
-            placeholder="例: 製造業"
-          />
+          <select
+            value={draft.industry_id}
+            onChange={(event) => setDraft({ ...draft, industry_id: event.target.value })}
+          >
+            {industryOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="goal-card__field">
+          <span>企業規模</span>
+          <select
+            value={draft.company_size_id}
+            onChange={(event) => setDraft({ ...draft, company_size_id: event.target.value })}
+          >
+            {companySizeOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="goal-card__field">
           <span>所在地</span>
@@ -86,28 +96,6 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
             value={draft.location}
             onChange={(event) => setDraft({ ...draft, location: event.target.value })}
             placeholder="例: 東京都"
-          />
-        </label>
-        <label className="goal-card__field">
-          <span>見込み金額</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={draft.estimated_amount}
-            onChange={(event) => setDraft({ ...draft, estimated_amount: event.target.value })}
-            placeholder="1000000"
-          />
-        </label>
-        <label className="goal-card__field">
-          <span>成約確率(%)</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={100}
-            value={draft.win_probability}
-            onChange={(event) => setDraft({ ...draft, win_probability: event.target.value })}
           />
         </label>
       </div>

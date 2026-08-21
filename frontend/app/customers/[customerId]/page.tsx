@@ -5,20 +5,9 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DealHistoryList } from "@/components/customers/DealHistoryList";
 import { fetchCustomers } from "@/lib/api";
-import { mockDealHistoryFor } from "@/lib/mockData";
+import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES, mockDealHistoryFor } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type { Customer } from "@/types";
-
-const STATUS_LABELS: Record<Customer["status"], string> = {
-  prospect: "見込み客",
-  active: "取引中",
-  dormant: "休眠",
-  churned: "離反",
-};
-
-function formatYen(amount: number): string {
-  return `¥${amount.toLocaleString("ja-JP")}`;
-}
 
 export default function CustomerDetailPage() {
   const { customerId } = useParams<{ customerId: string }>();
@@ -29,6 +18,7 @@ export default function CustomerDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const targetId = Number(customerId);
 
     async function load() {
       try {
@@ -36,7 +26,7 @@ export default function CustomerDetailPage() {
         setLoadError(null);
         const customers = await fetchCustomers(selectedRep.rep_id);
         if (cancelled) return;
-        setCustomer(customers.find((item) => item.customer_id === customerId) ?? null);
+        setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -80,22 +70,22 @@ export default function CustomerDetailPage() {
       </Link>
       <h1>{customer.customer_name}</h1>
       <p>
-        {customer.industry ?? "業種未設定"}・{customer.location ?? "所在地未設定"}
+        {INDUSTRY_NAMES[customer.industry_id] ?? "業種不明"}・{customer.location}
       </p>
 
       <section className="panel">
         <dl className="goal-card__numbers customer-detail__summary">
           <div>
-            <dt>見込み金額</dt>
-            <dd>{formatYen(customer.estimated_amount)}</dd>
+            <dt>企業規模</dt>
+            <dd>{COMPANY_SIZE_NAMES[customer.company_size_id] ?? "不明"}</dd>
           </div>
           <div>
-            <dt>成約確率</dt>
-            <dd>{customer.win_probability}%</dd>
+            <dt>業種</dt>
+            <dd>{INDUSTRY_NAMES[customer.industry_id] ?? "不明"}</dd>
           </div>
           <div>
-            <dt>ステータス</dt>
-            <dd>{STATUS_LABELS[customer.status]}</dd>
+            <dt>所在地</dt>
+            <dd>{customer.location}</dd>
           </div>
         </dl>
       </section>

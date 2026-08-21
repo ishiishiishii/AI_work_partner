@@ -7,7 +7,7 @@ import type { SalesRep } from "@/types";
 type RepContextValue = {
   reps: SalesRep[];
   selectedRep: SalesRep;
-  setSelectedRepId: (repId: string) => void;
+  setSelectedRepId: (repId: number) => void;
 };
 
 const RepContext = createContext<RepContextValue | null>(null);

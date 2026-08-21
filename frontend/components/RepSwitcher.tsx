@@ -9,7 +9,7 @@ export function RepSwitcher() {
     <select
       className="rep-switcher"
       value={selectedRep.rep_id}
-      onChange={(event) => setSelectedRepId(event.target.value)}
+      onChange={(event) => setSelectedRepId(Number(event.target.value))}
       aria-label="担当者を切り替える"
     >
       {reps.map((rep) => (
