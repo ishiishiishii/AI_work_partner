@@ -744,9 +744,14 @@ a {
   gap: 0.6rem;
 }
 
-.rep-switcher__name {
+.rep-switcher__select {
   font-size: 0.85rem;
-  color: var(--muted);
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  background: var(--card);
+  color: var(--ink);
 }
 
 .rep-switcher__signout {

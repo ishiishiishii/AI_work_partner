@@ -7,7 +7,9 @@ import { getSupabaseBrowserClient } from "@/lib/supabase";
 import type { SalesRep } from "@/types";
 
 type RepContextValue = {
+  reps: SalesRep[];
   selectedRep: SalesRep | null;
+  setSelectedRepId: (repId: number) => void;
   isAuthLoading: boolean;
   signOut: () => Promise<void>;
 };
@@ -18,7 +20,10 @@ const RepContext = createContext<RepContextValue | null>(null);
 const PUBLIC_PATHS = ["/login"];
 
 export function RepProvider({ children }: { children: React.ReactNode }) {
-  const [repId, setRepId] = useState<number | null>(null);
+  // authenticatedRepId: ログインしているかどうかの判定に使う(アクセス制御)
+  // selectedRepId: 画面に表示する担当者。ログイン後は自由に切り替えられる
+  const [authenticatedRepId, setAuthenticatedRepId] = useState<number | null>(null);
+  const [selectedRepId, setSelectedRepId] = useState<number | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -30,13 +35,18 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    function applySession(repId: number | null) {
+      setAuthenticatedRepId(repId);
+      setSelectedRepId(repId);
+    }
+
     supabase.auth.getSession().then(({ data }) => {
-      setRepId((data.session?.user.app_metadata.rep_id as number | undefined) ?? null);
+      applySession((data.session?.user.app_metadata.rep_id as number | undefined) ?? null);
       setIsAuthLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setRepId((session?.user.app_metadata.rep_id as number | undefined) ?? null);
+      applySession((session?.user.app_metadata.rep_id as number | undefined) ?? null);
     });
 
     return () => listener.subscription.unsubscribe();
@@ -45,22 +55,28 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isAuthLoading) return;
     const isPublicPath = PUBLIC_PATHS.includes(pathname);
-    if (repId === null && !isPublicPath) {
+    if (authenticatedRepId === null && !isPublicPath) {
       router.replace("/login");
     }
-  }, [isAuthLoading, repId, pathname, router]);
+  }, [isAuthLoading, authenticatedRepId, pathname, router]);
 
-  const selectedRep = repId !== null ? (mockSalesReps.find((rep) => rep.rep_id === repId) ?? null) : null;
+  const selectedRep =
+    selectedRepId !== null ? (mockSalesReps.find((rep) => rep.rep_id === selectedRepId) ?? null) : null;
 
   async function signOut() {
     const supabase = getSupabaseBrowserClient();
     await supabase?.auth.signOut();
-    setRepId(null);
+    setAuthenticatedRepId(null);
+    setSelectedRepId(null);
     router.replace("/login");
   }
 
   return (
-    <RepContext.Provider value={{ selectedRep, isAuthLoading, signOut }}>{children}</RepContext.Provider>
+    <RepContext.Provider
+      value={{ reps: mockSalesReps, selectedRep, setSelectedRepId, isAuthLoading, signOut }}
+    >
+      {children}
+    </RepContext.Provider>
   );
 }
 
