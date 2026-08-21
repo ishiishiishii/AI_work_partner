@@ -31,6 +31,7 @@ export type ActivityPlan = {
   plan_id: string;
   rep_id: string;
   plan_date: string; // "YYYY-MM-DD"
+  start_time: string | null; // "HH:MM"（日表示のスケジュール用。バックエンドにはまだ無い）
   customer_id: string | null;
   customer_name: string;
   deal_id: string | null;

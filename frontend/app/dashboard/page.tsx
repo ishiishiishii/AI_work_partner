@@ -14,7 +14,12 @@ import {
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockAlternativeCandidates, mockRepAffinities, mockSalesRep } from "@/lib/mockData";
+import {
+  mockAlternativeCandidates,
+  mockDailyTasks,
+  mockRepAffinities,
+  mockSalesRep,
+} from "@/lib/mockData";
 import type { ActivityPlan, DealResultStatus, ReplanInfo, SalesTarget } from "@/types";
 
 const REP_ID = mockSalesRep.rep_id;
@@ -205,6 +210,7 @@ export default function DashboardPage() {
       </div>
       <ActivityPlanList
         plans={plans}
+        dailyTasks={mockDailyTasks}
         onResultChange={handleResultChange}
         onRequestAlternative={handleRequestAlternative}
       />

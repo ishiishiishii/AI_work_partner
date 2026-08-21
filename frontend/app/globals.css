@@ -377,6 +377,16 @@ a {
   color: var(--muted);
 }
 
+.activity-plan-list__type--prep {
+  background: color-mix(in srgb, #0891b2 15%, transparent);
+  color: #0891b2;
+}
+
+.activity-plan-list__type--prospect {
+  background: color-mix(in srgb, #65a30d 15%, transparent);
+  color: #65a30d;
+}
+
 .activity-plan-list__amount {
   flex-shrink: 0;
   font-weight: 600;

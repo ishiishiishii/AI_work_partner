@@ -5,6 +5,7 @@ import type { ActivityPlan, DealResultStatus } from "@/types";
 
 type ActivityPlanListProps = {
   plans: ActivityPlan[];
+  dailyTasks: ActivityPlan[];
   onResultChange: (planId: string, status: DealResultStatus) => void;
   onRequestAlternative: (planId: string) => void;
 };
@@ -22,6 +23,8 @@ const ACTIVITY_TYPE_CLASS: Record<string, string> = {
   電話: "activity-plan-list__type--call",
   メール: "activity-plan-list__type--email",
   Web会議: "activity-plan-list__type--online",
+  資料作成: "activity-plan-list__type--prep",
+  新規開拓: "activity-plan-list__type--prospect",
 };
 
 const VIEW_LABELS: Record<ViewMode, string> = { day: "日", week: "週", month: "月" };
@@ -85,7 +88,12 @@ function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: strin
   return `${year}年${Number(month)}月の活動計画`;
 }
 
-export function ActivityPlanList({ plans, onResultChange, onRequestAlternative }: ActivityPlanListProps) {
+export function ActivityPlanList({
+  plans,
+  dailyTasks,
+  onResultChange,
+  onRequestAlternative,
+}: ActivityPlanListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
@@ -96,9 +104,20 @@ export function ActivityPlanList({ plans, onResultChange, onRequestAlternative }
   });
 
   const range = getRange(viewMode, selectedDate);
-  const filtered = plans
-    .filter((plan) => plan.plan_date >= range.start && plan.plan_date <= range.end)
-    .sort((a, b) => a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority);
+  const filteredPlans = plans.filter(
+    (plan) => plan.plan_date >= range.start && plan.plan_date <= range.end,
+  );
+  // 資料作成・新規開拓などの日次タスクは「日」表示でのみ、その日の分だけ合わせて表示する
+  const filteredTasks =
+    viewMode === "day" ? dailyTasks.filter((task) => task.plan_date === selectedDate) : [];
+  const filtered = [...filteredPlans, ...filteredTasks].sort((a, b) => {
+    if (viewMode === "day") {
+      const timeA = a.start_time ?? "99:99";
+      const timeB = b.start_time ?? "99:99";
+      return timeA.localeCompare(timeB) || a.priority - b.priority;
+    }
+    return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
+  });
 
   function handleShift(direction: -1 | 1) {
     const date = parseISODate(selectedDate);
@@ -146,7 +165,9 @@ export function ActivityPlanList({ plans, onResultChange, onRequestAlternative }
         <ul className="activity-plan-list__items">
           {filtered.map((plan) => (
             <li key={plan.plan_id} className="activity-plan-list__item">
-              <div className="activity-plan-list__date">{formatDate(plan.plan_date)}</div>
+              <div className="activity-plan-list__date">
+                {viewMode === "day" && plan.start_time ? plan.start_time : formatDate(plan.plan_date)}
+              </div>
               <div className="activity-plan-list__main">
                 <div className="activity-plan-list__customer">
                   {plan.customer_name}
@@ -161,50 +182,56 @@ export function ActivityPlanList({ plans, onResultChange, onRequestAlternative }
                   >
                     {plan.activity_type_name}
                   </span>
-                  <span>
-                    優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
-                  </span>
+                  {plan.customer_id && (
+                    <span>
+                      優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
+                    </span>
+                  )}
                 </div>
               </div>
-              <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
-              <div className="activity-plan-list__result-buttons">
-                {plan.result_status === "pending" ? (
-                  <>
-                    {RESULT_OPTIONS.map((option) => (
+              {plan.expected_amount > 0 && (
+                <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
+              )}
+              {plan.customer_id && (
+                <div className="activity-plan-list__result-buttons">
+                  {plan.result_status === "pending" ? (
+                    <>
+                      {RESULT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="activity-plan-list__result-button"
+                          onClick={() => onResultChange(plan.plan_id, option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
                       <button
-                        key={option.value}
                         type="button"
-                        className="activity-plan-list__result-button"
-                        onClick={() => onResultChange(plan.plan_id, option.value)}
+                        className="activity-plan-list__alt-button"
+                        onClick={() => onRequestAlternative(plan.plan_id)}
                       >
-                        {option.label}
+                        対応が難しい
                       </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="activity-plan-list__alt-button"
-                      onClick={() => onRequestAlternative(plan.plan_id)}
-                    >
-                      対応が難しい
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span
-                      className={`activity-plan-list__result-button is-active is-active--${plan.result_status}`}
-                    >
-                      {RESULT_OPTIONS.find((option) => option.value === plan.result_status)?.label}
-                    </span>
-                    <button
-                      type="button"
-                      className="activity-plan-list__undo-button"
-                      onClick={() => onResultChange(plan.plan_id, plan.result_status)}
-                    >
-                      取り消す
-                    </button>
-                  </>
-                )}
-              </div>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className={`activity-plan-list__result-button is-active is-active--${plan.result_status}`}
+                      >
+                        {RESULT_OPTIONS.find((option) => option.value === plan.result_status)?.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="activity-plan-list__undo-button"
+                        onClick={() => onResultChange(plan.plan_id, plan.result_status)}
+                      >
+                        取り消す
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>
