@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Customer } from "@/types";
 
 type CustomerTableProps = {
@@ -30,7 +31,7 @@ export function CustomerTable({ customers }: CustomerTableProps) {
         <li key={customer.customer_id} className="customer-table__row">
           <div className="customer-table__main">
             <div className="customer-table__name">
-              {customer.customer_name}
+              <Link href={`/customers/${customer.customer_id}`}>{customer.customer_name}</Link>
               <span className={`badge customer-table__status--${customer.status}`}>
                 {STATUS_LABELS[customer.status]}
               </span>

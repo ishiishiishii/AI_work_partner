@@ -37,6 +37,17 @@ export type Customer = {
   status: CustomerStatus;
 };
 
+export type DealHistoryStatus = "in_progress" | "won" | "lost" | "postponed";
+
+export type DealHistoryItem = {
+  history_id: string;
+  date: string; // "YYYY-MM-DD"
+  activity_type_name: string;
+  status: DealHistoryStatus;
+  amount: number;
+  note: string;
+};
+
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
 
 export type ActivityPlan = {

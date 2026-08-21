@@ -1,4 +1,4 @@
-import type { ActivityPlan, RepAffinity, SalesRep } from "@/types";
+import type { ActivityPlan, Customer, DealHistoryItem, RepAffinity, SalesRep } from "@/types";
 
 // 担当者一覧を返すAPIがまだ無いため、担当者情報を直書きしている。
 // 「山田 太郎」のみ supabase/seed.sql に実在する担当者で、他はUI確認用の仮の担当者。
@@ -177,3 +177,40 @@ export const mockDailyTasks: ActivityPlan[] = [
     result_status: "pending",
   },
 ];
+
+// 顧客詳細ページの「商談履歴」用の仮データ。
+// バックエンドに商談履歴を取得するAPI(GET /api/deals・GET /api/results 相当)がまだ無いため、
+// 顧客自身の実データ(見込み金額・成約確率・ステータス)を元にそれらしい履歴を組み立てている。
+export function mockDealHistoryFor(customer: Customer): DealHistoryItem[] {
+  const baseAmount = customer.estimated_amount || 500000;
+  const isActive = customer.status === "active";
+
+  return [
+    {
+      history_id: `${customer.customer_id}-h1`,
+      date: "2026-07-05",
+      activity_type_name: "訪問",
+      status: "in_progress",
+      amount: baseAmount,
+      note: `${customer.customer_name}へ初回提案を実施。反応は前向きだった。`,
+    },
+    {
+      history_id: `${customer.customer_id}-h2`,
+      date: "2026-07-20",
+      activity_type_name: "電話",
+      status: "in_progress",
+      amount: baseAmount,
+      note: "見積内容についてフォロー連絡。社内稟議中とのこと。",
+    },
+    {
+      history_id: `${customer.customer_id}-h3`,
+      date: "2026-08-01",
+      activity_type_name: "メール",
+      status: isActive ? "won" : "in_progress",
+      amount: Math.round(baseAmount * (customer.win_probability / 100)),
+      note: isActive
+        ? "契約締結。次回更新提案に向けて関係構築中。"
+        : "追加資料を送付し、次回訪問の日程を調整中。",
+    },
+  ];
+}
