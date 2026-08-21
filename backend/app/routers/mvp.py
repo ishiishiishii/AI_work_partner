@@ -17,6 +17,7 @@ from app.schemas.models import (
     ReplanRequest,
     ResultCreate,
     ResultOut,
+    StaleCustomerOut,
     TargetCreate,
     TargetOut,
 )
@@ -67,6 +68,18 @@ def post_customer(body: CustomerCreate) -> CustomerOut:
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CustomerOut.model_validate(row)
+
+
+@router.get("/customers/stale", response_model=list[StaleCustomerOut])
+def get_stale_customers(
+    threshold_days: int = Query(planning.STALE_THRESHOLD_DAYS, ge=1),
+    rep_id: int | None = None,
+) -> list[StaleCustomerOut]:
+    with get_connection() as conn:
+        rows = planning.list_stale_customers(
+            conn, threshold_days=threshold_days, rep_id=rep_id
+        )
+    return [StaleCustomerOut.model_validate(row) for row in rows]
 
 
 @router.get("/deals", response_model=list[DealOut])
