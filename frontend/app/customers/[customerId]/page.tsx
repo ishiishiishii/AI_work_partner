@@ -17,7 +17,11 @@ export default function CustomerDetailPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
 
+  const REP_ID = selectedRep?.rep_id ?? null;
+
   useEffect(() => {
+    if (REP_ID === null) return;
+    const repId = REP_ID;
     let cancelled = false;
     const targetId = Number(customerId);
 
@@ -25,10 +29,7 @@ export default function CustomerDetailPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const [customers, repDeals] = await Promise.all([
-          fetchCustomers(selectedRep.rep_id),
-          fetchDeals(selectedRep.rep_id),
-        ]);
+        const [customers, repDeals] = await Promise.all([fetchCustomers(repId), fetchDeals(repId)]);
         if (cancelled) return;
         setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
         setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
@@ -45,9 +46,9 @@ export default function CustomerDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedRep.rep_id, customerId]);
+  }, [REP_ID, customerId]);
 
-  if (isLoading) {
+  if (!selectedRep || isLoading) {
     return (
       <main>
         <p>読み込み中...</p>

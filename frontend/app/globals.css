@@ -739,13 +739,39 @@ a {
 
 .rep-switcher {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.rep-switcher__name {
   font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.rep-switcher__signout {
+  font-size: 0.8rem;
   font-family: inherit;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.3rem 0.6rem;
   background: var(--card);
   color: var(--ink);
+  cursor: pointer;
+}
+
+.rep-switcher__signout:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.login-page {
+  max-width: 360px;
+}
+
+.login-form {
+  display: grid;
+  gap: 0.9rem;
 }
 
 .customer-table {
