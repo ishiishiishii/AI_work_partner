@@ -32,6 +32,42 @@ export const mockRepAffinities: RepAffinity[] = [
     category_name: "小売業",
     score: 30,
   },
+  {
+    rep_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    category_id: 1,
+    category_name: "情報通信業",
+    score: 75,
+  },
+  {
+    rep_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    category_id: 2,
+    category_name: "卸売業",
+    score: 60,
+  },
+  {
+    rep_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    category_id: 3,
+    category_name: "小売業",
+    score: 35,
+  },
+  {
+    rep_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    category_id: 1,
+    category_name: "建設業",
+    score: 70,
+  },
+  {
+    rep_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    category_id: 2,
+    category_name: "製造業",
+    score: 65,
+  },
+  {
+    rep_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    category_id: 3,
+    category_name: "小売業",
+    score: 20,
+  },
 ];
 
 // 「対応が難しい」を押した際にAIが差し替える候補。

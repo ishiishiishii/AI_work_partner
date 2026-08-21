@@ -183,6 +183,7 @@ export default function DashboardPage() {
 
   const forecastAmount = calcForecastAmount(plans);
   const achievementRate = calcAchievementRate(plans, target.target_amount);
+  const repAffinities = mockRepAffinities.filter((affinity) => affinity.rep_id === REP_ID);
 
   return (
     <main>
@@ -211,7 +212,7 @@ export default function DashboardPage() {
         onResultChange={handleResultChange}
         onRequestAlternative={handleRequestAlternative}
       />
-      <AiReasoningPanel plans={plans} affinities={mockRepAffinities} />
+      <AiReasoningPanel plans={plans} affinities={repAffinities} />
     </main>
   );
 }
