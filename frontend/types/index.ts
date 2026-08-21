@@ -18,11 +18,21 @@ export type Forecast = {
   achievement_rate: number;
 };
 
+// 担当者の実績を「業界 × 商品カテゴリ × 案件パターン」で集計した実データ
+// (deal_count/win_rateなどはバックエンドの rep_affinity テーブルの計算結果そのまま)
 export type RepAffinity = {
   rep_id: number;
+  industry_id: number;
+  industry_name: string;
   category_id: number;
   category_name: string;
-  score: number; // 0-100
+  pattern_id: number;
+  pattern_name: string;
+  deal_count: number;
+  won_count: number;
+  win_rate: number; // 0-1
+  avg_won_amount: number;
+  affinity_score: number;
 };
 
 // 見込み金額・成約確率・ステータスは deal（商談）側に移動したため、
@@ -46,15 +56,22 @@ export type Product = {
   category_name: string;
 };
 
-export type DealHistoryStatus = "in_progress" | "won" | "lost" | "postponed";
-
-export type DealHistoryItem = {
-  history_id: string;
-  date: string; // "YYYY-MM-DD"
-  activity_type_name: string;
-  status: DealHistoryStatus;
-  amount: number;
-  note: string;
+export type Deal = {
+  deal_id: number;
+  customer_id: number;
+  rep_id: number;
+  deal_phase_id: number;
+  deal_phase_name: string;
+  deal_result_status_id: number;
+  deal_result_status_name: string;
+  product_id: number;
+  product_name: string;
+  estimated_amount: number;
+  win_probability: number;
+  expected_visit_count: number;
+  expected_effort_hours: number;
+  deal_start_date: string; // "YYYY-MM-DD"
+  contract_date: string | null;
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";

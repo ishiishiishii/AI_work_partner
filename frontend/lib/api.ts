@@ -1,4 +1,18 @@
-import type { ActivityPlan, Customer, DealResultStatus, Product, SalesTarget } from "@/types";
+import {
+  DEAL_PATTERN_NAMES,
+  DEAL_PHASE_NAMES,
+  DEAL_RESULT_STATUS_NAMES,
+  INDUSTRY_NAMES,
+} from "@/lib/mockData";
+import type {
+  ActivityPlan,
+  Customer,
+  Deal,
+  DealResultStatus,
+  Product,
+  RepAffinity,
+  SalesTarget,
+} from "@/types";
 
 export function getApiBaseUrl(): string {
   if (typeof window === "undefined") {
@@ -255,4 +269,96 @@ export async function fetchProducts(name?: string): Promise<Product[]> {
   const res = await fetch(`${base}/api/products${query}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`商品一覧の取得に失敗しました (HTTP ${res.status})`);
   return res.json();
+}
+
+type ApiDeal = {
+  deal_id: number;
+  customer_id: number;
+  rep_id: number;
+  deal_phase_id: number;
+  deal_result_status_id: number;
+  product_id: number;
+  estimated_amount: string | number;
+  win_probability: string | number;
+  expected_visit_count: number;
+  expected_effort_hours: string | number;
+  deal_start_date: string;
+  contract_date: string | null;
+};
+
+export async function fetchDeals(repId: number): Promise<Deal[]> {
+  const base = getApiBaseUrl();
+  const [dealsRes, products] = await Promise.all([
+    fetch(`${base}/api/deals?rep_id=${repId}`, { cache: "no-store" }),
+    fetchProducts(),
+  ]);
+  if (!dealsRes.ok) throw new Error(`商談一覧の取得に失敗しました (HTTP ${dealsRes.status})`);
+  const rows: ApiDeal[] = await dealsRes.json();
+  const productNames = new Map(products.map((product) => [product.product_id, product.product_name]));
+
+  return rows.map((row) => ({
+    deal_id: row.deal_id,
+    customer_id: row.customer_id,
+    rep_id: row.rep_id,
+    deal_phase_id: row.deal_phase_id,
+    deal_phase_name: DEAL_PHASE_NAMES[row.deal_phase_id] ?? "不明",
+    deal_result_status_id: row.deal_result_status_id,
+    deal_result_status_name: DEAL_RESULT_STATUS_NAMES[row.deal_result_status_id] ?? "不明",
+    product_id: row.product_id,
+    product_name: productNames.get(row.product_id) ?? "(商品不明)",
+    estimated_amount: Number(row.estimated_amount),
+    win_probability: Number(row.win_probability),
+    expected_visit_count: row.expected_visit_count,
+    expected_effort_hours: Number(row.expected_effort_hours),
+    deal_start_date: row.deal_start_date,
+    contract_date: row.contract_date,
+  }));
+}
+
+type ApiRepAffinity = {
+  rep_id: number;
+  industry_id: number;
+  category_id: number;
+  pattern_id: number;
+  deal_count: number;
+  won_count: number;
+  win_rate: string | number;
+  avg_won_amount: string | number;
+  affinity_score: string | number;
+};
+
+export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
+  const base = getApiBaseUrl();
+  const [affinityRes, products] = await Promise.all([
+    fetch(`${base}/api/reps/${repId}/affinity`, { cache: "no-store" }),
+    fetchProducts(),
+  ]);
+  if (!affinityRes.ok) throw new Error(`得意分野スコアの取得に失敗しました (HTTP ${affinityRes.status})`);
+  const rows: ApiRepAffinity[] = await affinityRes.json();
+  const categoryNames = new Map(products.map((product) => [product.category_id, product.category_name]));
+
+  return rows.map((row) => ({
+    rep_id: row.rep_id,
+    industry_id: row.industry_id,
+    industry_name: INDUSTRY_NAMES[row.industry_id] ?? "不明",
+    category_id: row.category_id,
+    category_name: categoryNames.get(row.category_id) ?? "不明",
+    pattern_id: row.pattern_id,
+    pattern_name: DEAL_PATTERN_NAMES[row.pattern_id] ?? "不明",
+    deal_count: row.deal_count,
+    won_count: row.won_count,
+    win_rate: Number(row.win_rate),
+    avg_won_amount: Number(row.avg_won_amount),
+    affinity_score: Number(row.affinity_score),
+  }));
+}
+
+// 得意分野スコアはバックエンドの計算結果をキャッシュしたテーブルのため、
+// 表示前に最新の商談結果を反映させておく
+export async function recalculateRepAffinity(repId: number): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/affinity/recalculate?rep_id=${repId}`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`得意分野スコアの再計算に失敗しました (HTTP ${res.status})`);
 }

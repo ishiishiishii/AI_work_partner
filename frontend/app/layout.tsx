@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { RepSwitcher } from "@/components/RepSwitcher";
+import { AppNav } from "@/components/AppNav";
 import { RepProvider } from "@/lib/repContext";
 import "./globals.css";
 
@@ -18,12 +17,7 @@ export default function RootLayout({
     <html lang="ja">
       <body>
         <RepProvider>
-          <nav className="app-nav">
-            <Link href="/dashboard">ダッシュボード</Link>
-            <Link href="/customers">顧客一覧</Link>
-            <Link href="/products">商品カタログ</Link>
-            <RepSwitcher />
-          </nav>
+          <AppNav />
           {children}
         </RepProvider>
       </body>
