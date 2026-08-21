@@ -291,8 +291,8 @@ docker compose up --build
 | --- | --- |
 | http://localhost:3000 | フロント |
 | http://localhost:8000/docs | FastAPI OpenAPI |
-| http://127.0.0.1:54321 | Supabase API |
-| http://127.0.0.1:54323 | Supabase Studio |
+| http://127.0.0.1:55321 | Supabase API |
+| http://127.0.0.1:55323 | Supabase Studio |
 
 ### 11.3 コンテナに入って作業する
 
