@@ -134,6 +134,15 @@ class ResultOut(OrmModel):
     created_at: datetime | None = None
 
 
+class ProductOut(OrmModel):
+    product_id: int
+    product_name: str
+    subcategory_id: int
+    subcategory_name: str
+    category_id: int
+    category_name: str
+
+
 class ReplanRequest(BaseModel):
     rep_id: int
     target_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")

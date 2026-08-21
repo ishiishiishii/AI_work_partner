@@ -12,6 +12,7 @@ from app.schemas.models import (
     PlanGenerateRequest,
     PlanGenerateResponse,
     PlanOut,
+    ProductOut,
     RepAffinityOut,
     ReplanRequest,
     ResultCreate,
@@ -108,6 +109,13 @@ def post_rep_affinity_recalculate(rep_id: int | None = None) -> list[RepAffinity
     with get_connection() as conn:
         rows = affinity.recalculate_rep_affinity(conn, rep_id)
     return [RepAffinityOut.model_validate(row) for row in rows]
+
+
+@router.get("/products", response_model=list[ProductOut])
+def get_products(name: str | None = None) -> list[ProductOut]:
+    with get_connection() as conn:
+        rows = planning.search_products(conn, name)
+    return [ProductOut.model_validate(row) for row in rows]
 
 
 @router.get("/plans", response_model=list[PlanOut])
