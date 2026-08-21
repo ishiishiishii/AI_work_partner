@@ -1,4 +1,4 @@
-import type { ActivityPlan, DealResultStatus, SalesTarget } from "@/types";
+import type { ActivityPlan, Customer, DealResultStatus, Product, SalesTarget } from "@/types";
 
 export function getApiBaseUrl(): string {
   if (typeof window === "undefined") {
@@ -14,8 +14,19 @@ const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   online: "Web会議",
 };
 
+const ACTIVITY_TYPE_CODES: Record<string, string> = {
+  訪問: "visit",
+  電話: "call",
+  メール: "email",
+  Web会議: "online",
+};
+
 function toActivityTypeName(activityType: string): string {
   return ACTIVITY_TYPE_LABELS[activityType] ?? activityType;
+}
+
+export function toActivityTypeCode(activityTypeName: string): string {
+  return ACTIVITY_TYPE_CODES[activityTypeName] ?? "visit";
 }
 
 type ApiTarget = {
@@ -66,12 +77,62 @@ export async function saveSalesTarget(
   return mapTarget(await res.json());
 }
 
-async function fetchCustomerNames(repId: number): Promise<Map<number, string>> {
+type ApiCustomer = {
+  customer_id: number;
+  customer_name: string;
+  industry_id: number;
+  company_size_id: number;
+  location: string;
+  primary_rep_id: number | null;
+};
+
+function mapCustomer(row: ApiCustomer): Customer {
+  return {
+    customer_id: row.customer_id,
+    customer_name: row.customer_name,
+    industry_id: row.industry_id,
+    company_size_id: row.company_size_id,
+    location: row.location,
+    primary_rep_id: row.primary_rep_id,
+  };
+}
+
+export async function fetchCustomers(repId: number): Promise<Customer[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/customers?rep_id=${repId}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`顧客一覧の取得に失敗しました (HTTP ${res.status})`);
-  const rows: { customer_id: number; customer_name: string }[] = await res.json();
-  return new Map(rows.map((row) => [row.customer_id, row.customer_name]));
+  const rows: ApiCustomer[] = await res.json();
+  return rows.map(mapCustomer);
+}
+
+export async function createCustomer(
+  repId: number,
+  input: {
+    customer_name: string;
+    industry_id: number;
+    company_size_id: number;
+    location: string;
+  },
+): Promise<Customer> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      customer_name: input.customer_name,
+      primary_rep_id: repId,
+      industry_id: input.industry_id,
+      company_size_id: input.company_size_id,
+      location: input.location,
+    }),
+  });
+  if (!res.ok) throw new Error(`顧客の登録に失敗しました (HTTP ${res.status})`);
+  return mapCustomer(await res.json());
+}
+
+async function fetchCustomerNames(repId: number): Promise<Map<number, string>> {
+  const customers = await fetchCustomers(repId);
+  return new Map(customers.map((customer) => [customer.customer_id, customer.customer_name]));
 }
 
 type ApiPlan = {
@@ -87,6 +148,8 @@ type ApiPlan = {
   plan_status: string;
   is_ai_generated: boolean;
   rationale: string | null;
+  product_id: number | null;
+  product_name: string | null;
 };
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
@@ -96,9 +159,11 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     plan_id: row.plan_id,
     rep_id: row.rep_id,
     plan_date: row.plan_date,
+    start_time: null,
     customer_id: row.customer_id,
     customer_name: (row.customer_id && customerNames.get(row.customer_id)) || "(顧客不明)",
     deal_id: row.deal_id,
+    product_name: row.product_name,
     activity_type_name: toActivityTypeName(row.activity_type),
     priority: row.priority,
     expected_amount: Number(row.expected_amount),
@@ -166,6 +231,7 @@ export async function postActivityResult(
   repId: number,
   plan: ActivityPlan,
   status: Exclude<DealResultStatus, "pending">,
+  activityTypeName: string,
 ): Promise<void> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/results`, {
@@ -177,7 +243,16 @@ export async function postActivityResult(
       plan_id: plan.plan_id,
       customer_id: plan.customer_id,
       deal_id: plan.deal_id,
+      activity_type: toActivityTypeCode(activityTypeName),
     }),
   });
   if (!res.ok) throw new Error(`結果の登録に失敗しました (HTTP ${res.status})`);
+}
+
+export async function fetchProducts(name?: string): Promise<Product[]> {
+  const base = getApiBaseUrl();
+  const query = name ? `?name=${encodeURIComponent(name)}` : "";
+  const res = await fetch(`${base}/api/products${query}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`商品一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
 }

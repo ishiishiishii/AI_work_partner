@@ -5,7 +5,9 @@ import type { ActivityPlan, DealResultStatus } from "@/types";
 
 type ActivityPlanListProps = {
   plans: ActivityPlan[];
-  onResultChange: (planId: number, status: DealResultStatus) => void;
+  dailyTasks: ActivityPlan[];
+  onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
+  onRequestAlternative: (planId: number) => void;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -16,11 +18,17 @@ const RESULT_OPTIONS: { value: DealResultStatus; label: string }[] = [
   { value: "postponed", label: "延期" },
 ];
 
+// バックエンドの計画生成は今のところ「訪問」しか作らないため、
+// 記録時に実際どう対応したかをここで選べるようにしている
+const CONTACT_TYPE_OPTIONS = ["訪問", "電話", "メール", "Web会議"];
+
 const ACTIVITY_TYPE_CLASS: Record<string, string> = {
   訪問: "activity-plan-list__type--visit",
   電話: "activity-plan-list__type--call",
   メール: "activity-plan-list__type--email",
   Web会議: "activity-plan-list__type--online",
+  資料作成: "activity-plan-list__type--prep",
+  新規開拓: "activity-plan-list__type--prospect",
 };
 
 const VIEW_LABELS: Record<ViewMode, string> = { day: "日", week: "週", month: "月" };
@@ -84,8 +92,14 @@ function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: strin
   return `${year}年${Number(month)}月の活動計画`;
 }
 
-export function ActivityPlanList({ plans, onResultChange }: ActivityPlanListProps) {
+export function ActivityPlanList({
+  plans,
+  dailyTasks,
+  onResultChange,
+  onRequestAlternative,
+}: ActivityPlanListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
       (min, plan) => (plan.plan_date < min ? plan.plan_date : min),
@@ -95,9 +109,24 @@ export function ActivityPlanList({ plans, onResultChange }: ActivityPlanListProp
   });
 
   const range = getRange(viewMode, selectedDate);
-  const filtered = plans
-    .filter((plan) => plan.plan_date >= range.start && plan.plan_date <= range.end)
-    .sort((a, b) => a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority);
+  const filteredPlans = plans.filter(
+    (plan) => plan.plan_date >= range.start && plan.plan_date <= range.end,
+  );
+  // 資料作成・新規開拓などの日次タスクは「日」表示でのみ、その日の分だけ合わせて表示する
+  const filteredTasks =
+    viewMode === "day" ? dailyTasks.filter((task) => task.plan_date === selectedDate) : [];
+  const filtered = [...filteredPlans, ...filteredTasks].sort((a, b) => {
+    if (viewMode === "day") {
+      const timeA = a.start_time ?? "99:99";
+      const timeB = b.start_time ?? "99:99";
+      return timeA.localeCompare(timeB) || a.priority - b.priority;
+    }
+    return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
+  });
+
+  function getSelectedContactType(plan: ActivityPlan): string {
+    return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
+  }
 
   function handleShift(direction: -1 | 1) {
     const date = parseISODate(selectedDate);
@@ -145,12 +174,17 @@ export function ActivityPlanList({ plans, onResultChange }: ActivityPlanListProp
         <ul className="activity-plan-list__items">
           {filtered.map((plan) => (
             <li key={plan.plan_id} className="activity-plan-list__item">
-              <div className="activity-plan-list__date">{formatDate(plan.plan_date)}</div>
+              <div className="activity-plan-list__date">
+                {viewMode === "day" && plan.start_time ? plan.start_time : formatDate(plan.plan_date)}
+              </div>
               <div className="activity-plan-list__main">
                 <div className="activity-plan-list__customer">
                   {plan.customer_name}
                   {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
                 </div>
+                {plan.product_name && (
+                  <div className="activity-plan-list__product">商品: {plan.product_name}</div>
+                )}
                 <div className="activity-plan-list__meta">
                   <span
                     className={`activity-plan-list__type ${
@@ -160,41 +194,78 @@ export function ActivityPlanList({ plans, onResultChange }: ActivityPlanListProp
                   >
                     {plan.activity_type_name}
                   </span>
-                  <span>
-                    優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
-                  </span>
+                  {plan.customer_id && (
+                    <span>
+                      優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
+                    </span>
+                  )}
                 </div>
               </div>
-              <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
-              <div className="activity-plan-list__result-buttons">
-                {plan.result_status === "pending" ? (
-                  RESULT_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className="activity-plan-list__result-button"
-                      onClick={() => onResultChange(plan.plan_id, option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))
-                ) : (
-                  <>
-                    <span
-                      className={`activity-plan-list__result-button is-active is-active--${plan.result_status}`}
-                    >
-                      {RESULT_OPTIONS.find((option) => option.value === plan.result_status)?.label}
-                    </span>
-                    <button
-                      type="button"
-                      className="activity-plan-list__undo-button"
-                      onClick={() => onResultChange(plan.plan_id, plan.result_status)}
-                    >
-                      取り消す
-                    </button>
-                  </>
-                )}
-              </div>
+              {plan.expected_amount > 0 && (
+                <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
+              )}
+              {plan.customer_id && (
+                <div className="activity-plan-list__result-buttons">
+                  {plan.result_status === "pending" ? (
+                    <>
+                      <label className="activity-plan-list__contact-type">
+                        実際の対応:
+                        <select
+                          value={getSelectedContactType(plan)}
+                          onChange={(event) =>
+                            setContactTypeSelections((prev) => ({
+                              ...prev,
+                              [plan.plan_id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {CONTACT_TYPE_OPTIONS.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {RESULT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="activity-plan-list__result-button"
+                          onClick={() =>
+                            onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))
+                          }
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="activity-plan-list__alt-button"
+                        onClick={() => onRequestAlternative(plan.plan_id)}
+                      >
+                        対応が難しい
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className={`activity-plan-list__result-button is-active is-active--${plan.result_status}`}
+                      >
+                        {RESULT_OPTIONS.find((option) => option.value === plan.result_status)?.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="activity-plan-list__undo-button"
+                        onClick={() =>
+                          onResultChange(plan.plan_id, plan.result_status, getSelectedContactType(plan))
+                        }
+                      >
+                        取り消す
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>
