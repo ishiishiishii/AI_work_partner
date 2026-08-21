@@ -14,8 +14,19 @@ const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   online: "Web会議",
 };
 
+const ACTIVITY_TYPE_CODES: Record<string, string> = {
+  訪問: "visit",
+  電話: "call",
+  メール: "email",
+  Web会議: "online",
+};
+
 function toActivityTypeName(activityType: string): string {
   return ACTIVITY_TYPE_LABELS[activityType] ?? activityType;
+}
+
+export function toActivityTypeCode(activityTypeName: string): string {
+  return ACTIVITY_TYPE_CODES[activityTypeName] ?? "visit";
 }
 
 type ApiTarget = {
@@ -217,6 +228,7 @@ export async function postActivityResult(
   repId: number,
   plan: ActivityPlan,
   status: Exclude<DealResultStatus, "pending">,
+  activityTypeName: string,
 ): Promise<void> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/results`, {
@@ -228,6 +240,7 @@ export async function postActivityResult(
       plan_id: plan.plan_id,
       customer_id: plan.customer_id,
       deal_id: plan.deal_id,
+      activity_type: toActivityTypeCode(activityTypeName),
     }),
   });
   if (!res.ok) throw new Error(`結果の登録に失敗しました (HTTP ${res.status})`);

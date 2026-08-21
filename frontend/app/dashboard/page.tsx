@@ -90,7 +90,7 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleResultChange(planId: number, status: DealResultStatus) {
+  async function handleResultChange(planId: number, status: DealResultStatus, activityTypeName: string) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target) return;
 
@@ -104,7 +104,9 @@ export default function DashboardPage() {
     }
 
     const updatedPlans = plans.map((plan) =>
-      plan.plan_id === planId ? { ...plan, result_status: status } : plan,
+      plan.plan_id === planId
+        ? { ...plan, result_status: status, activity_type_name: activityTypeName }
+        : plan,
     );
     setPlans(updatedPlans);
 
@@ -115,7 +117,12 @@ export default function DashboardPage() {
     }
 
     try {
-      await postActivityResult(REP_ID, changedPlan, status as Exclude<DealResultStatus, "pending">);
+      await postActivityResult(
+        REP_ID,
+        changedPlan,
+        status as Exclude<DealResultStatus, "pending">,
+        activityTypeName,
+      );
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
       setPlans(plans); // ロールバック

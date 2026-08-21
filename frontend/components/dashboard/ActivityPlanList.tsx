@@ -6,7 +6,7 @@ import type { ActivityPlan, DealResultStatus } from "@/types";
 type ActivityPlanListProps = {
   plans: ActivityPlan[];
   dailyTasks: ActivityPlan[];
-  onResultChange: (planId: number, status: DealResultStatus) => void;
+  onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
 };
 
@@ -17,6 +17,10 @@ const RESULT_OPTIONS: { value: DealResultStatus; label: string }[] = [
   { value: "lost", label: "失注" },
   { value: "postponed", label: "延期" },
 ];
+
+// バックエンドの計画生成は今のところ「訪問」しか作らないため、
+// 記録時に実際どう対応したかをここで選べるようにしている
+const CONTACT_TYPE_OPTIONS = ["訪問", "電話", "メール", "Web会議"];
 
 const ACTIVITY_TYPE_CLASS: Record<string, string> = {
   訪問: "activity-plan-list__type--visit",
@@ -95,6 +99,7 @@ export function ActivityPlanList({
   onRequestAlternative,
 }: ActivityPlanListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
       (min, plan) => (plan.plan_date < min ? plan.plan_date : min),
@@ -118,6 +123,10 @@ export function ActivityPlanList({
     }
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
+
+  function getSelectedContactType(plan: ActivityPlan): string {
+    return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
+  }
 
   function handleShift(direction: -1 | 1) {
     const date = parseISODate(selectedDate);
@@ -196,12 +205,32 @@ export function ActivityPlanList({
                 <div className="activity-plan-list__result-buttons">
                   {plan.result_status === "pending" ? (
                     <>
+                      <label className="activity-plan-list__contact-type">
+                        実際の対応:
+                        <select
+                          value={getSelectedContactType(plan)}
+                          onChange={(event) =>
+                            setContactTypeSelections((prev) => ({
+                              ...prev,
+                              [plan.plan_id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {CONTACT_TYPE_OPTIONS.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       {RESULT_OPTIONS.map((option) => (
                         <button
                           key={option.value}
                           type="button"
                           className="activity-plan-list__result-button"
-                          onClick={() => onResultChange(plan.plan_id, option.value)}
+                          onClick={() =>
+                            onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))
+                          }
                         >
                           {option.label}
                         </button>
@@ -224,7 +253,9 @@ export function ActivityPlanList({
                       <button
                         type="button"
                         className="activity-plan-list__undo-button"
-                        onClick={() => onResultChange(plan.plan_id, plan.result_status)}
+                        onClick={() =>
+                          onResultChange(plan.plan_id, plan.result_status, getSelectedContactType(plan))
+                        }
                       >
                         取り消す
                       </button>

@@ -486,8 +486,29 @@ a {
 .activity-plan-list__result-buttons {
   flex-basis: 100%;
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 0.4rem;
   padding-left: 3.5rem;
+}
+
+.activity-plan-list__contact-type {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.activity-plan-list__contact-type select {
+  font-size: 0.8rem;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.2rem 0.4rem;
+  background: var(--card);
+  color: var(--ink);
 }
 
 .activity-plan-list__result-button {
