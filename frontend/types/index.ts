@@ -59,6 +59,7 @@ export type Product = {
 export type Deal = {
   deal_id: number;
   customer_id: number;
+  customer_name: string;
   rep_id: number;
   deal_phase_id: number;
   deal_phase_name: string;

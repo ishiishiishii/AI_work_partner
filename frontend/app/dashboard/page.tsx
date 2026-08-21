@@ -8,6 +8,7 @@ import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
   fetchActivityPlans,
+  fetchDeals,
   fetchRepAffinity,
   fetchSalesTarget,
   generateActivityPlans,
@@ -17,9 +18,9 @@ import {
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockAlternativeCandidates, mockDailyTasks } from "@/lib/mockData";
+import { mockDailyTasks } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
-import type { ActivityPlan, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
+import type { ActivityPlan, Deal, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
 
 const TARGET_MONTH = "2026-08";
 
@@ -30,8 +31,10 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
+  const [altNotice, setAltNotice] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
   useEffect(() => {
@@ -56,7 +59,10 @@ export default function DashboardPage() {
 
         // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(repId);
-        const fetchedAffinities = await fetchRepAffinity(repId);
+        const [fetchedAffinities, fetchedDeals] = await Promise.all([
+          fetchRepAffinity(repId),
+          fetchDeals(repId),
+        ]);
         if (cancelled) return;
 
         setTarget(
@@ -69,6 +75,7 @@ export default function DashboardPage() {
         );
         setPlans(resolvedPlans);
         setAffinities(fetchedAffinities);
+        setDeals(fetchedDeals);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -164,11 +171,35 @@ export default function DashboardPage() {
   function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target) return;
+    setAltNotice(null);
 
-    const candidate = mockAlternativeCandidates.find(
-      (item) => !plans.some((plan) => plan.plan_id === item.plan_id),
-    );
-    if (!candidate) return;
+    // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
+    const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
+    const candidateDeal = [...deals]
+      .filter((deal) => deal.deal_result_status_id === 1 && !usedDealIds.has(deal.deal_id))
+      .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
+    if (!candidateDeal) {
+      setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
+      return;
+    }
+
+    const candidate: ActivityPlan = {
+      plan_id: 900000 + candidateDeal.deal_id,
+      rep_id: candidateDeal.rep_id,
+      plan_date: changedPlan.plan_date,
+      start_time: null,
+      customer_id: candidateDeal.customer_id,
+      customer_name: candidateDeal.customer_name,
+      deal_id: candidateDeal.deal_id,
+      product_name: candidateDeal.product_name,
+      activity_type_name: "訪問",
+      priority: changedPlan.priority,
+      expected_amount: candidateDeal.estimated_amount,
+      expected_probability: candidateDeal.win_probability,
+      is_ai_generated: true,
+      reasoning_text: `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`,
+      result_status: "pending",
+    };
 
     const before = calcAchievementRate(plans, target.target_amount);
     const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
@@ -217,6 +248,7 @@ export default function DashboardPage() {
         onSave={handleTargetSave}
       />
       {replan && <ReplanBanner info={replan} />}
+      {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
       <div className="regenerate-bar">
         <button
           type="button"
