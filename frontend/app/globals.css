@@ -1306,6 +1306,7 @@ a {
   border-radius: 12px;
   font-size: 0.9rem;
   line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .ai-chat__message--ai {
@@ -1339,4 +1340,8 @@ a {
   padding: 0.5rem 0.75rem;
   background: var(--card);
   color: var(--ink);
+}
+
+.ai-chat__form input:disabled {
+  opacity: 0.65;
 }
