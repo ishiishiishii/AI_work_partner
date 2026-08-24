@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     )
     api_cors_origins: str = "http://localhost:3000"
 
+    # Qwen / vLLM (OpenAI-compatible API)
+    ai_base_url: str = "http://host.docker.internal:8080/v1"
+    ai_api_key: str = "local"
+    ai_model: str = "Qwen3.8-27B-NVFP4"
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]

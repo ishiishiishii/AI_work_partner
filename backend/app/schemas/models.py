@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -200,3 +201,19 @@ class ForecastOut(BaseModel):
     expected_amount: Decimal
     attainment_ratio: float
     open_plan_count: int
+
+class AiChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4_000)
+
+
+class AiChatRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2_000)
+    history: list[AiChatMessage] = Field(default_factory=list, max_length=20)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiChatResponse(BaseModel):
+    answer: str
+    model: str
+
