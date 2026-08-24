@@ -90,8 +90,8 @@ export type ActivityPlan = {
   plan_id: number;
   rep_id: number;
   plan_date: string; // "YYYY-MM-DD"
-  start_time: string | null; // "HH:MM"（日表示のスケジュール用。バックエンドにはまだ無い）
-  end_time: string | null; // "HH:MM"（バックエンドにはまだ無い）
+  start_time: string | null; // "HH:MM"（日表示のスケジュール用）
+  end_time: string | null; // "HH:MM"
   category: ActivityPlanCategory;
   customer_id: number | null;
   customer_name: string;

@@ -290,9 +290,9 @@ def list_plans(
     where = " and ".join(clauses)
     rows = conn.execute(
         f"""
-        select plan_id, rep_id, plan_date, customer_id, deal_id,
-               activity_type, priority, expected_amount, expected_probability,
-               plan_status, is_ai_generated, rationale, product_name
+        select plan_id, rep_id, plan_date, start_time, end_time, category, title,
+               customer_id, deal_id, activity_type, priority, expected_amount,
+               expected_probability, plan_status, is_ai_generated, rationale, product_name
         from ai.activity_plan
         where {where}
         order by plan_date, priority
@@ -300,6 +300,94 @@ def list_plans(
         params,
     ).fetchall()
     return list(rows)
+
+
+def create_plan(
+    conn: Connection,
+    *,
+    rep_id: int,
+    plan_date: date,
+    category: str,
+    activity_type: str,
+    start_time: str | None,
+    end_time: str | None,
+    title: str | None,
+    customer_id: int | None,
+    deal_id: int | None,
+    priority: int,
+) -> dict:
+    row = conn.execute(
+        """
+        insert into activity_plan (
+          rep_id, plan_date, category, activity_type, start_time, end_time,
+          title, customer_id, deal_id, priority, plan_status, is_ai_generated
+        )
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', false)
+        returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
+                  customer_id, deal_id, activity_type, priority, expected_amount,
+                  expected_probability, plan_status, is_ai_generated, rationale,
+                  null::int as product_id, null::text as product_name
+        """,
+        (
+            rep_id,
+            plan_date,
+            category,
+            activity_type,
+            start_time,
+            end_time,
+            title,
+            customer_id,
+            deal_id,
+            priority,
+        ),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def update_plan(
+    conn: Connection,
+    *,
+    plan_id: int,
+    rep_id: int,
+    start_time: str | None,
+    end_time: str | None,
+    category: str,
+    activity_type: str,
+    title: str | None,
+    product_name_override: str | None,
+) -> dict:
+    row = conn.execute(
+        """
+        update activity_plan ap
+        set start_time = %s,
+            end_time = %s,
+            category = %s,
+            activity_type = %s,
+            title = %s,
+            product_name_override = %s
+        where ap.plan_id = %s and ap.rep_id = %s
+        returning ap.plan_id, ap.rep_id, ap.plan_date, ap.start_time, ap.end_time,
+                  ap.category, ap.title, ap.customer_id, ap.deal_id, ap.activity_type,
+                  ap.priority, ap.expected_amount, ap.expected_probability, ap.plan_status,
+                  ap.is_ai_generated, ap.rationale,
+                  (select d.product_id from deal d where d.deal_id = ap.deal_id) as product_id,
+                  coalesce(
+                    ap.product_name_override,
+                    (
+                      select p.product_name
+                      from deal d
+                      join product p on p.product_id = d.product_id
+                      where d.deal_id = ap.deal_id
+                    )
+                  ) as product_name
+        """,
+        (start_time, end_time, category, activity_type, title, product_name_override, plan_id, rep_id),
+    ).fetchone()
+    if not row:
+        raise ValueError("plan not found")
+    conn.commit()
+    return dict(row)
 
 
 def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
@@ -347,6 +435,7 @@ def generate_plans(
         """
         delete from activity_plan
         where rep_id = %s
+          and category = 'visit'
           and is_ai_generated = true
           and plan_status = 'scheduled'
           and plan_date >= %s
