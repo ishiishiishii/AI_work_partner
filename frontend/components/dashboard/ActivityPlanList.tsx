@@ -118,7 +118,7 @@ function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: strin
   if (viewMode === "day") return `${formatDate(range.start)}の活動計画`;
   if (viewMode === "week") return `${formatDate(range.start)}〜${formatDate(range.end)}の活動計画`;
   const [year, month] = range.start.split("-");
-  return `${year}年${Number(month)}月の活動計画`;
+  return `${year}年${Number(month)}月に狙うべき企業`;
 }
 
 function parseTimeToMinutes(time: string): number {
@@ -132,6 +132,35 @@ function formatDurationMinutes(minutes: number): string {
   if (hours === 0) return `${mins}分`;
   if (mins === 0) return `${hours}時間`;
   return `${hours}時間${mins}分`;
+}
+
+// 「月」表示は個々の予定の日時ではなく、今月どの企業を狙うべきかを示す一覧にするため、
+// 企業(customer_id)ごとにグルーピングし、グループ内は見込み金額×成約確率の高い順に並べる
+type CompanyGroup = { customerName: string; items: ActivityPlan[]; totalValue: number };
+
+function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
+  const groups = new Map<string, { customerName: string; items: ActivityPlan[] }>();
+  for (const item of items) {
+    const key = item.customer_id !== null ? String(item.customer_id) : item.customer_name;
+    const group = groups.get(key);
+    if (group) {
+      group.items.push(item);
+    } else {
+      groups.set(key, { customerName: item.customer_name, items: [item] });
+    }
+  }
+  return Array.from(groups.values())
+    .map(({ customerName, items: list }) => {
+      const sorted = [...list].sort(
+        (a, b) => b.expected_amount * b.expected_probability - a.expected_amount * a.expected_probability,
+      );
+      const totalValue = sorted.reduce(
+        (sum, plan) => sum + (plan.expected_amount * plan.expected_probability) / 100,
+        0,
+      );
+      return { customerName, items: sorted, totalValue };
+    })
+    .sort((a, b) => b.totalValue - a.totalValue);
 }
 
 // 開始・終了時間が両方わかる予定同士だけを対象に、時間の重複を検出する
@@ -199,9 +228,18 @@ export function ActivityPlanList({
   const filteredPlans = plans.filter(
     (plan) => plan.plan_date >= range.start && plan.plan_date <= range.end,
   );
-  // 資料作成・新規開拓などの日次タスクは「日」表示でのみ、その日の分だけ合わせて表示する
+  // 資料作成・新規開拓などの顧客に紐づかない日次タスクは「日」表示でのみ、その日の分だけ
+  // 合わせて表示する。商談(deal_id)に紐づくタスク(見積書作成・提案資料準備など)は
+  // その企業への提案・契約に向けた準備という位置づけなので、週表示でも期間内の分を表示する。
+  // 「月」は日時を持たない商材別の一覧にするため、タスクは対象外
   const filteredTasks =
-    viewMode === "day" ? dailyTasks.filter((task) => task.plan_date === selectedDate) : [];
+    viewMode === "day"
+      ? dailyTasks.filter((task) => task.plan_date === selectedDate)
+      : viewMode === "week"
+        ? dailyTasks.filter(
+            (task) => task.deal_id !== null && task.plan_date >= range.start && task.plan_date <= range.end,
+          )
+        : [];
   const filtered = [...filteredPlans, ...filteredTasks].sort((a, b) => {
     if (viewMode === "day") {
       const timeA = a.start_time ?? "99:99";
@@ -210,6 +248,7 @@ export function ActivityPlanList({
     }
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
+  const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans) : [];
 
   const detailPlan =
     newPlanDraft && detailPlanId === newPlanDraft.plan_id
@@ -275,6 +314,73 @@ export function ActivityPlanList({
         >
           取り消す
         </button>
+      </>
+    );
+  }
+
+  // 一覧行・詳細モーダル・「月」表示(企業グループ)から共通で使う予定1件分の中身。
+  // dateLabel は「日」の時刻・その他の日付表示用。月表示では日時を出さないため null を渡す。
+  // hideCustomerName は「月」表示用: 企業名は既にグループ見出しに出ているため、行側は商品名を主表示にする
+  function renderPlanRow(plan: ActivityPlan, dateLabel: string | null, isOverlapping = false, hideCustomerName = false) {
+    return (
+      <>
+        <div
+          className="activity-plan-list__clickable"
+          onDoubleClick={() => openDetail(plan)}
+          title="ダブルクリックで詳細を表示"
+        >
+          {dateLabel !== null && <div className="activity-plan-list__date">{dateLabel}</div>}
+          <div className="activity-plan-list__main">
+            {hideCustomerName && plan.product_name ? (
+              <div className="activity-plan-list__customer">
+                {plan.product_name}
+                {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
+              </div>
+            ) : (
+              <>
+                <div className="activity-plan-list__customer">
+                  {plan.customer_name}
+                  {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
+                </div>
+                {plan.category === "visit" && plan.product_name && (
+                  <div className="activity-plan-list__product">商品: {plan.product_name}</div>
+                )}
+              </>
+            )}
+            <div className="activity-plan-list__meta">
+              <span
+                className={`activity-plan-list__type ${
+                  ACTIVITY_TYPE_CLASS[plan.activity_type_name] ?? "activity-plan-list__type--default"
+                }`}
+              >
+                {plan.activity_type_name}
+              </span>
+              {plan.category === "visit" && (
+                <span>
+                  優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
+                </span>
+              )}
+              {isOverlapping && <span className="activity-plan-list__warning">⚠ 時間が重複しています</span>}
+            </div>
+          </div>
+          {plan.expected_amount > 0 && (
+            <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
+          )}
+        </div>
+        {plan.category === "visit" && (
+          <div className="activity-plan-list__result-buttons">
+            {renderResultControls(plan)}
+            {plan.result_status === "pending" && (
+              <button
+                type="button"
+                className="activity-plan-list__alt-button"
+                onClick={() => onRequestAlternative(plan.plan_id)}
+              >
+                対応が難しい
+              </button>
+            )}
+          </div>
+        )}
       </>
     );
   }
@@ -431,80 +537,54 @@ export function ActivityPlanList({
         </button>
       </div>
 
-      {filtered.length === 0 ? (
+      {viewMode === "month" ? (
+        monthGroups.length === 0 ? (
+          <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
+        ) : (
+          <div className="activity-plan-list__groups">
+            {monthGroups.map((group) => (
+              <div key={group.customerName} className="activity-plan-list__group">
+                <h3 className="activity-plan-list__group-title">
+                  {group.customerName}
+                  <span className="activity-plan-list__group-total">
+                    見込み合計 {formatYen(Math.round(group.totalValue))}
+                  </span>
+                </h3>
+                <ul className="activity-plan-list__items">
+                  {group.items.map((plan) => (
+                    <li key={plan.plan_id} className="activity-plan-list__item">
+                      {renderPlanRow(plan, null, false, true)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )
+      ) : filtered.length === 0 ? (
         <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
       ) : (
         <ul className="activity-plan-list__items">
           {filtered.map((plan) => {
             const gapMinutes = gapBeforePlanId.get(plan.plan_id);
             const isOverlapping = overlappingPlanIds.has(plan.plan_id);
+            const dateLabel =
+              viewMode === "day" && plan.start_time ? plan.start_time : formatDate(plan.plan_date);
             return (
-            <Fragment key={plan.plan_id}>
-              {gapMinutes !== undefined && (
-                <li className="activity-plan-list__gap" aria-hidden="true">
-                  空き時間 {formatDurationMinutes(gapMinutes)}
-                </li>
-              )}
-              <li
-                className={`activity-plan-list__item${
-                  isOverlapping ? " activity-plan-list__item--overlap" : ""
-                }`}
-              >
-              <div
-                className="activity-plan-list__clickable"
-                onDoubleClick={() => openDetail(plan)}
-                title="ダブルクリックで詳細を表示"
-              >
-                <div className="activity-plan-list__date">
-                  {viewMode === "day" && plan.start_time ? plan.start_time : formatDate(plan.plan_date)}
-                </div>
-                <div className="activity-plan-list__main">
-                  <div className="activity-plan-list__customer">
-                    {plan.customer_name}
-                    {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
-                  </div>
-                  {plan.category === "visit" && plan.product_name && (
-                    <div className="activity-plan-list__product">商品: {plan.product_name}</div>
-                  )}
-                  <div className="activity-plan-list__meta">
-                    <span
-                      className={`activity-plan-list__type ${
-                        ACTIVITY_TYPE_CLASS[plan.activity_type_name] ??
-                        "activity-plan-list__type--default"
-                      }`}
-                    >
-                      {plan.activity_type_name}
-                    </span>
-                    {plan.category === "visit" && (
-                      <span>
-                        優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
-                      </span>
-                    )}
-                    {isOverlapping && (
-                      <span className="activity-plan-list__warning">⚠ 時間が重複しています</span>
-                    )}
-                  </div>
-                </div>
-                {plan.expected_amount > 0 && (
-                  <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
+              <Fragment key={plan.plan_id}>
+                {gapMinutes !== undefined && (
+                  <li className="activity-plan-list__gap" aria-hidden="true">
+                    空き時間 {formatDurationMinutes(gapMinutes)}
+                  </li>
                 )}
-              </div>
-              {plan.category === "visit" && (
-                <div className="activity-plan-list__result-buttons">
-                  {renderResultControls(plan)}
-                  {plan.result_status === "pending" && (
-                    <button
-                      type="button"
-                      className="activity-plan-list__alt-button"
-                      onClick={() => onRequestAlternative(plan.plan_id)}
-                    >
-                      対応が難しい
-                    </button>
-                  )}
-                </div>
-              )}
-              </li>
-            </Fragment>
+                <li
+                  className={`activity-plan-list__item${
+                    isOverlapping ? " activity-plan-list__item--overlap" : ""
+                  }`}
+                >
+                  {renderPlanRow(plan, dateLabel, isOverlapping)}
+                </li>
+              </Fragment>
             );
           })}
         </ul>

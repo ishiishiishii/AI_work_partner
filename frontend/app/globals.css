@@ -387,6 +387,28 @@ a {
   margin-top: 0.1rem;
 }
 
+.activity-plan-list__groups {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.activity-plan-list__group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.25rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.95rem;
+}
+
+.activity-plan-list__group-total {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
 .activity-plan-list__meta {
   display: flex;
   align-items: center;
