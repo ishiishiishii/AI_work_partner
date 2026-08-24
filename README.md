@@ -83,15 +83,11 @@ docker compose up --build
 
 ### 3. ログイン用デモアカウント
 
-フロントの `/login` は Supabase Auth を使っています。`sales_rep` テーブルとは別物ですが、
-`api` コンテナ起動時に `scripts.seed_demo_auth_users` が自動実行されるため、
-`docker compose up` するだけで担当者ごとのデモアカウント（EMP001〜EMP018、パスワードは共通で `demo1234`）が作成されます。手動での実行は不要です。
-
-既にアカウントがある場合はスキップされるだけなので、コンテナを再起動しても安全です。手動で再実行したい場合は次のコマンドでも実行できます。
-
-```powershell
-docker compose exec api python3 -m scripts.seed_demo_auth_users
-```
+フロントの `/login` は Supabase Auth を使っています。`sales_rep` テーブルとは別物のデータですが、
+`supabase/seed.sql` が担当者ごとのデモアカウント（EMP001〜EMP018、パスワードは共通で `demo1234`）を
+`auth.users` に直接作成するため、`supabase start` / `supabase db reset` するだけで用意されます。
+（`docker compose up` すら不要です。DBがリセットされるたびに再作成されるので、`api` コンテナの
+再起動有無に関わらず、常にログインできる状態になります。）
 
 
 ## 日常の起動 / 停止
