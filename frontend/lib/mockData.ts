@@ -92,6 +92,8 @@ export const mockDailyTasks: ActivityPlan[] = [
     is_ai_generated: true,
     reasoning_text: "午後の訪問前に、見積・提案内容を最終確認しておくことを提案しました。",
     result_status: "pending",
+    memo: null,
+    progress_percent: 0,
   },
   {
     plan_id: 900102,
@@ -111,6 +113,8 @@ export const mockDailyTasks: ActivityPlan[] = [
     is_ai_generated: true,
     reasoning_text: "午前中の空き時間を使い、新規開拓の候補を増やすことを提案しました。",
     result_status: "pending",
+    memo: null,
+    progress_percent: 0,
   },
   {
     plan_id: 900103,
@@ -130,6 +134,8 @@ export const mockDailyTasks: ActivityPlan[] = [
     is_ai_generated: true,
     reasoning_text: "訪問後の移動時間を使い、他の見込み客にも短時間で接点を作ることを提案しました。",
     result_status: "pending",
+    memo: null,
+    progress_percent: 0,
   },
   {
     plan_id: 900104,
@@ -149,5 +155,46 @@ export const mockDailyTasks: ActivityPlan[] = [
     is_ai_generated: true,
     reasoning_text: "1日の活動を振り返り、報告書としてまとめる時間を確保しました。",
     result_status: "pending",
+    memo: null,
+    progress_percent: 0,
+  },
+];
+
+// 事務作業の「AI作り直し」で差し替え候補として使う仮の提案プール。
+// 商談のような実データが無いため、ここでは固定の候補から未使用のものを提示する。
+export const mockTaskSuggestions: {
+  title: string;
+  activityTypeName: string;
+  reasoningText: string;
+}[] = [
+  {
+    title: "名刺交換した見込み客のリストアップ",
+    activityTypeName: "新規開拓",
+    reasoningText: "直近の展示会・商談で交換した名刺をリスト化し、新規開拓の候補を増やすことを提案しました。",
+  },
+  {
+    title: "見積書テンプレートの見直し",
+    activityTypeName: "資料作成",
+    reasoningText: "商品カタログの更新に合わせて、見積書テンプレートを最新化しておくことを提案しました。",
+  },
+  {
+    title: "休眠顧客への様子伺いメール送付",
+    activityTypeName: "メール",
+    reasoningText: "しばらく接点の無い既存顧客に、様子伺いのメールで関係を維持することを提案しました。",
+  },
+  {
+    title: "紹介案件の候補リスト作成",
+    activityTypeName: "新規開拓",
+    reasoningText: "既存顧客からの紹介が見込めそうな案件を洗い出し、優先順位をつけることを提案しました。",
+  },
+  {
+    title: "商談メモの整理・共有",
+    activityTypeName: "資料作成",
+    reasoningText: "直近の商談内容をメモから整理し、チームで共有できる状態にしておくことを提案しました。",
+  },
+  {
+    title: "オンライン商談ツールの動作確認",
+    activityTypeName: "Web会議",
+    reasoningText: "来週予定しているオンライン商談に備え、事前に接続・画面共有の動作確認をしておくことを提案しました。",
   },
 ];

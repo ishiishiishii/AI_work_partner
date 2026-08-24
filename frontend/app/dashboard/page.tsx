@@ -19,7 +19,7 @@ import {
   saveSalesTarget,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockDailyTasks } from "@/lib/mockData";
+import { mockDailyTasks, mockTaskSuggestions } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type { ActivityPlan, Deal, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
 
@@ -202,10 +202,81 @@ export default function DashboardPage() {
     );
   }
 
+  // 手動で追加した予定もローカル表示のみ(バックエンドへの保存はまだ無い)
+  function handleAddPlan(newPlan: ActivityPlan) {
+    setPlans((prev) => [...prev, newPlan]);
+  }
+
+  // 「確定する」はAI提案フラグだけを外す。提案理由(reasoning_text)はそのまま残す
+  function handleConfirmPlan(planId: number) {
+    setPlans((prev) =>
+      prev.map((plan) => (plan.plan_id === planId ? { ...plan, is_ai_generated: false } : plan)),
+    );
+    setDailyTasks((prev) =>
+      prev.map((task) => (task.plan_id === planId ? { ...task, is_ai_generated: false } : task)),
+    );
+  }
+
+  // 事務作業の進捗もローカル表示のみ(バックエンドへの保存はまだ無い)
+  function handleUpdateProgress(planId: number, percent: number) {
+    setPlans((prev) =>
+      prev.map((plan) => (plan.plan_id === planId ? { ...plan, progress_percent: percent } : plan)),
+    );
+    setDailyTasks((prev) =>
+      prev.map((task) => (task.plan_id === planId ? { ...task, progress_percent: percent } : task)),
+    );
+  }
+
   function handleRequestAlternative(planId: number) {
-    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    const changedPlan = plans.find((plan) => plan.plan_id === planId) ?? dailyTasks.find((task) => task.plan_id === planId);
     if (!changedPlan || !target) return;
+    const foundInPlans = plans.some((plan) => plan.plan_id === planId);
     setAltNotice(null);
+
+    if (changedPlan.category === "task") {
+      // 商談のような実データが無い事務作業は、固定の候補プールから未使用のものを提示する
+      const usedTitles = new Set([...plans, ...dailyTasks].map((item) => item.customer_name));
+      const candidateTask = mockTaskSuggestions.find((task) => !usedTitles.has(task.title));
+      if (!candidateTask) {
+        setAltNotice("現在、差し替えられる事務作業の候補がありません。");
+        return;
+      }
+
+      const candidate: ActivityPlan = {
+        plan_id: -Date.now(),
+        rep_id: changedPlan.rep_id,
+        plan_date: changedPlan.plan_date,
+        // 時間が(手動編集などで)設定済みならそのまま引き継ぐ
+        start_time: changedPlan.start_time,
+        end_time: changedPlan.end_time,
+        category: "task",
+        customer_id: null,
+        customer_name: candidateTask.title,
+        deal_id: null,
+        product_name: null,
+        activity_type_name: candidateTask.activityTypeName,
+        priority: changedPlan.priority,
+        expected_amount: 0,
+        expected_probability: 0,
+        is_ai_generated: true,
+        reasoning_text: candidateTask.reasoningText,
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+      };
+
+      if (foundInPlans) {
+        setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(candidate));
+      } else {
+        setDailyTasks((prev) => prev.filter((task) => task.plan_id !== planId).concat(candidate));
+      }
+      setReplan({
+        before_achievement_rate: calcAchievementRate(plans, target.target_amount),
+        after_achievement_rate: calcAchievementRate(plans, target.target_amount),
+        reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが「${candidate.customer_name}」に差し替えました`,
+      });
+      return;
+    }
 
     // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
     const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
@@ -221,8 +292,9 @@ export default function DashboardPage() {
       plan_id: 900000 + candidateDeal.deal_id,
       rep_id: candidateDeal.rep_id,
       plan_date: changedPlan.plan_date,
-      start_time: null,
-      end_time: null,
+      // 時間が(手動編集などで)設定済みならそのまま引き継ぐ
+      start_time: changedPlan.start_time,
+      end_time: changedPlan.end_time,
       category: "visit",
       customer_id: candidateDeal.customer_id,
       customer_name: candidateDeal.customer_name,
@@ -235,6 +307,8 @@ export default function DashboardPage() {
       is_ai_generated: true,
       reasoning_text: `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`,
       result_status: "pending",
+      memo: null,
+      progress_percent: 0,
     };
 
     const before = calcAchievementRate(plans, target.target_amount);
@@ -296,11 +370,15 @@ export default function DashboardPage() {
         </button>
       </div>
       <ActivityPlanList
+        repId={selectedRep.rep_id}
         plans={plans}
         dailyTasks={dailyTasks}
         onResultChange={handleResultChange}
         onRequestAlternative={handleRequestAlternative}
         onEditPlan={handleEditPlan}
+        onAddPlan={handleAddPlan}
+        onConfirmPlan={handleConfirmPlan}
+        onUpdateProgress={handleUpdateProgress}
       />
       <AiReasoningPanel plans={plans} affinities={affinities} />
       <AiChatPanel

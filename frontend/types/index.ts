@@ -99,6 +99,8 @@ export type ActivityPlan = {
   is_ai_generated: boolean;
   reasoning_text: string;
   result_status: DealResultStatus;
+  memo: string | null; // 企業訪問での自由メモ(バックエンドにはまだ無い)
+  progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う(バックエンドにはまだ無い)
 };
 
 export type ReplanInfo = {

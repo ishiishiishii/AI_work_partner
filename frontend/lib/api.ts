@@ -187,6 +187,8 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     is_ai_generated: row.is_ai_generated,
     reasoning_text: row.rationale ?? "",
     result_status: "pending",
+    memo: null,
+    progress_percent: 0,
   };
 }
 
