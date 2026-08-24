@@ -63,7 +63,7 @@ def ask(
                 "model": settings.ai_model,
                 "messages": messages,
                 "temperature": 0.4,
-                "max_tokens": 800,
+                "max_tokens": 10000,
                 # 回答本文だけを返し、モデルの思考過程は画面に表示しない。
                 "chat_template_kwargs": {"enable_thinking": False},
             },
