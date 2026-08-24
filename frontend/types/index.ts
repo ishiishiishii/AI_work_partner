@@ -69,9 +69,11 @@ export type Deal = {
   deal_phase_name: string;
   deal_result_status: string;
   deal_result_status_name: string;
+  product_id: number; // 表示は product_name を使うが、編集フォームの送信にはIDが要る
   product_name: string;
   subcategory_name: string;
   category_name: string;
+  deal_phase_id: number; // 同上(編集フォーム用)
   estimated_amount: number;
   win_probability: number;
   expected_visit_count: number;
@@ -110,11 +112,4 @@ export type ReplanInfo = {
   before_achievement_rate: number;
   after_achievement_rate: number;
   reason: string;
-};
-
-export type PlanVariant = {
-  variant_id: string;
-  label: string;
-  description: string;
-  plans: ActivityPlan[];
 };

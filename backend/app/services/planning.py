@@ -23,6 +23,11 @@ def _format_target(row: dict) -> dict:
     return row
 
 
+def list_reps(conn: Connection) -> list[dict]:
+    rows = conn.execute("select rep_id, rep_name from sales_rep order by rep_id").fetchall()
+    return list(rows)
+
+
 def list_targets(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(
@@ -164,14 +169,19 @@ def list_stale_customers(
     return list(rows)
 
 
+_AI_DEAL_COLUMNS = """
+    deal_id, customer_id, customer_name, rep_id, rep_name,
+    deal_phase_name, deal_result_status, product_name, subcategory_name,
+    category_name, estimated_amount, win_probability, expected_visit_count,
+    expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id
+"""
+
+
 def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(
-            """
-            select deal_id, customer_id, customer_name, rep_id, rep_name,
-                   deal_phase_name, deal_result_status, product_name, subcategory_name,
-                   category_name, estimated_amount, win_probability, expected_visit_count,
-                   expected_effort_hours, deal_start_date, contract_date
+            f"""
+            select {_AI_DEAL_COLUMNS}
             from ai.deal
             where rep_id = %s
             order by deal_start_date desc, deal_id desc
@@ -180,11 +190,8 @@ def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
         ).fetchall()
     else:
         rows = conn.execute(
-            """
-            select deal_id, customer_id, customer_name, rep_id, rep_name,
-                   deal_phase_name, deal_result_status, product_name, subcategory_name,
-                   category_name, estimated_amount, win_probability, expected_visit_count,
-                   expected_effort_hours, deal_start_date, contract_date
+            f"""
+            select {_AI_DEAL_COLUMNS}
             from ai.deal
             order by deal_start_date desc, deal_id desc
             """
@@ -239,18 +246,66 @@ def create_deal(
     # Re-read through the AI view so the response carries resolved names
     # (customer/rep/phase/status/product) rather than the raw ids just inserted.
     row = conn.execute(
-        """
-        select deal_id, customer_id, customer_name, rep_id, rep_name,
-               deal_phase_name, deal_result_status, product_name, subcategory_name,
-               category_name, estimated_amount, win_probability, expected_visit_count,
-               expected_effort_hours, deal_start_date, contract_date
-        from ai.deal
-        where deal_id = %s
-        """,
+        f"select {_AI_DEAL_COLUMNS} from ai.deal where deal_id = %s",
         (new_deal_id,),
     ).fetchone()
     conn.commit()
     return dict(row)
+
+
+def update_deal(
+    conn: Connection,
+    *,
+    deal_id: int,
+    rep_id: int,
+    product_id: int,
+    deal_phase_id: int,
+    estimated_amount: Decimal,
+    win_probability: int,
+    expected_visit_count: int,
+    expected_effort_hours: Decimal,
+) -> dict:
+    updated = conn.execute(
+        """
+        update deal
+        set product_id = %s,
+            deal_phase_id = %s,
+            estimated_amount = %s,
+            win_probability = %s,
+            expected_visit_count = %s,
+            expected_effort_hours = %s
+        where deal_id = %s and rep_id = %s
+        returning deal_id
+        """,
+        (
+            product_id,
+            deal_phase_id,
+            estimated_amount,
+            win_probability,
+            expected_visit_count,
+            expected_effort_hours,
+            deal_id,
+            rep_id,
+        ),
+    ).fetchone()
+    if not updated:
+        raise ValueError("deal not found")
+    row = conn.execute(
+        f"select {_AI_DEAL_COLUMNS} from ai.deal where deal_id = %s",
+        (deal_id,),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def delete_deal(conn: Connection, *, deal_id: int, rep_id: int) -> None:
+    deleted = conn.execute(
+        "delete from deal where deal_id = %s and rep_id = %s returning deal_id",
+        (deal_id, rep_id),
+    ).fetchone()
+    if not deleted:
+        raise ValueError("deal not found")
+    conn.commit()
 
 
 def search_products(conn: Connection, name: str | None = None) -> list[dict]:
@@ -279,7 +334,9 @@ def list_plans(
     from_date: date | None = None,
     to_date: date | None = None,
 ) -> list[dict]:
-    clauses = ["rep_id = %s"]
+    # cancelled plans (e.g. replaced via '対応が難しい') are intentionally excluded --
+    # they're kept in the table for history, but shouldn't reappear in the active list.
+    clauses = ["rep_id = %s", "plan_status != 'cancelled'"]
     params: list[object] = [rep_id]
     if from_date:
         clauses.append("plan_date >= %s")
@@ -315,14 +372,18 @@ def create_plan(
     customer_id: int | None,
     deal_id: int | None,
     priority: int,
+    expected_amount: Decimal,
+    expected_probability: int,
+    rationale: str | None,
 ) -> dict:
     row = conn.execute(
         """
         insert into activity_plan (
           rep_id, plan_date, category, activity_type, start_time, end_time,
-          title, customer_id, deal_id, priority, plan_status, is_ai_generated
+          title, customer_id, deal_id, priority, expected_amount, expected_probability,
+          plan_status, is_ai_generated, rationale
         )
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', false)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', false, %s)
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
@@ -339,8 +400,31 @@ def create_plan(
             customer_id,
             deal_id,
             priority,
+            expected_amount,
+            expected_probability,
+            rationale,
         ),
     ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
+def cancel_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
+    """Soft-cancel a plan (e.g. replaced via '対応が難しい') rather than hard-deleting it."""
+    row = conn.execute(
+        """
+        update activity_plan
+        set plan_status = 'cancelled'
+        where plan_id = %s and rep_id = %s
+        returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
+                  customer_id, deal_id, activity_type, priority, expected_amount,
+                  expected_probability, plan_status, is_ai_generated, rationale,
+                  null::int as product_id, null::text as product_name
+        """,
+        (plan_id, rep_id),
+    ).fetchone()
+    if not row:
+        raise ValueError("plan not found")
     conn.commit()
     return dict(row)
 

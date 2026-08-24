@@ -7,6 +7,8 @@ import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
+  cancelPlan,
+  createPlan,
   deleteActivityResult,
   fetchActivityPlans,
   fetchDeals,
@@ -228,9 +230,9 @@ export default function DashboardPage() {
     }
   }
 
-  function handleRequestAlternative(planId: number) {
+  async function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
-    if (!changedPlan || !target) return;
+    if (!changedPlan || !target || REP_ID === null) return;
     setAltNotice(null);
 
     // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
@@ -243,36 +245,58 @@ export default function DashboardPage() {
       return;
     }
 
-    const candidate: ActivityPlan = {
-      plan_id: 900000 + candidateDeal.deal_id,
-      rep_id: candidateDeal.rep_id,
-      plan_date: changedPlan.plan_date,
-      start_time: null,
-      end_time: null,
-      category: "visit",
-      customer_id: candidateDeal.customer_id,
-      customer_name: candidateDeal.customer_name,
-      deal_id: candidateDeal.deal_id,
-      product_name: candidateDeal.product_name,
-      activity_type_name: "訪問",
-      priority: changedPlan.priority,
-      expected_amount: candidateDeal.estimated_amount,
-      expected_probability: candidateDeal.win_probability,
-      is_ai_generated: true,
-      reasoning_text: `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`,
-      result_status: "pending",
-    };
+    const reasoningText = `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`;
 
-    const before = calcAchievementRate(plans, target.target_amount);
-    const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
-    const after = calcAchievementRate(nextPlans, target.target_amount);
+    try {
+      // 差し替え候補を本物の予定として登録し、元の予定は取り消す(どちらもバックエンドに反映)。
+      // 以前はローカル専用の仮 plan_id(900000+deal_id)を使っていたため、結果を記録しようと
+      // すると実在しない plan_id で外部キー違反になり得た。
+      const created = await createPlan(REP_ID, {
+        plan_date: changedPlan.plan_date,
+        category: "visit",
+        activity_type: "visit",
+        customer_id: candidateDeal.customer_id,
+        deal_id: candidateDeal.deal_id,
+        priority: changedPlan.priority,
+        expected_amount: candidateDeal.estimated_amount,
+        expected_probability: candidateDeal.win_probability,
+        rationale: reasoningText,
+      });
+      await cancelPlan(REP_ID, planId);
 
-    setPlans(nextPlans);
-    setReplan({
-      before_achievement_rate: before,
-      after_achievement_rate: after,
-      reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが${candidate.customer_name}への提案に差し替えました`,
-    });
+      const candidate: ActivityPlan = {
+        plan_id: created.plan_id,
+        rep_id: candidateDeal.rep_id,
+        plan_date: changedPlan.plan_date,
+        start_time: null,
+        end_time: null,
+        category: "visit",
+        customer_id: candidateDeal.customer_id,
+        customer_name: candidateDeal.customer_name,
+        deal_id: candidateDeal.deal_id,
+        product_name: candidateDeal.product_name,
+        activity_type_name: "訪問",
+        priority: changedPlan.priority,
+        expected_amount: candidateDeal.estimated_amount,
+        expected_probability: candidateDeal.win_probability,
+        is_ai_generated: true,
+        reasoning_text: reasoningText,
+        result_status: "pending",
+      };
+
+      const before = calcAchievementRate(plans, target.target_amount);
+      const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
+      const after = calcAchievementRate(nextPlans, target.target_amount);
+
+      setPlans(nextPlans);
+      setReplan({
+        before_achievement_rate: before,
+        after_achievement_rate: after,
+        reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが${candidate.customer_name}への提案に差し替えました`,
+      });
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "計画の差し替えに失敗しました");
+    }
   }
 
   if (!selectedRep || isLoading) {

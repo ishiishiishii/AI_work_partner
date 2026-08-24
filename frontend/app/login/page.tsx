@@ -51,7 +51,14 @@ export default function LoginPage() {
     setIsSubmitting(false);
 
     if (signInError) {
-      setError("社員IDまたはパスワードが正しくありません");
+      // ネットワーク/接続エラー(バックエンドやSupabaseが起動していない等)は
+      // AuthRetryableFetchError として返る。認証エラー(ID/パスワード不一致)とは
+      // 原因も対処法も違うため、メッセージを出し分ける。
+      setError(
+        signInError.name === "AuthRetryableFetchError"
+          ? "Supabaseに接続できません。ローカル環境が起動しているか確認してください。"
+          : "社員IDまたはパスワードが正しくありません",
+      );
       return;
     }
 
