@@ -1,9 +1,4 @@
-import {
-  DEAL_PATTERN_NAMES,
-  DEAL_PHASE_NAMES,
-  DEAL_RESULT_STATUS_NAMES,
-  INDUSTRY_NAMES,
-} from "@/lib/mockData";
+import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
   ActivityPlanCategory,
@@ -95,20 +90,22 @@ export async function saveSalesTarget(
 type ApiCustomer = {
   customer_id: number;
   customer_name: string;
-  industry_id: number;
-  company_size_id: number;
+  industry_name: string;
+  company_size_name: string;
   location: string;
   primary_rep_id: number | null;
+  primary_rep_name: string | null;
 };
 
 function mapCustomer(row: ApiCustomer): Customer {
   return {
     customer_id: row.customer_id,
     customer_name: row.customer_name,
-    industry_id: row.industry_id,
-    company_size_id: row.company_size_id,
+    industry_name: row.industry_name,
+    company_size_name: row.company_size_name,
     location: row.location,
     primary_rep_id: row.primary_rep_id,
+    primary_rep_name: row.primary_rep_name,
   };
 }
 
@@ -167,7 +164,6 @@ type ApiPlan = {
   plan_status: string;
   is_ai_generated: boolean;
   rationale: string | null;
-  product_id: number | null;
   product_name: string | null;
 };
 
@@ -287,7 +283,7 @@ export async function postActivityResult(
   plan: ActivityPlan,
   status: Exclude<DealResultStatus, "pending">,
   activityTypeName: string,
-): Promise<void> {
+): Promise<{ result_id: number }> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/results`, {
     method: "POST",
@@ -302,6 +298,17 @@ export async function postActivityResult(
     }),
   });
   if (!res.ok) throw new Error(`結果の登録に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+// 同じ結果ボタンをもう一度押したときの「取り消し」用。
+// 商談/計画のステータスもバックエンド側で登録前の状態に戻る。
+export async function deleteActivityResult(repId: number, resultId: number): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/results/${resultId}?rep_id=${repId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`結果の取り消しに失敗しました (HTTP ${res.status})`);
 }
 
 export async function fetchProducts(name?: string): Promise<Product[]> {
@@ -315,10 +322,14 @@ export async function fetchProducts(name?: string): Promise<Product[]> {
 type ApiDeal = {
   deal_id: number;
   customer_id: number;
+  customer_name: string;
   rep_id: number;
-  deal_phase_id: number;
-  deal_result_status_id: number;
-  product_id: number;
+  rep_name: string;
+  deal_phase_name: string;
+  deal_result_status: string;
+  product_name: string;
+  subcategory_name: string;
+  category_name: string;
   estimated_amount: string | number;
   win_probability: string | number;
   expected_visit_count: number;
@@ -329,26 +340,22 @@ type ApiDeal = {
 
 export async function fetchDeals(repId: number): Promise<Deal[]> {
   const base = getApiBaseUrl();
-  const [dealsRes, products, customerNames] = await Promise.all([
-    fetch(`${base}/api/deals?rep_id=${repId}`, { cache: "no-store" }),
-    fetchProducts(),
-    fetchCustomerNames(repId),
-  ]);
-  if (!dealsRes.ok) throw new Error(`商談一覧の取得に失敗しました (HTTP ${dealsRes.status})`);
-  const rows: ApiDeal[] = await dealsRes.json();
-  const productNames = new Map(products.map((product) => [product.product_id, product.product_name]));
+  const res = await fetch(`${base}/api/deals?rep_id=${repId}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`商談一覧の取得に失敗しました (HTTP ${res.status})`);
+  const rows: ApiDeal[] = await res.json();
 
   return rows.map((row) => ({
     deal_id: row.deal_id,
     customer_id: row.customer_id,
-    customer_name: customerNames.get(row.customer_id) ?? "(顧客不明)",
+    customer_name: row.customer_name,
     rep_id: row.rep_id,
-    deal_phase_id: row.deal_phase_id,
-    deal_phase_name: DEAL_PHASE_NAMES[row.deal_phase_id] ?? "不明",
-    deal_result_status_id: row.deal_result_status_id,
-    deal_result_status_name: DEAL_RESULT_STATUS_NAMES[row.deal_result_status_id] ?? "不明",
-    product_id: row.product_id,
-    product_name: productNames.get(row.product_id) ?? "(商品不明)",
+    rep_name: row.rep_name,
+    deal_phase_name: row.deal_phase_name,
+    deal_result_status: row.deal_result_status,
+    deal_result_status_name: DEAL_RESULT_STATUS_NAMES[row.deal_result_status] ?? "不明",
+    product_name: row.product_name,
+    subcategory_name: row.subcategory_name,
+    category_name: row.category_name,
     estimated_amount: Number(row.estimated_amount),
     win_probability: Number(row.win_probability),
     expected_visit_count: row.expected_visit_count,
@@ -360,9 +367,10 @@ export async function fetchDeals(repId: number): Promise<Deal[]> {
 
 type ApiRepAffinity = {
   rep_id: number;
-  industry_id: number;
-  category_id: number;
-  pattern_id: number;
+  rep_name: string;
+  industry_name: string;
+  category_name: string;
+  pattern_name: string;
   deal_count: number;
   won_count: number;
   win_rate: string | number;
@@ -372,22 +380,16 @@ type ApiRepAffinity = {
 
 export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
   const base = getApiBaseUrl();
-  const [affinityRes, products] = await Promise.all([
-    fetch(`${base}/api/reps/${repId}/affinity`, { cache: "no-store" }),
-    fetchProducts(),
-  ]);
-  if (!affinityRes.ok) throw new Error(`得意分野スコアの取得に失敗しました (HTTP ${affinityRes.status})`);
-  const rows: ApiRepAffinity[] = await affinityRes.json();
-  const categoryNames = new Map(products.map((product) => [product.category_id, product.category_name]));
+  const res = await fetch(`${base}/api/reps/${repId}/affinity`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`得意分野スコアの取得に失敗しました (HTTP ${res.status})`);
+  const rows: ApiRepAffinity[] = await res.json();
 
   return rows.map((row) => ({
     rep_id: row.rep_id,
-    industry_id: row.industry_id,
-    industry_name: INDUSTRY_NAMES[row.industry_id] ?? "不明",
-    category_id: row.category_id,
-    category_name: categoryNames.get(row.category_id) ?? "不明",
-    pattern_id: row.pattern_id,
-    pattern_name: DEAL_PATTERN_NAMES[row.pattern_id] ?? "不明",
+    rep_name: row.rep_name,
+    industry_name: row.industry_name,
+    category_name: row.category_name,
+    pattern_name: row.pattern_name,
     deal_count: row.deal_count,
     won_count: row.won_count,
     win_rate: Number(row.win_rate),

@@ -38,19 +38,21 @@ class CustomerCreate(BaseModel):
 class CustomerOut(OrmModel):
     customer_id: int
     customer_name: str
-    industry_id: int
-    company_size_id: int
+    industry_name: str
+    company_size_name: str
     location: str
     primary_rep_id: int | None = None
+    primary_rep_name: str | None = None
 
 
 class StaleCustomerOut(OrmModel):
     customer_id: int
     customer_name: str
-    industry_id: int
-    company_size_id: int
+    industry_name: str
+    company_size_name: str
     location: str
     primary_rep_id: int | None = None
+    primary_rep_name: str | None = None
     last_contact_date: date | None = None
     days_since_contact: int | None = None
 
@@ -70,10 +72,14 @@ class DealCreate(BaseModel):
 class DealOut(OrmModel):
     deal_id: int
     customer_id: int
+    customer_name: str
     rep_id: int
-    deal_phase_id: int
-    deal_result_status_id: int
-    product_id: int
+    rep_name: str
+    deal_phase_name: str
+    deal_result_status: str
+    product_name: str
+    subcategory_name: str
+    category_name: str
     estimated_amount: Decimal
     win_probability: Decimal
     expected_visit_count: int
@@ -84,9 +90,10 @@ class DealOut(OrmModel):
 
 class RepAffinityOut(OrmModel):
     rep_id: int
-    industry_id: int
-    category_id: int
-    pattern_id: int
+    rep_name: str
+    industry_name: str
+    category_name: str
+    pattern_name: str
     deal_count: int
     won_count: int
     win_rate: Decimal
@@ -112,7 +119,6 @@ class PlanOut(OrmModel):
     plan_status: str
     is_ai_generated: bool
     rationale: str | None = None
-    product_id: int | None = None
     product_name: str | None = None
 
 

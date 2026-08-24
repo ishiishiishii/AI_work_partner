@@ -232,6 +232,16 @@ def post_result(body: ResultCreate) -> ResultOut:
     return ResultOut.model_validate(row)
 
 
+@router.delete("/results/{result_id}", response_model=ResultOut)
+def delete_result(result_id: int, rep_id: int = Query(...)) -> ResultOut:
+    with get_connection() as conn:
+        try:
+            row = planning.delete_result(conn, result_id=result_id, rep_id=rep_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ResultOut.model_validate(row)
+
+
 @router.get("/forecast", response_model=ForecastOut)
 def get_forecast(
     rep_id: int = Query(...),
