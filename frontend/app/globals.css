@@ -1403,12 +1403,32 @@ a {
   border-radius: 12px;
   font-size: 0.9rem;
   line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .ai-chat__message--ai {
   align-self: flex-start;
   background: color-mix(in srgb, var(--ai) 10%, var(--card));
   border: 1px solid var(--line);
+}
+
+.ai-chat__message--ai p {
+  margin: 0 0 0.5rem;
+}
+
+.ai-chat__message--ai p:last-child {
+  margin-bottom: 0;
+}
+
+.ai-chat__message--ai ul,
+.ai-chat__message--ai ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.ai-chat__message--ai ul:last-child,
+.ai-chat__message--ai ol:last-child {
+  margin-bottom: 0;
 }
 
 .ai-chat__message--user {
@@ -1436,4 +1456,8 @@ a {
   padding: 0.5rem 0.75rem;
   background: var(--card);
   color: var(--ink);
+}
+
+.ai-chat__form input:disabled {
+  opacity: 0.65;
 }
