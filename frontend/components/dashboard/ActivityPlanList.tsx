@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
+  plan_date: string;
   start_time: string | null;
   end_time: string | null;
   category: ActivityPlanCategory;
   activity_type_name: string;
   customer_name: string;
   product_name: string | null;
+  expected_probability: number;
+  memo: string | null;
 };
 
 const CATEGORY_LABELS: Record<ActivityPlanCategory, string> = {
@@ -18,11 +21,15 @@ const CATEGORY_LABELS: Record<ActivityPlanCategory, string> = {
 };
 
 type ActivityPlanListProps = {
+  repId: number;
   plans: ActivityPlan[];
   dailyTasks: ActivityPlan[];
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
   onEditPlan: (planId: number, updates: PlanEditFields) => void;
+  onAddPlan: (plan: ActivityPlan) => void;
+  onConfirmPlan: (planId: number) => void;
+  onUpdateProgress: (planId: number, percent: number) => void;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -50,6 +57,10 @@ const ACTIVITY_TYPE_CLASS: Record<string, string> = {
 };
 
 const VIEW_LABELS: Record<ViewMode, string> = { day: "日", week: "週", month: "月" };
+
+// 進捗の円グラフ(ドーナツ)用の固定サイズ
+const PROGRESS_RING_RADIUS = 28;
+const PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * PROGRESS_RING_RADIUS;
 
 function formatYen(amount: number): string {
   return `¥${amount.toLocaleString("ja-JP")}`;
@@ -110,16 +121,71 @@ function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: strin
   return `${year}年${Number(month)}月の活動計画`;
 }
 
+function parseTimeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function formatDurationMinutes(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins}分`;
+  if (mins === 0) return `${hours}時間`;
+  return `${hours}時間${mins}分`;
+}
+
+// 開始・終了時間が両方わかる予定同士だけを対象に、時間の重複を検出する
+function getOverlappingPlanIds(items: ActivityPlan[]): Set<number> {
+  const timed = items.filter((item) => item.start_time && item.end_time);
+  const overlapping = new Set<number>();
+  for (let i = 0; i < timed.length; i++) {
+    const aStart = parseTimeToMinutes(timed[i].start_time!);
+    const aEnd = parseTimeToMinutes(timed[i].end_time!);
+    for (let j = i + 1; j < timed.length; j++) {
+      const bStart = parseTimeToMinutes(timed[j].start_time!);
+      const bEnd = parseTimeToMinutes(timed[j].end_time!);
+      if (aStart < bEnd && bStart < aEnd) {
+        overlapping.add(timed[i].plan_id);
+        overlapping.add(timed[j].plan_id);
+      }
+    }
+  }
+  return overlapping;
+}
+
+// 時系列順に見て、それまでで一番遅い終了時刻より後に始まる予定の直前に「空き時間」を計算する
+function getGapBeforePlanId(items: ActivityPlan[]): Map<number, number> {
+  const gaps = new Map<number, number>();
+  const timed = items
+    .filter((item) => item.start_time && item.end_time)
+    .sort((a, b) => a.start_time!.localeCompare(b.start_time!));
+  let latestEnd: number | null = null;
+  for (const item of timed) {
+    const start = parseTimeToMinutes(item.start_time!);
+    const end = parseTimeToMinutes(item.end_time!);
+    if (latestEnd !== null && start > latestEnd) {
+      gaps.set(item.plan_id, start - latestEnd);
+    }
+    latestEnd = latestEnd === null ? end : Math.max(latestEnd, end);
+  }
+  return gaps;
+}
+
 export function ActivityPlanList({
+  repId,
   plans,
   dailyTasks,
   onResultChange,
   onRequestAlternative,
   onEditPlan,
+  onAddPlan,
+  onConfirmPlan,
+  onUpdateProgress,
 }: ActivityPlanListProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
+  const [newPlanDraft, setNewPlanDraft] = useState<ActivityPlan | null>(null);
   const [editDraft, setEditDraft] = useState<(PlanEditFields & { planId: number }) | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
@@ -146,21 +212,82 @@ export function ActivityPlanList({
   });
 
   const detailPlan =
-    detailPlanId !== null
-      ? ([...plans, ...dailyTasks].find((plan) => plan.plan_id === detailPlanId) ?? null)
-      : null;
+    newPlanDraft && detailPlanId === newPlanDraft.plan_id
+      ? newPlanDraft
+      : detailPlanId !== null
+        ? ([...plans, ...dailyTasks].find((plan) => plan.plan_id === detailPlanId) ?? null)
+        : null;
+  const isCreating = newPlanDraft !== null && detailPlan?.plan_id === newPlanDraft.plan_id;
+
+  // 時間の重複・空き時間は「日」表示でのみ意味があるので、そこだけ計算する
+  const overlappingPlanIds = viewMode === "day" ? getOverlappingPlanIds(filtered) : new Set<number>();
+  const gapBeforePlanId = viewMode === "day" ? getGapBeforePlanId(filtered) : new Map<number, number>();
 
   function getSelectedContactType(plan: ActivityPlan): string {
     return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
   }
 
+  // ステータスの記録・取り消しUI。一覧行と詳細モーダルの両方で同じものを使う
+  function renderResultControls(plan: ActivityPlan) {
+    if (plan.result_status === "pending") {
+      return (
+        <>
+          <label className="activity-plan-list__contact-type">
+            実際の対応:
+            <select
+              value={getSelectedContactType(plan)}
+              onChange={(event) =>
+                setContactTypeSelections((prev) => ({
+                  ...prev,
+                  [plan.plan_id]: event.target.value,
+                }))
+              }
+            >
+              {CONTACT_TYPE_OPTIONS.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+          {RESULT_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="activity-plan-list__result-button"
+              onClick={() => onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))}
+            >
+              {option.label}
+            </button>
+          ))}
+        </>
+      );
+    }
+    return (
+      <>
+        <span className={`activity-plan-list__result-button is-active is-active--${plan.result_status}`}>
+          {RESULT_OPTIONS.find((option) => option.value === plan.result_status)?.label}
+        </span>
+        <button
+          type="button"
+          className="activity-plan-list__undo-button"
+          onClick={() => onResultChange(plan.plan_id, plan.result_status, getSelectedContactType(plan))}
+        >
+          取り消す
+        </button>
+      </>
+    );
+  }
+
   function openDetail(plan: ActivityPlan) {
     setDetailPlanId(plan.plan_id);
+    setNewPlanDraft(null);
     setEditDraft(null);
   }
 
   function closeDetail() {
     setDetailPlanId(null);
+    setNewPlanDraft(null);
     setEditDraft(null);
   }
 
@@ -168,27 +295,98 @@ export function ActivityPlanList({
     setDetailPlanId(plan.plan_id);
     setEditDraft({
       planId: plan.plan_id,
+      plan_date: plan.plan_date,
       start_time: plan.start_time,
       end_time: plan.end_time,
       category: plan.category,
       activity_type_name: plan.activity_type_name,
       customer_name: plan.customer_name,
       product_name: plan.product_name,
+      expected_probability: plan.expected_probability,
+      memo: plan.memo,
+    });
+  }
+
+  // 引数無しなら空の新規予定、引数ありなら会社・商品などを引き継いだ「次回の予定」を作る
+  function startCreate(base?: ActivityPlan) {
+    const draft: ActivityPlan = base
+      ? {
+          ...base,
+          plan_id: -Date.now(),
+          plan_date: selectedDate,
+          start_time: null,
+          end_time: null,
+          is_ai_generated: false,
+          reasoning_text: "",
+          result_status: "pending",
+          memo: null,
+          progress_percent: 0,
+        }
+      : {
+          plan_id: -Date.now(),
+          rep_id: repId,
+          plan_date: selectedDate,
+          start_time: null,
+          end_time: null,
+          category: "task",
+          customer_id: null,
+          customer_name: "",
+          deal_id: null,
+          product_name: null,
+          activity_type_name: "資料作成",
+          priority: 3,
+          expected_amount: 0,
+          expected_probability: 0,
+          is_ai_generated: false,
+          reasoning_text: "",
+          result_status: "pending",
+          memo: null,
+          progress_percent: 0,
+        };
+    setNewPlanDraft(draft);
+    setDetailPlanId(draft.plan_id);
+    setEditDraft({
+      planId: draft.plan_id,
+      plan_date: draft.plan_date,
+      start_time: draft.start_time,
+      end_time: draft.end_time,
+      category: draft.category,
+      activity_type_name: draft.activity_type_name,
+      customer_name: draft.customer_name,
+      product_name: draft.product_name,
+      expected_probability: draft.expected_probability,
+      memo: draft.memo,
     });
   }
 
   function cancelEdit() {
+    if (newPlanDraft) {
+      setNewPlanDraft(null);
+      setDetailPlanId(null);
+    }
     setEditDraft(null);
   }
 
   function saveEdit() {
     if (!editDraft) return;
     const { planId, ...updates } = editDraft;
-    onEditPlan(planId, {
+    const normalized = {
       ...updates,
       customer_name: updates.customer_name.trim() || "(未設定)",
       product_name: updates.product_name?.trim() || null,
-    });
+      expected_probability: Math.min(100, Math.max(0, updates.expected_probability)),
+      memo: updates.memo?.trim() || null,
+    };
+
+    if (newPlanDraft && planId === newPlanDraft.plan_id) {
+      onAddPlan({ ...newPlanDraft, ...normalized });
+      setNewPlanDraft(null);
+      setDetailPlanId(null);
+      setEditDraft(null);
+      return;
+    }
+
+    onEditPlan(planId, normalized);
     setEditDraft(null);
   }
 
@@ -237,8 +435,21 @@ export function ActivityPlanList({
         <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
       ) : (
         <ul className="activity-plan-list__items">
-          {filtered.map((plan) => (
-            <li key={plan.plan_id} className="activity-plan-list__item">
+          {filtered.map((plan) => {
+            const gapMinutes = gapBeforePlanId.get(plan.plan_id);
+            const isOverlapping = overlappingPlanIds.has(plan.plan_id);
+            return (
+            <Fragment key={plan.plan_id}>
+              {gapMinutes !== undefined && (
+                <li className="activity-plan-list__gap" aria-hidden="true">
+                  空き時間 {formatDurationMinutes(gapMinutes)}
+                </li>
+              )}
+              <li
+                className={`activity-plan-list__item${
+                  isOverlapping ? " activity-plan-list__item--overlap" : ""
+                }`}
+              >
               <div
                 className="activity-plan-list__clickable"
                 onDoubleClick={() => openDetail(plan)}
@@ -269,6 +480,9 @@ export function ActivityPlanList({
                         優先度{plan.priority}・成約確率{plan.expected_probability.toFixed(0)}%
                       </span>
                     )}
+                    {isOverlapping && (
+                      <span className="activity-plan-list__warning">⚠ 時間が重複しています</span>
+                    )}
                   </div>
                 </div>
                 {plan.expected_amount > 0 && (
@@ -277,68 +491,22 @@ export function ActivityPlanList({
               </div>
               {plan.category === "visit" && (
                 <div className="activity-plan-list__result-buttons">
-                  {plan.result_status === "pending" ? (
-                    <>
-                      <label className="activity-plan-list__contact-type">
-                        実際の対応:
-                        <select
-                          value={getSelectedContactType(plan)}
-                          onChange={(event) =>
-                            setContactTypeSelections((prev) => ({
-                              ...prev,
-                              [plan.plan_id]: event.target.value,
-                            }))
-                          }
-                        >
-                          {CONTACT_TYPE_OPTIONS.map((type) => (
-                            <option key={type} value={type}>
-                              {type}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {RESULT_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className="activity-plan-list__result-button"
-                          onClick={() =>
-                            onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))
-                          }
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        className="activity-plan-list__alt-button"
-                        onClick={() => onRequestAlternative(plan.plan_id)}
-                      >
-                        対応が難しい
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span
-                        className={`activity-plan-list__result-button is-active is-active--${plan.result_status}`}
-                      >
-                        {RESULT_OPTIONS.find((option) => option.value === plan.result_status)?.label}
-                      </span>
-                      <button
-                        type="button"
-                        className="activity-plan-list__undo-button"
-                        onClick={() =>
-                          onResultChange(plan.plan_id, plan.result_status, getSelectedContactType(plan))
-                        }
-                      >
-                        取り消す
-                      </button>
-                    </>
+                  {renderResultControls(plan)}
+                  {plan.result_status === "pending" && (
+                    <button
+                      type="button"
+                      className="activity-plan-list__alt-button"
+                      onClick={() => onRequestAlternative(plan.plan_id)}
+                    >
+                      対応が難しい
+                    </button>
                   )}
                 </div>
               )}
-            </li>
-          ))}
+              </li>
+            </Fragment>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -347,7 +515,7 @@ export function ActivityPlanList({
       <div className="plan-modal-overlay" onClick={closeDetail}>
         <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
           <div className="plan-modal__header">
-            <h3>予定の詳細</h3>
+            <h3>{isCreating ? "予定を追加" : "予定の詳細"}</h3>
             <button type="button" className="plan-modal__close" onClick={closeDetail} aria-label="閉じる">
               ×
             </button>
@@ -360,7 +528,17 @@ export function ActivityPlanList({
               <div className="plan-modal__detail">
                 <dl className="plan-modal__fields">
                   <dt>日付</dt>
-                  <dd>{formatDate(detailPlan.plan_date)}</dd>
+                  <dd>
+                    {isEditing ? (
+                      <input
+                        type="date"
+                        value={editDraft.plan_date}
+                        onChange={(event) => setEditDraft({ ...editDraft, plan_date: event.target.value })}
+                      />
+                    ) : (
+                      formatDate(detailPlan.plan_date)
+                    )}
+                  </dd>
 
                   <dt>種別</dt>
                   <dd>
@@ -473,18 +651,81 @@ export function ActivityPlanList({
                   )}
                   {effectiveCategory === "visit" && (
                     <>
-                      <dt>優先度・成約確率</dt>
+                      <dt>優先度</dt>
+                      <dd>優先度{detailPlan.priority}</dd>
+
+                      <dt>成約確率</dt>
                       <dd>
-                        優先度{detailPlan.priority}・成約確率{detailPlan.expected_probability.toFixed(0)}%
+                        {isEditing ? (
+                          <span className="plan-modal__percent-input">
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={5}
+                              value={editDraft.expected_probability}
+                              onChange={(event) =>
+                                setEditDraft({
+                                  ...editDraft,
+                                  expected_probability: Number(event.target.value),
+                                })
+                              }
+                            />
+                            %
+                          </span>
+                        ) : (
+                          `${detailPlan.expected_probability.toFixed(0)}%`
+                        )}
                       </dd>
+
+                      <dt>メモ</dt>
+                      <dd>
+                        {isEditing ? (
+                          <textarea
+                            className="plan-modal__memo-input"
+                            value={editDraft.memo ?? ""}
+                            onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })}
+                            rows={3}
+                          />
+                        ) : (
+                          (detailPlan.memo ?? "(メモなし)")
+                        )}
+                      </dd>
+
+                      <dt>ステータス</dt>
+                      <dd className="plan-modal__status-controls">{renderResultControls(detailPlan)}</dd>
                     </>
                   )}
-                  {effectiveCategory === "visit" && (
+                  {effectiveCategory === "task" && !detailPlan.is_ai_generated && (
                     <>
-                      <dt>ステータス</dt>
+                      <dt>進捗</dt>
                       <dd>
-                        {RESULT_OPTIONS.find((option) => option.value === detailPlan.result_status)?.label ??
-                          "未対応"}
+                        <div className="plan-modal__progress">
+                          <svg className="plan-modal__progress-ring" viewBox="0 0 80 80" width="64" height="64">
+                            <circle cx="40" cy="40" r={PROGRESS_RING_RADIUS} className="plan-modal__progress-ring-track" />
+                            <circle
+                              cx="40"
+                              cy="40"
+                              r={PROGRESS_RING_RADIUS}
+                              className="plan-modal__progress-ring-value"
+                              strokeDasharray={PROGRESS_RING_CIRCUMFERENCE}
+                              strokeDashoffset={
+                                PROGRESS_RING_CIRCUMFERENCE * (1 - detailPlan.progress_percent / 100)
+                              }
+                            />
+                            <text x="40" y="45" textAnchor="middle" className="plan-modal__progress-ring-label">
+                              {detailPlan.progress_percent}%
+                            </text>
+                          </svg>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={detailPlan.progress_percent}
+                            onChange={(event) => onUpdateProgress(detailPlan.plan_id, Number(event.target.value))}
+                          />
+                        </div>
                       </dd>
                     </>
                   )}
@@ -507,6 +748,15 @@ export function ActivityPlanList({
                     </>
                   ) : (
                     <>
+                      {detailPlan.is_ai_generated && (
+                        <button
+                          type="button"
+                          className="activity-plan-list__result-button"
+                          onClick={() => onConfirmPlan(detailPlan.plan_id)}
+                        >
+                          確定する
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="activity-plan-list__result-button"
@@ -514,6 +764,22 @@ export function ActivityPlanList({
                       >
                         編集
                       </button>
+                      <button
+                        type="button"
+                        className="activity-plan-list__alt-button"
+                        onClick={() => onRequestAlternative(detailPlan.plan_id)}
+                      >
+                        AI作り直し
+                      </button>
+                      {detailPlan.category === "visit" && (
+                        <button
+                          type="button"
+                          className="activity-plan-list__result-button"
+                          onClick={() => startCreate(detailPlan)}
+                        >
+                          次回の予定を作成
+                        </button>
+                      )}
                       <button type="button" className="activity-plan-list__undo-button" onClick={closeDetail}>
                         閉じる
                       </button>
@@ -526,6 +792,10 @@ export function ActivityPlanList({
         </div>
       </div>
     )}
+
+    <button type="button" className="plan-fab" onClick={() => startCreate()} aria-label="予定を追加" title="予定を追加">
+      ＋
+    </button>
     </>
   );
 }
