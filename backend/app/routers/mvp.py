@@ -8,6 +8,7 @@ from app.schemas.models import (
     CustomerOut,
     DealCreate,
     DealOut,
+    DealUpdate,
     ForecastOut,
     PlanCreate,
     PlanGenerateRequest,
@@ -19,6 +20,7 @@ from app.schemas.models import (
     ReplanRequest,
     ResultCreate,
     ResultOut,
+    SalesRepOut,
     StaleCustomerOut,
     TargetCreate,
     TargetOut,
@@ -26,6 +28,13 @@ from app.schemas.models import (
 from app.services import affinity, planning
 
 router = APIRouter(prefix="/api", tags=["mvp"])
+
+
+@router.get("/reps", response_model=list[SalesRepOut])
+def get_reps() -> list[SalesRepOut]:
+    with get_connection() as conn:
+        rows = planning.list_reps(conn)
+    return [SalesRepOut.model_validate(row) for row in rows]
 
 
 @router.get("/targets", response_model=list[TargetOut])
@@ -112,6 +121,35 @@ def post_deal(body: DealCreate) -> DealOut:
     return DealOut.model_validate(row)
 
 
+@router.patch("/deals/{deal_id}", response_model=DealOut)
+def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> DealOut:
+    with get_connection() as conn:
+        try:
+            row = planning.update_deal(
+                conn,
+                deal_id=deal_id,
+                rep_id=rep_id,
+                product_id=body.product_id,
+                deal_phase_id=body.deal_phase_id,
+                estimated_amount=body.estimated_amount,
+                win_probability=body.win_probability,
+                expected_visit_count=body.expected_visit_count,
+                expected_effort_hours=body.expected_effort_hours,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return DealOut.model_validate(row)
+
+
+@router.delete("/deals/{deal_id}", status_code=204)
+def delete_deal(deal_id: int, rep_id: int = Query(...)) -> None:
+    with get_connection() as conn:
+        try:
+            planning.delete_deal(conn, deal_id=deal_id, rep_id=rep_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/reps/{rep_id}/affinity", response_model=list[RepAffinityOut])
 def get_rep_affinity(rep_id: int) -> list[RepAffinityOut]:
     with get_connection() as conn:
@@ -161,7 +199,21 @@ def post_plan(body: PlanCreate) -> PlanOut:
             customer_id=body.customer_id,
             deal_id=body.deal_id,
             priority=body.priority,
+            expected_amount=body.expected_amount,
+            expected_probability=body.expected_probability,
+            rationale=body.rationale,
         )
+    return PlanOut.model_validate(row)
+
+
+@router.delete("/plans/{plan_id}", response_model=PlanOut)
+def delete_plan(plan_id: int, rep_id: int = Query(...)) -> PlanOut:
+    """Soft-cancel (plan_status='cancelled'), e.g. when '対応が難しい' replaces it."""
+    with get_connection() as conn:
+        try:
+            row = planning.cancel_plan(conn, plan_id=plan_id, rep_id=rep_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     return PlanOut.model_validate(row)
 
 

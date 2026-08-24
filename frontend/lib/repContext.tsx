@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
-import { mockSalesReps } from "@/lib/mockData";
+import { fetchReps } from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import type { SalesRep } from "@/types";
 
@@ -25,8 +25,17 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
   const [authenticatedRepId, setAuthenticatedRepId] = useState<number | null>(null);
   const [selectedRepId, setSelectedRepId] = useState<number | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [reps, setReps] = useState<SalesRep[]>([]);
   const router = useRouter();
   const pathname = usePathname();
+
+  useEffect(() => {
+    fetchReps()
+      .then(setReps)
+      .catch((error) => {
+        console.error("担当者一覧の取得に失敗しました", error);
+      });
+  }, []);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -61,7 +70,7 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthLoading, authenticatedRepId, pathname, router]);
 
   const selectedRep =
-    selectedRepId !== null ? (mockSalesReps.find((rep) => rep.rep_id === selectedRepId) ?? null) : null;
+    selectedRepId !== null ? (reps.find((rep) => rep.rep_id === selectedRepId) ?? null) : null;
 
   async function signOut() {
     const supabase = getSupabaseBrowserClient();
@@ -73,7 +82,7 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <RepContext.Provider
-      value={{ reps: mockSalesReps, selectedRep, setSelectedRepId, isAuthLoading, signOut }}
+      value={{ reps, selectedRep, setSelectedRepId, isAuthLoading, signOut }}
     >
       {children}
     </RepContext.Provider>
