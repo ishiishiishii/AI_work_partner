@@ -5,9 +5,17 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DealHistoryList, type DealEditFields } from "@/components/customers/DealHistoryList";
 import { NewDealForm } from "@/components/customers/NewDealForm";
-import { createDeal, deleteDeal, fetchCustomers, fetchDeals, fetchProducts, updateDeal } from "@/lib/api";
+import {
+  createDeal,
+  deleteDeal,
+  fetchCustomers,
+  fetchDeals,
+  fetchMasters,
+  fetchProducts,
+  updateDeal,
+} from "@/lib/api";
 import { useRep } from "@/lib/repContext";
-import type { Customer, Deal, Product } from "@/types";
+import type { Customer, Deal, DealPhase, Product } from "@/types";
 
 export default function CustomerDetailPage() {
   const { customerId } = useParams<{ customerId: string }>();
@@ -17,6 +25,7 @@ export default function CustomerDetailPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [dealPhases, setDealPhases] = useState<DealPhase[]>([]);
 
   const REP_ID = selectedRep?.rep_id ?? null;
 
@@ -30,15 +39,17 @@ export default function CustomerDetailPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const [customers, repDeals, allProducts] = await Promise.all([
+        const [customers, repDeals, allProducts, masters] = await Promise.all([
           fetchCustomers(repId),
           fetchDeals(repId),
           fetchProducts(),
+          fetchMasters(),
         ]);
         if (cancelled) return;
         setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
         setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
         setProducts(allProducts);
+        setDealPhases(masters.deal_phases);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -144,6 +155,7 @@ export default function CustomerDetailPage() {
         <DealHistoryList
           deals={deals}
           products={products}
+          dealPhases={dealPhases}
           onUpdateDeal={handleUpdateDeal}
           onDeleteDeal={handleDeleteDeal}
         />

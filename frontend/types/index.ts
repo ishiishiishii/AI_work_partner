@@ -64,6 +64,28 @@ export type Product = {
   category_name: string;
 };
 
+// 新規顧客登録・商談登録/編集フォームのセレクトボックス用マスタ。GET /api/masters が返す。
+export type Industry = {
+  industry_id: number;
+  industry_name: string;
+};
+
+export type CompanySize = {
+  company_size_id: number;
+  company_size_name: string;
+};
+
+export type DealPhase = {
+  deal_phase_id: number;
+  deal_phase_name: string;
+};
+
+export type Masters = {
+  industries: Industry[];
+  company_sizes: CompanySize[];
+  deal_phases: DealPhase[];
+};
+
 // AI 参照用ビュー(ai.deal)の形にそのまま対応させている。deal_result_status は
 // DB上の status_code("ongoing"/"won"/"lost")で、表示用の日本語名は
 // deal_result_status_name に別途持たせる(mockData.DEAL_RESULT_STATUS_NAMESで解決)。
@@ -114,7 +136,7 @@ export type ActivityPlan = {
   reasoning_text: string;
   result_status: DealResultStatus;
   memo: string | null; // 企業訪問での自由メモ(バックエンドにはまだ無い)
-  progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う(バックエンドにはまだ無い)
+  progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う
 };
 
 export type ReplanInfo = {

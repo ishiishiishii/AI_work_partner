@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DEAL_PHASE_OPTIONS } from "@/lib/mockData";
-import type { Deal, Product } from "@/types";
+import type { Deal, DealPhase, Product } from "@/types";
 
 export type DealEditFields = {
   product_id: number;
@@ -16,6 +15,7 @@ export type DealEditFields = {
 type DealHistoryListProps = {
   deals: Deal[];
   products: Product[];
+  dealPhases: DealPhase[];
   onUpdateDeal: (dealId: number, updates: DealEditFields) => void;
   onDeleteDeal: (dealId: number) => void;
 };
@@ -36,7 +36,13 @@ function formatDate(dateStr: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}(${weekday})`;
 }
 
-export function DealHistoryList({ deals, products, onUpdateDeal, onDeleteDeal }: DealHistoryListProps) {
+export function DealHistoryList({
+  deals,
+  products,
+  dealPhases,
+  onUpdateDeal,
+  onDeleteDeal,
+}: DealHistoryListProps) {
   const [editDraft, setEditDraft] = useState<(DealEditFields & { dealId: number }) | null>(null);
 
   const sorted = [...deals].sort((a, b) => b.deal_start_date.localeCompare(a.deal_start_date));
@@ -118,7 +124,7 @@ export function DealHistoryList({ deals, products, onUpdateDeal, onDeleteDeal }:
                         setEditDraft({ ...editDraft, deal_phase_id: Number(event.target.value) })
                       }
                     >
-                      {DEAL_PHASE_OPTIONS.map((phase) => (
+                      {dealPhases.map((phase) => (
                         <option key={phase.deal_phase_id} value={phase.deal_phase_id}>
                           {phase.deal_phase_name}
                         </option>
