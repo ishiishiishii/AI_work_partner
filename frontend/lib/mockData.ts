@@ -44,3 +44,29 @@ export const DEAL_PHASE_OPTIONS: { deal_phase_id: number; deal_phase_name: strin
   { deal_phase_id: 4, deal_phase_name: "見積" },
   { deal_phase_id: 5, deal_phase_name: "契約交渉" },
 ];
+
+// 事務作業(category='task')の「対応が難しい」差し替え候補プール。商談と違って実データが
+// 無いため、固定の候補から未使用のものを提示する。この差し替え自体はまだローカル表示のみ
+// (バックエンドへの保存は無い)。
+export const mockTaskSuggestions: { title: string; activityTypeName: string; reasoningText: string }[] = [
+  {
+    title: "見積書の見直し",
+    activityTypeName: "資料作成",
+    reasoningText: "他の予定と重なっていたため、見積内容の見直しに差し替えました。",
+  },
+  {
+    title: "新規リストへの架電",
+    activityTypeName: "新規開拓",
+    reasoningText: "空いた時間を使って新規開拓の候補を増やすことを提案しました。",
+  },
+  {
+    title: "既存顧客へのフォローメール",
+    activityTypeName: "メール",
+    reasoningText: "短時間でも接点を作れるよう、フォローメールに差し替えました。",
+  },
+  {
+    title: "週次報告書の作成",
+    activityTypeName: "資料作成",
+    reasoningText: "活動の振り返りと報告書作成の時間として提案しました。",
+  },
+];

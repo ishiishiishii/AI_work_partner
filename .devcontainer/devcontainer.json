@@ -1,0 +1,21 @@
+{
+  "name": "AI Work Partner (Codespaces)",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [3000, 8000, 55321],
+  "portsAttributes": {
+    "3000": {
+      "label": "Web (Next.js)"
+    },
+    "8000": {
+      "label": "API (FastAPI)"
+    },
+    "55321": {
+      "label": "Supabase API / Auth"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/install-supabase-cli.sh",
+  "postStartCommand": "bash .devcontainer/write-codespace-env.sh"
+}
