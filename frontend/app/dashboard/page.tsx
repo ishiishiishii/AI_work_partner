@@ -7,9 +7,11 @@ import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
+  createPlan,
   deleteActivityResult,
   fetchActivityPlans,
   fetchDeals,
+  fetchForecast,
   fetchRepAffinity,
   fetchSalesTarget,
   generateActivityPlans,
@@ -22,7 +24,15 @@ import {
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
-import type { ActivityPlan, Deal, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
+import type {
+  ActivityPlan,
+  Deal,
+  DealResultStatus,
+  Forecast,
+  RepAffinity,
+  ReplanInfo,
+  SalesTarget,
+} from "@/types";
 
 const TARGET_MONTH = "2026-08";
 
@@ -36,11 +46,22 @@ export default function DashboardPage() {
   const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
+
+  // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
+  // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
+  async function refreshForecast(repId: number) {
+    try {
+      setForecast(await fetchForecast(repId, TARGET_MONTH));
+    } catch {
+      setForecast(null);
+    }
+  }
 
   useEffect(() => {
     if (REP_ID === null) return;
@@ -86,6 +107,7 @@ export default function DashboardPage() {
         setDailyTasks(fetchedPlans.filter((plan) => plan.category === "task"));
         setAffinities(fetchedAffinities);
         setDeals(fetchedDeals);
+        await refreshForecast(repId);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -105,6 +127,7 @@ export default function DashboardPage() {
     if (REP_ID === null) return;
     const updated = await saveSalesTarget(REP_ID, TARGET_MONTH, input);
     setTarget(updated);
+    await refreshForecast(REP_ID);
   }
 
   async function handleRegenerate() {
@@ -115,6 +138,7 @@ export default function DashboardPage() {
       const fresh = await generateActivityPlans(repId, TARGET_MONTH);
       setPlans(fresh);
       setReplan(null);
+      await refreshForecast(repId);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
     } finally {
@@ -150,6 +174,7 @@ export default function DashboardPage() {
           await recalculateRepAffinity(REP_ID);
           setAffinities(await fetchRepAffinity(REP_ID));
         }
+        await refreshForecast(REP_ID);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "結果の取り消しに失敗しました");
       }
@@ -177,6 +202,7 @@ export default function DashboardPage() {
         activityTypeName,
       );
       setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
+      await refreshForecast(REP_ID);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
       setPlans(plans); // ロールバック
@@ -194,6 +220,7 @@ export default function DashboardPage() {
           after_achievement_rate: after,
           reason: "商談結果を反映し、AIが残り期間の計画を組み直しました",
         });
+        await refreshForecast(REP_ID);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "再計画に失敗しました");
       }
@@ -229,9 +256,28 @@ export default function DashboardPage() {
     }
   }
 
-  // 手動で追加した予定もローカル表示のみ(バックエンドへの保存はまだ無い)
-  function handleAddPlan(newPlan: ActivityPlan) {
-    setPlans((prev) => [...prev, newPlan]);
+  async function handleAddPlan(newPlan: ActivityPlan) {
+    if (REP_ID === null) return;
+    try {
+      const created = await createPlan(REP_ID, {
+        plan_date: newPlan.plan_date,
+        start_time: newPlan.start_time,
+        end_time: newPlan.end_time,
+        category: newPlan.category,
+        activity_type_name: newPlan.activity_type_name,
+        customer_name: newPlan.customer_name,
+        customer_id: newPlan.customer_id,
+        deal_id: newPlan.deal_id,
+        priority: newPlan.priority,
+      });
+      if (created.category === "visit") {
+        setPlans((prev) => [...prev, created]);
+      } else {
+        setDailyTasks((prev) => [...prev, created]);
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "予定の追加に失敗しました");
+    }
   }
 
   // 「確定する」はAI提案フラグだけを外す。提案理由(reasoning_text)はそのまま残す
@@ -371,8 +417,11 @@ export default function DashboardPage() {
     );
   }
 
-  const forecastAmount = calcForecastAmount(plans);
-  const achievementRate = calcAchievementRate(plans, target.target_amount);
+  // バックエンドの forecast は成約/失注の実績まで反映した正確な値。
+  // 目標(sales_target)が未登録の月は 404 になるため、その場合だけクライアント計算に
+  // フォールバックする
+  const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans);
+  const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
 
   return (
     <main>

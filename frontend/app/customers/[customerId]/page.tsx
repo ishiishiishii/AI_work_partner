@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DealHistoryList } from "@/components/customers/DealHistoryList";
-import { fetchCustomers, fetchDeals } from "@/lib/api";
+import { NewDealForm } from "@/components/customers/NewDealForm";
+import { createDeal, fetchCustomers, fetchDeals } from "@/lib/api";
 import { useRep } from "@/lib/repContext";
 import type { Customer, Deal } from "@/types";
 
@@ -46,6 +47,20 @@ export default function CustomerDetailPage() {
       cancelled = true;
     };
   }, [REP_ID, customerId]);
+
+  async function handleCreateDeal(input: {
+    product_id: number;
+    deal_phase_id: number;
+    estimated_amount: number;
+    win_probability: number;
+    expected_visit_count: number;
+    expected_effort_hours: number;
+    deal_start_date?: string;
+  }) {
+    if (REP_ID === null || !customer) return;
+    const created = await createDeal(REP_ID, { ...input, customer_id: customer.customer_id });
+    setDeals((prev) => [...prev, created]);
+  }
 
   if (!selectedRep || isLoading) {
     return (
@@ -97,6 +112,8 @@ export default function CustomerDetailPage() {
         <h2>商談履歴</h2>
         <DealHistoryList deals={deals} />
       </section>
+
+      <NewDealForm onCreate={handleCreateDeal} />
     </main>
   );
 }

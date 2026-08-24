@@ -27,6 +27,17 @@ export const COMPANY_SIZE_NAMES: Record<number, string> = {
   3: "大企業",
 };
 
+// 商談登録フォームの商談フェーズ選択用。deal_phase 一覧を返すAPIがまだ無いため
+// supabase/seed.sql の投入順(= serial の採番順)を前提にハードコードしている。
+// 表示専用途(既存商談の deal_phase_name 表示)では ai.* ビューが名称を返すため不要。
+export const DEAL_PHASE_NAMES: Record<number, string> = {
+  1: "初回接触",
+  2: "ヒアリング",
+  3: "提案",
+  4: "見積",
+  5: "契約交渉",
+};
+
 // deal_result_status テーブルは status_code(英語)しか持たないため、表示用の
 // 日本語名はここで解決する。deal_phase_name・pattern_name 等は ai.* ビューが
 // マスタの日本語名をそのまま返すため、ここでのハードコードは不要。
