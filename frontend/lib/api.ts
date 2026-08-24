@@ -409,3 +409,62 @@ export async function recalculateRepAffinity(repId: number): Promise<void> {
   });
   if (!res.ok) throw new Error(`得意分野スコアの再計算に失敗しました (HTTP ${res.status})`);
 }
+
+export type AiChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export async function askAiQuestion(
+  question: string,
+  history: AiChatHistoryMessage[],
+  dashboard: {
+    target: SalesTarget;
+    achievementRate: number;
+    plans: ActivityPlan[];
+    affinities: RepAffinity[];
+  },
+): Promise<string> {
+  const base = getApiBaseUrl();
+  const res = await fetch(base + "/api/ai/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question,
+      history,
+      context: {
+        target: dashboard.target,
+        achievement_rate: dashboard.achievementRate,
+        plans: dashboard.plans.map((plan) => ({
+          plan_id: plan.plan_id,
+          plan_date: plan.plan_date,
+          customer_name: plan.customer_name,
+          product_name: plan.product_name,
+          priority: plan.priority,
+          expected_amount: plan.expected_amount,
+          expected_probability: plan.expected_probability,
+          rationale: plan.reasoning_text,
+          result_status: plan.result_status,
+        })),
+        affinities: dashboard.affinities.map((affinity) => ({
+          industry_name: affinity.industry_name,
+          category_name: affinity.category_name,
+          pattern_name: affinity.pattern_name,
+          deal_count: affinity.deal_count,
+          win_rate: affinity.win_rate,
+          avg_won_amount: affinity.avg_won_amount,
+          affinity_score: affinity.affinity_score,
+        })),
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body: { detail?: string } = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "AIへの質問に失敗しました (HTTP " + res.status + ")");
+  }
+
+  const body: { answer: string } = await res.json();
+  return body.answer;
+}
+
