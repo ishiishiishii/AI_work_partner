@@ -425,8 +425,9 @@ export async function askAiQuestion(
     affinities: RepAffinity[];
   },
 ): Promise<string> {
-  const base = getApiBaseUrl();
-  const res = await fetch(base + "/api/ai/chat", {
+  // ブラウザから FastAPI の localhost:8000 を直接参照すると、別PCでの
+  // デモ時にそのPC自身へ接続してしまう。Next.js の同一オリジン経由で中継する。
+  const res = await fetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
