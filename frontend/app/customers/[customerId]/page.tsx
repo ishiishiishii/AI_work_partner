@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DealHistoryList, type DealEditFields } from "@/components/customers/DealHistoryList";
-import { deleteDeal, fetchCustomers, fetchDeals, fetchProducts, updateDeal } from "@/lib/api";
+import { NewDealForm } from "@/components/customers/NewDealForm";
+import { createDeal, deleteDeal, fetchCustomers, fetchDeals, fetchProducts, updateDeal } from "@/lib/api";
 import { useRep } from "@/lib/repContext";
 import type { Customer, Deal, Product } from "@/types";
 
@@ -52,6 +53,20 @@ export default function CustomerDetailPage() {
       cancelled = true;
     };
   }, [REP_ID, customerId]);
+
+  async function handleCreateDeal(input: {
+    product_id: number;
+    deal_phase_id: number;
+    estimated_amount: number;
+    win_probability: number;
+    expected_visit_count: number;
+    expected_effort_hours: number;
+    deal_start_date?: string;
+  }) {
+    if (REP_ID === null || !customer) return;
+    const created = await createDeal(REP_ID, { ...input, customer_id: customer.customer_id });
+    setDeals((prev) => [...prev, created]);
+  }
 
   async function handleUpdateDeal(dealId: number, updates: DealEditFields) {
     if (REP_ID === null) return;
@@ -133,6 +148,8 @@ export default function CustomerDetailPage() {
           onDeleteDeal={handleDeleteDeal}
         />
       </section>
+
+      <NewDealForm onCreate={handleCreateDeal} />
     </main>
   );
 }

@@ -48,6 +48,13 @@ export type Customer = {
   primary_rep_name: string | null;
 };
 
+// 休眠顧客(しばらく接点の無い顧客)一覧。Customer に加えて最終接点日と
+// 経過日数を持つ(接点が一度も無ければ last_contact_date は null)。
+export type StaleCustomer = Customer & {
+  last_contact_date: string | null; // "YYYY-MM-DD"
+  days_since_contact: number | null;
+};
+
 export type Product = {
   product_id: number;
   product_name: string;

@@ -707,15 +707,31 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     if not target:
         raise ValueError("target not found")
 
+    # 成約(won)は満額、失注(lost)は0円、それ以外(対応前 or 延期等)は確率按分で計上する。
+    # plan_status='done' の予定は活動結果(activity_result)を紐づけて実際の結果を反映し、
+    # 未対応(scheduled)のままの予定だけ確率按分にする(フロントの calcForecastAmount と同じ考え方)。
     plan_stats = conn.execute(
         """
         select
-          coalesce(sum(expected_amount * expected_probability / 100.0), 0) as expected_amount,
-          count(*)::int as open_plan_count
-        from activity_plan
-        where rep_id = %s
-          and plan_status = 'scheduled'
-          and to_char(plan_date, 'YYYY-MM') = %s
+          coalesce(sum(
+            case
+              when ap.plan_status = 'done' and latest.outcome = 'won' then ap.expected_amount
+              when ap.plan_status = 'done' and latest.outcome = 'lost' then 0
+              else ap.expected_amount * ap.expected_probability / 100.0
+            end
+          ), 0) as expected_amount,
+          count(*) filter (where ap.plan_status = 'scheduled')::int as open_plan_count
+        from activity_plan ap
+        left join lateral (
+          select ar.outcome
+          from activity_result ar
+          where ar.plan_id = ap.plan_id
+          order by ar.created_at desc
+          limit 1
+        ) latest on true
+        where ap.rep_id = %s
+          and ap.plan_status != 'cancelled'
+          and to_char(ap.plan_date, 'YYYY-MM') = %s
         """,
         (rep_id, target_month),
     ).fetchone()
