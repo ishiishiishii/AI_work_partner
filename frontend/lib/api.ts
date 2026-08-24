@@ -246,7 +246,7 @@ export async function postActivityResult(
   plan: ActivityPlan,
   status: Exclude<DealResultStatus, "pending">,
   activityTypeName: string,
-): Promise<void> {
+): Promise<{ result_id: number }> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/results`, {
     method: "POST",
@@ -261,6 +261,17 @@ export async function postActivityResult(
     }),
   });
   if (!res.ok) throw new Error(`結果の登録に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+// 同じ結果ボタンをもう一度押したときの「取り消し」用。
+// 商談/計画のステータスもバックエンド側で登録前の状態に戻る。
+export async function deleteActivityResult(repId: number, resultId: number): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/results/${resultId}?rep_id=${repId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`結果の取り消しに失敗しました (HTTP ${res.status})`);
 }
 
 export async function fetchProducts(name?: string): Promise<Product[]> {

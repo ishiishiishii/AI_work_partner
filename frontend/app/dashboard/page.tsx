@@ -7,6 +7,7 @@ import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
+  deleteActivityResult,
   fetchActivityPlans,
   fetchDeals,
   fetchRepAffinity,
@@ -36,6 +37,8 @@ export default function DashboardPage() {
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
+  const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
 
   useEffect(() => {
     if (REP_ID === null) return;
@@ -116,12 +119,33 @@ export default function DashboardPage() {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target || REP_ID === null) return;
 
-    // 同じ結果をもう一度押したら、表示だけ取り消し
-    // （バックエンドに送信済みの記録は削除されません。取り消しAPIはまだ無いためです）
+    // 同じ結果をもう一度押したら取り消し。バックエンドに送信済みの記録があれば、
+    // そちらも削除して商談/計画のステータスを登録前に戻す。
     if (changedPlan.result_status === status) {
+      const resultId = resultIdByPlan[planId];
       setPlans((prev) =>
         prev.map((plan) => (plan.plan_id === planId ? { ...plan, result_status: "pending" } : plan)),
       );
+
+      // 「対応が難しい」の差し替え等、バックエンドに送信されていない結果は表示を戻すだけ
+      if (resultId === undefined) return;
+
+      setResultIdByPlan((prev) => {
+        const next = { ...prev };
+        delete next[planId];
+        return next;
+      });
+
+      try {
+        await deleteActivityResult(REP_ID, resultId);
+        if (status === "won" || status === "lost") {
+          // 成約/失注の取り消しは得意分野スコアにも影響するため、最新値を取り直す
+          await recalculateRepAffinity(REP_ID);
+          setAffinities(await fetchRepAffinity(REP_ID));
+        }
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "結果の取り消しに失敗しました");
+      }
       return;
     }
 
@@ -139,12 +163,13 @@ export default function DashboardPage() {
     }
 
     try {
-      await postActivityResult(
+      const result = await postActivityResult(
         REP_ID,
         changedPlan,
         status as Exclude<DealResultStatus, "pending">,
         activityTypeName,
       );
+      setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
       setPlans(plans); // ロールバック
