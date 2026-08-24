@@ -17,9 +17,9 @@ import {
   recalculateRepAffinity,
   replanActivityPlans,
   saveSalesTarget,
+  updatePlan,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-import { mockDailyTasks } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type { ActivityPlan, Deal, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
 
@@ -32,7 +32,7 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
-  const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>(mockDailyTasks);
+  const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
@@ -56,9 +56,13 @@ export default function DashboardPage() {
         ]);
         if (cancelled) return;
 
-        // 計画が1件も無ければ、初回だけAIに作ってもらう
-        const resolvedPlans =
-          fetchedPlans.length > 0 ? fetchedPlans : await generateActivityPlans(repId, TARGET_MONTH);
+        // 訪問系の計画が1件も無ければ、初回だけAIに作ってもらう
+        // (顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない)
+        const initialVisitPlans = fetchedPlans.filter((plan) => plan.category === "visit");
+        const resolvedVisitPlans =
+          initialVisitPlans.length > 0
+            ? initialVisitPlans
+            : await generateActivityPlans(repId, TARGET_MONTH);
         if (cancelled) return;
 
         // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
@@ -77,7 +81,8 @@ export default function DashboardPage() {
             target_deal_count: 0,
           },
         );
-        setPlans(resolvedPlans);
+        setPlans(resolvedVisitPlans);
+        setDailyTasks(fetchedPlans.filter((plan) => plan.category === "task"));
         setAffinities(fetchedAffinities);
         setDeals(fetchedDeals);
       } catch (error) {
@@ -194,12 +199,33 @@ export default function DashboardPage() {
     }
   }
 
-  // 手動編集はローカル表示のみを書き換える(バックエンドへの保存はまだ無い)
-  function handleEditPlan(planId: number, updates: PlanEditFields) {
-    setPlans((prev) => prev.map((plan) => (plan.plan_id === planId ? { ...plan, ...updates } : plan)));
-    setDailyTasks((prev) =>
-      prev.map((task) => (task.plan_id === planId ? { ...task, ...updates } : task)),
-    );
+  async function handleEditPlan(planId: number, updates: PlanEditFields) {
+    if (REP_ID === null) return;
+    const target = [...plans, ...dailyTasks].find((plan) => plan.plan_id === planId);
+    if (!target) return;
+
+    const previousPlans = plans;
+    const previousTasks = dailyTasks;
+    const updated: ActivityPlan = { ...target, ...updates };
+
+    // 種別(訪問/事務作業)を切り替えた場合は、表示するリスト自体を跨いで移動させる
+    const nextPlans = plans.filter((plan) => plan.plan_id !== planId);
+    const nextTasks = dailyTasks.filter((task) => task.plan_id !== planId);
+    if (updated.category === "visit") {
+      setPlans([...nextPlans, updated]);
+      setDailyTasks(nextTasks);
+    } else {
+      setDailyTasks([...nextTasks, updated]);
+      setPlans(nextPlans);
+    }
+
+    try {
+      await updatePlan(REP_ID, planId, updates);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "予定の更新に失敗しました");
+      setPlans(previousPlans);
+      setDailyTasks(previousTasks);
+    }
   }
 
   function handleRequestAlternative(planId: number) {
