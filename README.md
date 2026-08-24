@@ -83,16 +83,31 @@ docker compose up --build
 
 ### 3. ログイン用デモアカウント
 
-フロントの `/login` は Supabase Auth を使っています。`sales_rep` テーブルとは別物ですが、
-`api` コンテナ起動時に `scripts.seed_demo_auth_users` が自動実行されるため、
-`docker compose up` するだけで担当者ごとのデモアカウント（EMP001〜EMP018、パスワードは共通で `demo1234`）が作成されます。手動での実行は不要です。
+フロントの `/login` は Supabase Auth を使っています。`sales_rep` テーブルとは別物のデータですが、
+`supabase/seed.sql` が担当者ごとのデモアカウント（EMP001〜EMP018、パスワードは共通で `demo1234`）を
+`auth.users` に直接作成するため、`supabase start` / `supabase db reset` するだけで用意されます。
+（`docker compose up` すら不要です。DBがリセットされるたびに再作成されるので、`api` コンテナの
+再起動有無に関わらず、常にログインできる状態になります。）
 
-既にアカウントがある場合はスキップされるだけなので、コンテナを再起動しても安全です。手動で再実行したい場合は次のコマンドでも実行できます。
+既にアカウントがある場合はスキップされるだけなので、何度実行しても安全です。
 
-```powershell
-docker compose exec api python3 -m scripts.seed_demo_auth_users
-```
+## GitHub Codespaces でスマホ等の別端末から確認する
 
+同じLANに繋げない端末（スマホ等）で `/login` などを確認したい場合、`.devcontainer` を使って
+GitHub Codespaces 上でこの一式を起動できます。`localhost`/`127.0.0.1` は端末自身を指してしまい
+LAN外からは繋がらないため、Codespaces のポート転送URLを使う方式です。
+
+1. GitHub上でこのリポジトリの Codespace を作成（`.devcontainer` の設定で Supabase CLI が自動インストールされ、`.env` の URL がこの Codespace 用に自動書き換えされます）
+2. Codespace のターミナルで通常通りセットアップ
+   ```bash
+   supabase start
+   supabase status   # anon key / service_role key を .env に反映
+   docker compose exec api python3 -m scripts.seed_demo_auth_users
+   docker compose up --build -d
+   ```
+3. VS Code の **Ports** パネルで `3000` / `8000` / `55321` の **Visibility** を `Public` に変更
+   （デフォルトは Private = GitHubログインが必要なため、スマホ等からそのまま開けません）
+4. `3000` の転送URL（`https://<codespace名>-3000.app.github.dev` 形式）をスマホ等で開く
 
 ## 日常の起動 / 停止
 

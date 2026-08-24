@@ -1,3 +1,5 @@
+import type { Product } from "@/types";
+
 // 顧客の表示名は GET /api/customers (ai.customer ビュー) が industry_name/
 // company_size_name まで解決して返すため、表示用途にはもう使わない。
 // ここに残しているのは新規顧客登録フォームの業種/企業規模セレクトボックス用で、
@@ -23,6 +25,17 @@ export const COMPANY_SIZE_NAMES: Record<number, string> = {
   1: "中小企業",
   2: "中堅企業",
   3: "大企業",
+};
+
+// 商談登録フォームの商談フェーズ選択用。deal_phase 一覧を返すAPIがまだ無いため
+// supabase/seed.sql の投入順(= serial の採番順)を前提にハードコードしている。
+// 表示専用途(既存商談の deal_phase_name 表示)では ai.* ビューが名称を返すため不要。
+export const DEAL_PHASE_NAMES: Record<number, string> = {
+  1: "初回接触",
+  2: "ヒアリング",
+  3: "提案",
+  4: "見積",
+  5: "契約交渉",
 };
 
 // deal_result_status テーブルは status_code(英語)しか持たないため、表示用の
@@ -70,3 +83,39 @@ export const mockTaskSuggestions: { title: string; activityTypeName: string; rea
     reasoningText: "活動の振り返りと報告書作成の時間として提案しました。",
   },
 ];
+
+// 商品マスタには名称・カテゴリしか無く、価格帯・特徴などを返すAPIがまだ無いため、
+// 商品詳細ページ用に product_id から決定的に(同じ商品なら常に同じ内容になるよう)
+// ダミーの説明・価格帯・納期目安・特徴を生成する。実データが用意でき次第、置き換える。
+const PRODUCT_FEATURE_POOL = [
+  "導入実績豊富",
+  "低コストで導入可能",
+  "短納期対応",
+  "柔軟なカスタマイズ",
+  "保守サポート充実",
+  "クラウド対応",
+  "省スペース設計",
+  "高い信頼性",
+];
+
+export type ProductDummyDetails = {
+  description: string;
+  priceRangeText: string;
+  leadTimeText: string;
+  features: string[];
+};
+
+export function getProductDummyDetails(product: Product): ProductDummyDetails {
+  const seed = product.product_id;
+  const priceLow = 50000 + ((seed * 37) % 950000);
+  const priceHigh = priceLow + 100000 + ((seed * 13) % 300000);
+  const leadDays = 5 + (seed % 20);
+  const features = [0, 3, 5].map((offset) => PRODUCT_FEATURE_POOL[(seed + offset) % PRODUCT_FEATURE_POOL.length]);
+
+  return {
+    description: `${product.category_name}(${product.subcategory_name})に分類される商品です。業種・企業規模に応じた提案実績があります。`,
+    priceRangeText: `¥${priceLow.toLocaleString("ja-JP")} 〜 ¥${priceHigh.toLocaleString("ja-JP")}`,
+    leadTimeText: `約${leadDays}営業日`,
+    features,
+  };
+}

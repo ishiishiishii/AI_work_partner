@@ -6,10 +6,12 @@ import type {
   Customer,
   Deal,
   DealResultStatus,
+  Forecast,
   Product,
   RepAffinity,
   SalesRep,
   SalesTarget,
+  StaleCustomer,
 } from "@/types";
 
 export function getApiBaseUrl(): string {
@@ -151,6 +153,23 @@ export async function createCustomer(
   return mapCustomer(await res.json());
 }
 
+type ApiStaleCustomer = ApiCustomer & {
+  last_contact_date: string | null;
+  days_since_contact: number | null;
+};
+
+export async function fetchStaleCustomers(repId: number): Promise<StaleCustomer[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers/stale?rep_id=${repId}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`休眠顧客一覧の取得に失敗しました (HTTP ${res.status})`);
+  const rows: ApiStaleCustomer[] = await res.json();
+  return rows.map((row) => ({
+    ...mapCustomer(row),
+    last_contact_date: row.last_contact_date,
+    days_since_contact: row.days_since_contact,
+  }));
+}
+
 async function fetchCustomerNames(repId: number): Promise<Map<number, string>> {
   const customers = await fetchCustomers(repId);
   return new Map(customers.map((customer) => [customer.customer_id, customer.customer_name]));
@@ -250,6 +269,49 @@ export async function replanActivityPlans(
   if (!replanRes.ok) throw new Error(`再計画に失敗しました (HTTP ${replanRes.status})`);
   const body: { plans: ApiPlan[] } = await replanRes.json();
   return body.plans.map((row) => mapPlan(row, customerNames));
+}
+
+// 予定の手動追加の保存。title/customer_id/deal_id の扱いは updatePlan と同じ考え方
+// (title があれば表示上そちらを優先するが、customer_id/deal_id が分かっていれば
+// 商談への紐付けとして残す)。createPlan(差し替え提案の永続化用。plan_id しか返らない)
+// とは用途が異なるため名前を分けている。
+export async function createManualPlan(
+  repId: number,
+  input: {
+    plan_date: string;
+    start_time: string | null;
+    end_time: string | null;
+    category: ActivityPlanCategory;
+    activity_type_name: string;
+    customer_name: string;
+    customer_id: number | null;
+    deal_id: number | null;
+    priority: number;
+  },
+): Promise<ActivityPlan> {
+  const base = getApiBaseUrl();
+  const [res, customerNames] = await Promise.all([
+    fetch(`${base}/api/plans`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rep_id: repId,
+        plan_date: input.plan_date,
+        category: input.category,
+        activity_type: input.activity_type_name,
+        start_time: input.start_time,
+        end_time: input.end_time,
+        title: input.customer_name,
+        customer_id: input.customer_id,
+        deal_id: input.deal_id,
+        priority: input.priority,
+      }),
+    }),
+    fetchCustomerNames(repId),
+  ]);
+  if (!res.ok) throw new Error(`予定の追加に失敗しました (HTTP ${res.status})`);
+  const row: ApiPlan = await res.json();
+  return mapPlan(row, customerNames);
 }
 
 // 予定の手動編集の保存。activity_type_name/customer_name/product_name はコード変換せず
@@ -418,6 +480,39 @@ export async function fetchDeals(repId: number): Promise<Deal[]> {
   return rows.map(mapDeal);
 }
 
+export async function createDeal(
+  repId: number,
+  input: {
+    customer_id: number;
+    product_id: number;
+    deal_phase_id: number;
+    estimated_amount: number;
+    win_probability: number;
+    expected_visit_count: number;
+    expected_effort_hours: number;
+    deal_start_date?: string;
+  },
+): Promise<Deal> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/deals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      customer_id: input.customer_id,
+      rep_id: repId,
+      product_id: input.product_id,
+      deal_phase_id: input.deal_phase_id,
+      estimated_amount: input.estimated_amount,
+      win_probability: input.win_probability,
+      expected_visit_count: input.expected_visit_count,
+      expected_effort_hours: input.expected_effort_hours,
+      deal_start_date: input.deal_start_date || null,
+    }),
+  });
+  if (!res.ok) throw new Error(`商談の登録に失敗しました (HTTP ${res.status})`);
+  return mapDeal(await res.json());
+}
+
 export async function updateDeal(
   repId: number,
   dealId: number,
@@ -474,6 +569,33 @@ export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
   }));
 }
 
+type ApiForecast = {
+  rep_id: number;
+  target_month: string;
+  target_amount: string | number;
+  expected_amount: string | number;
+  attainment_ratio: number;
+  open_plan_count: number;
+};
+
+// sales_target がまだ登録されていない月は 404 になる(呼び出し側でフォールバックすること)
+export async function fetchForecast(repId: number, targetMonth: string): Promise<Forecast> {
+  const base = getApiBaseUrl();
+  const res = await fetch(
+    `${base}/api/forecast?rep_id=${repId}&target_month=${targetMonth}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`達成見込みの取得に失敗しました (HTTP ${res.status})`);
+  const row: ApiForecast = await res.json();
+  return {
+    rep_id: row.rep_id,
+    target_month: row.target_month,
+    target_amount: Number(row.target_amount),
+    forecast_amount: Number(row.expected_amount),
+    achievement_rate: row.attainment_ratio * 100,
+  };
+}
+
 // 得意分野スコアはバックエンドの計算結果をキャッシュしたテーブルのため、
 // 表示前に最新の商談結果を反映させておく
 export async function recalculateRepAffinity(repId: number): Promise<void> {
@@ -499,8 +621,9 @@ export async function askAiQuestion(
     affinities: RepAffinity[];
   },
 ): Promise<string> {
-  const base = getApiBaseUrl();
-  const res = await fetch(base + "/api/ai/chat", {
+  // ブラウザから FastAPI の localhost:8000 を直接参照すると、別PCでの
+  // デモ時にそのPC自身へ接続してしまう。Next.js の同一オリジン経由で中継する。
+  const res = await fetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

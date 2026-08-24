@@ -5641,3 +5641,84 @@ insert into activity_plan (
    '1日の活動を振り返り、報告書としてまとめる時間を確保しました。',
    '週次報告書の作成', 'scheduled');
 
+-- Deal-linked task rows (見積書作成・提案資料準備など) for the "週" view. Unlike the
+-- daily tasks above, these carry customer_id/deal_id: they represent prep work
+-- needed ahead of a specific visit, toward proposing to / contracting with that
+-- company, so the week view can surface them alongside the visit itself.
+insert into activity_plan (
+  rep_id, plan_date, start_time, end_time, category, activity_type,
+  customer_id, deal_id, priority, is_ai_generated, rationale, title, plan_status
+) values
+  (1, '2026-07-31', '09:00', '10:00', 'task', '資料作成', 88, 842, 2, true,
+   '8/1に訪問予定の桔梗工業様向けに、見積内容を事前に固めておくことを提案しました。',
+   '桔梗工業様向け見積書の作成', 'scheduled'),
+  (1, '2026-08-02', '09:00', '10:00', 'task', '資料作成', 61, 861, 3, true,
+   '8/3に訪問予定の白鳥テクノ様向けに、提案資料を準備しておくことを提案しました。',
+   '白鳥テクノ様向け提案資料の準備', 'scheduled'),
+  (1, '2026-08-04', '09:00', '09:30', 'task', '資料作成', 43, 732, 3, true,
+   '8/5に訪問予定の夕凪建設様向けに、見積内容を見直しておくことを提案しました。',
+   '夕凪建設様向け見積書の見直し', 'scheduled');
+
+-- Demo login accounts (Supabase Auth), one per sales_rep. Created directly via
+-- SQL so they exist automatically after `supabase db reset` / `supabase start`
+-- with no separate manual step -- previously this ran once via
+-- backend/scripts/seed_demo_auth_users.py on api-container startup only,
+-- which went stale (silently) whenever the DB was reset without also
+-- restarting that container.
+--
+-- Password for every account: demo1234
+-- Email: rep{rep_id}@aiworkpartner.local, matching
+-- frontend/app/login/page.tsx's employeeIdToLoginEmail (EMP001 -> rep1@...).
+--
+-- GoTrue (Supabase Auth) scans several *_token columns into non-nullable Go
+-- strings; leaving them NULL makes every login 500 with
+-- "converting NULL to string is unsupported" instead of just failing to
+-- match -- verified by hand against a real GoTrue-created row before writing
+-- this loop.
+do $$
+declare
+  rep record;
+  new_user_id uuid;
+begin
+  for rep in select rep_id, rep_name from sales_rep order by rep_id loop
+    new_user_id := gen_random_uuid();
+
+    insert into auth.users (
+      instance_id, id, aud, role, email, encrypted_password,
+      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at,
+      confirmation_token, recovery_token, email_change_token_new, email_change
+    ) values (
+      '00000000-0000-0000-0000-000000000000',
+      new_user_id,
+      'authenticated',
+      'authenticated',
+      'rep' || rep.rep_id || '@aiworkpartner.local',
+      crypt('demo1234', gen_salt('bf', 10)),
+      now(),
+      jsonb_build_object(
+        'provider', 'email', 'providers', jsonb_build_array('email'),
+        'rep_id', rep.rep_id, 'rep_name', rep.rep_name
+      ),
+      jsonb_build_object('email_verified', true),
+      now(), now(),
+      '', '', '', ''
+    );
+
+    insert into auth.identities (
+      id, provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+    ) values (
+      gen_random_uuid(),
+      new_user_id::text,
+      new_user_id,
+      jsonb_build_object(
+        'sub', new_user_id::text,
+        'email', 'rep' || rep.rep_id || '@aiworkpartner.local',
+        'email_verified', false, 'phone_verified', false
+      ),
+      'email',
+      now(), now(), now()
+    );
+  end loop;
+end $$;
+

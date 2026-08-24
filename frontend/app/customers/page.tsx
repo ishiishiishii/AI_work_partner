@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { CustomerTable } from "@/components/customers/CustomerTable";
 import { NewCustomerForm } from "@/components/customers/NewCustomerForm";
-import { createCustomer, fetchCustomers } from "@/lib/api";
+import { StaleCustomerList } from "@/components/customers/StaleCustomerList";
+import { createCustomer, fetchCustomers, fetchStaleCustomers } from "@/lib/api";
 import { useRep } from "@/lib/repContext";
-import type { Customer } from "@/types";
+import type { Customer, StaleCustomer } from "@/types";
 
 export default function CustomersPage() {
   const { selectedRep } = useRep();
@@ -13,6 +14,7 @@ export default function CustomersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [staleCustomers, setStaleCustomers] = useState<StaleCustomer[]>([]);
 
   useEffect(() => {
     if (REP_ID === null) return;
@@ -23,8 +25,14 @@ export default function CustomersPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const fetched = await fetchCustomers(repId);
-        if (!cancelled) setCustomers(fetched);
+        const [fetched, fetchedStale] = await Promise.all([
+          fetchCustomers(repId),
+          fetchStaleCustomers(repId),
+        ]);
+        if (!cancelled) {
+          setCustomers(fetched);
+          setStaleCustomers(fetchedStale);
+        }
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -72,10 +80,18 @@ export default function CustomersPage() {
           データの取得に失敗しました({loadError})。バックエンド(API・Supabase)が起動しているか確認してください。
         </p>
       ) : (
-        <section className="panel">
-          <h2>登録済みの顧客</h2>
-          <CustomerTable customers={customers} />
-        </section>
+        <>
+          <section className="panel">
+            <h2>休眠顧客</h2>
+            <p>60日以上接点の無い顧客です。フォローの優先候補として確認してください。</p>
+            <StaleCustomerList customers={staleCustomers} />
+          </section>
+
+          <section className="panel">
+            <h2>登録済みの顧客</h2>
+            <CustomerTable customers={customers} />
+          </section>
+        </>
       )}
 
       <NewCustomerForm onCreate={handleCreate} />

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { askAiQuestion, type AiChatHistoryMessage } from "@/lib/api";
 import type { ActivityPlan, RepAffinity, SalesTarget } from "@/types";
 
@@ -83,7 +85,11 @@ export function AiChatPanel({ target, achievementRate, plans, affinities }: AiCh
             key={message.id}
             className={"ai-chat__message ai-chat__message--" + message.role}
           >
-            {message.text}
+            {message.role === "ai" ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+            ) : (
+              message.text
+            )}
           </div>
         ))}
         {isThinking && (
