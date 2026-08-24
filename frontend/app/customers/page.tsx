@@ -69,7 +69,7 @@ export default function CustomersPage() {
   }
 
   return (
-    <main>
+    <main className="wide-main">
       <h1>顧客一覧</h1>
       <p>{selectedRep.rep_name}さんが担当する顧客候補です。</p>
 
@@ -80,18 +80,21 @@ export default function CustomersPage() {
           データの取得に失敗しました({loadError})。バックエンド(API・Supabase)が起動しているか確認してください。
         </p>
       ) : (
-        <>
-          <section className="panel">
-            <h2>休眠顧客</h2>
-            <p>60日以上接点の無い顧客です。フォローの優先候補として確認してください。</p>
-            <StaleCustomerList customers={staleCustomers} />
-          </section>
-
-          <section className="panel">
-            <h2>登録済みの顧客</h2>
-            <CustomerTable customers={customers} />
-          </section>
-        </>
+        <div className="page-layout">
+          <div className="page-layout__primary">
+            <section className="panel">
+              <h2>登録済みの顧客</h2>
+              <CustomerTable customers={customers} />
+            </section>
+          </div>
+          <div className="page-layout__sidebar">
+            <section className="panel">
+              <h2>休眠顧客</h2>
+              <p>60日以上接点の無い顧客です。フォローの優先候補として確認してください。</p>
+              <StaleCustomerList customers={staleCustomers} />
+            </section>
+          </div>
+        </div>
       )}
 
       <NewCustomerForm onCreate={handleCreate} />

@@ -448,45 +448,51 @@ export default function DashboardPage() {
   const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
 
   return (
-    <main>
+    <main className="dashboard-main">
       <h1>営業ダッシュボード</h1>
-      <GoalCard
-        rep={selectedRep}
-        target={target}
-        forecastAmount={forecastAmount}
-        achievementRate={achievementRate}
-        onSave={handleTargetSave}
-      />
-      {replan && <ReplanBanner info={replan} />}
-      {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
-      <div className="regenerate-bar">
-        <button
-          type="button"
-          className="regenerate-button"
-          onClick={handleRegenerate}
-          disabled={isRegenerating}
-        >
-          {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
-        </button>
+      <div className="dashboard-layout">
+        <div className="dashboard-layout__primary">
+          <GoalCard
+            rep={selectedRep}
+            target={target}
+            forecastAmount={forecastAmount}
+            achievementRate={achievementRate}
+            onSave={handleTargetSave}
+          />
+          {replan && <ReplanBanner info={replan} />}
+          {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
+          <div className="regenerate-bar">
+            <button
+              type="button"
+              className="regenerate-button"
+              onClick={handleRegenerate}
+              disabled={isRegenerating}
+            >
+              {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
+            </button>
+          </div>
+          <ActivityPlanList
+            repId={selectedRep.rep_id}
+            plans={plans}
+            dailyTasks={dailyTasks}
+            onResultChange={handleResultChange}
+            onRequestAlternative={handleRequestAlternative}
+            onEditPlan={handleEditPlan}
+            onAddPlan={handleAddPlan}
+            onConfirmPlan={handleConfirmPlan}
+            onUpdateProgress={handleUpdateProgress}
+          />
+        </div>
+        <div className="dashboard-layout__sidebar">
+          <AiChatPanel
+            target={target}
+            achievementRate={achievementRate}
+            plans={plans}
+            affinities={affinities}
+          />
+          <AiReasoningPanel plans={plans} affinities={affinities} />
+        </div>
       </div>
-      <ActivityPlanList
-        repId={selectedRep.rep_id}
-        plans={plans}
-        dailyTasks={dailyTasks}
-        onResultChange={handleResultChange}
-        onRequestAlternative={handleRequestAlternative}
-        onEditPlan={handleEditPlan}
-        onAddPlan={handleAddPlan}
-        onConfirmPlan={handleConfirmPlan}
-        onUpdateProgress={handleUpdateProgress}
-      />
-      <AiReasoningPanel plans={plans} affinities={affinities} />
-      <AiChatPanel
-        target={target}
-        achievementRate={achievementRate}
-        plans={plans}
-        affinities={affinities}
-      />
     </main>
   );
 }

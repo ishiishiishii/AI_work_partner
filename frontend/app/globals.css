@@ -1461,3 +1461,54 @@ a {
 .ai-chat__form input:disabled {
   opacity: 0.65;
 }
+
+.dashboard-layout,
+.page-layout {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.dashboard-layout__primary,
+.dashboard-layout__sidebar,
+.page-layout__primary,
+.page-layout__sidebar {
+  min-width: 0;
+}
+
+@media (min-width: 960px) {
+  main.dashboard-main,
+  main.wide-main {
+    max-width: 1180px;
+  }
+
+  .dashboard-layout,
+  .page-layout {
+    grid-template-columns: minmax(0, 1fr) 380px;
+    gap: 2rem;
+  }
+
+  .dashboard-layout__sidebar,
+  .page-layout__sidebar {
+    position: sticky;
+    top: 1.5rem;
+    max-height: calc(100vh - 3rem);
+    overflow-y: auto;
+    display: grid;
+    gap: 1rem;
+  }
+
+  .dashboard-layout__sidebar .panel,
+  .page-layout__sidebar .panel {
+    margin-bottom: 0;
+  }
+
+  .product-catalog {
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    align-items: start;
+  }
+
+  .app-nav {
+    max-width: 1180px;
+  }
+}
