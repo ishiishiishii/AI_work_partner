@@ -55,6 +55,12 @@ insert into sales_rep (rep_id, rep_name) values
   (18, '後藤大輔');
 select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
 
+-- Demo login accounts, one per sales_rep, employee_id = 'EMP' + zero-padded rep_id.
+-- All demo accounts share the password "demo1234".
+insert into sales_rep_account (employee_id, rep_id, password_hash)
+select 'EMP' || lpad(rep_id::text, 3, '0'), rep_id, crypt('demo1234', gen_salt('bf'))
+from sales_rep;
+
 
 ﻿insert into customer (customer_id, customer_name, industry_id, company_size_id, location) values
   (1, '桔梗商会株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '埼玉県'),
