@@ -8,16 +8,16 @@ services:
     env_file:
       - .env
     environment:
-      SUPABASE_URL: ${SUPABASE_URL_DOCKER:-http://host.docker.internal:54321}
+      SUPABASE_URL: ${SUPABASE_URL_DOCKER:-http://host.docker.internal:55321}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://postgres:postgres@host.docker.internal:55322/postgres}
       API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - ./backend:/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: sh -c "python3 -m scripts.seed_demo_auth_users; uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   web:
     build:
@@ -29,7 +29,7 @@ services:
       - .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-http://127.0.0.1:54321}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-http://127.0.0.1:55321}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
       # Server-side fetches inside the container use the Docker DNS name for the API
       API_INTERNAL_URL: http://api:8000
