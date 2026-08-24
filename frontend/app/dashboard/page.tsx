@@ -20,7 +20,7 @@ import {
   updatePlan,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
-
+import { mockTaskSuggestions } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type { ActivityPlan, Deal, DealResultStatus, RepAffinity, ReplanInfo, SalesTarget } from "@/types";
 
