@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Fragment, useEffect, useState } from "react";
+import { fetchProducts } from "@/lib/api";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
 
@@ -143,21 +145,21 @@ function formatDurationMinutes(minutes: number): string {
 
 // 「月」表示は個々の予定の日時ではなく、今月どの企業を狙うべきかを示す一覧にするため、
 // 企業(customer_id)ごとにグルーピングし、グループ内は見込み金額×成約確率の高い順に並べる
-type CompanyGroup = { customerName: string; items: ActivityPlan[]; totalValue: number };
+type CompanyGroup = { customerName: string; customerId: number | null; items: ActivityPlan[]; totalValue: number };
 
 function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
-  const groups = new Map<string, { customerName: string; items: ActivityPlan[] }>();
+  const groups = new Map<string, { customerName: string; customerId: number | null; items: ActivityPlan[] }>();
   for (const item of items) {
     const key = item.customer_id !== null ? String(item.customer_id) : item.customer_name;
     const group = groups.get(key);
     if (group) {
       group.items.push(item);
     } else {
-      groups.set(key, { customerName: item.customer_name, items: [item] });
+      groups.set(key, { customerName: item.customer_name, customerId: item.customer_id, items: [item] });
     }
   }
   return Array.from(groups.values())
-    .map(({ customerName, items: list }) => {
+    .map(({ customerName, customerId, items: list }) => {
       const sorted = [...list].sort(
         (a, b) => b.expected_amount * b.expected_probability - a.expected_amount * a.expected_probability,
       );
@@ -165,7 +167,7 @@ function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
         (sum, plan) => sum + (plan.expected_amount * plan.expected_probability) / 100,
         0,
       );
-      return { customerName, items: sorted, totalValue };
+      return { customerName, customerId, items: sorted, totalValue };
     })
     .sort((a, b) => b.totalValue - a.totalValue);
 }
@@ -252,12 +254,30 @@ export function ActivityPlanList({
   onConfirmPlan,
   onUpdateProgress,
 }: ActivityPlanListProps) {
+  const router = useRouter();
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
   const [newPlanDraft, setNewPlanDraft] = useState<ActivityPlan | null>(null);
   const [editDraft, setEditDraft] = useState<(PlanEditFields & { planId: number }) | null>(null);
-  const [gapPicker, setGapPicker] = useState<{ start: string; end: string } | null>(null);
+  const [gapPicker, setGapPicker] = useState<{ start: string; maxEnd: string; end: string } | null>(null);
+  // 「月」表示で商品名をダブルクリックした際に商品詳細ページへ飛べるよう、
+  // 商品名→product_id の対応をあらかじめ取得しておく
+  const [productIdByName, setProductIdByName] = useState<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchProducts()
+      .then((products) => {
+        if (!cancelled) setProductIdByName(new Map(products.map((product) => [product.product_name, product.product_id])));
+      })
+      .catch(() => {
+        // 商品詳細への導線が使えなくなるだけなので、失敗しても画面全体は壊さない
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
       (min, plan) => (plan.plan_date < min ? plan.plan_date : min),
@@ -331,12 +351,29 @@ export function ActivityPlanList({
     );
   }
 
+  function openCustomerDetail(customerId: number | null) {
+    if (customerId === null) return;
+    router.push(`/customers/${customerId}`);
+  }
+
+  function openProductDetail(productName: string | null) {
+    if (!productName) return;
+    const productId = productIdByName.get(productName);
+    if (productId === undefined) return;
+    router.push(`/products/${productId}`);
+  }
+
   function openGapPicker(start: string, end: string) {
-    setGapPicker({ start, end });
+    setGapPicker({ start, maxEnd: end, end });
   }
 
   function closeGapPicker() {
     setGapPicker(null);
+  }
+
+  // 空き時間の枠(start〜maxEnd)を超えない範囲でのみ終了時間を変更できるようにする
+  function setGapPickerEnd(end: string) {
+    setGapPicker((prev) => (prev ? { ...prev, end: end > prev.maxEnd ? prev.maxEnd : end } : prev));
   }
 
   function pickGapCandidate(candidate: (typeof mockTaskSuggestions)[number]) {
@@ -346,7 +383,7 @@ export function ActivityPlanList({
       rep_id: repId,
       plan_date: selectedDate,
       start_time: gapPicker.start,
-      end_time: gapPicker.end,
+      end_time: gapPicker.end > gapPicker.start ? gapPicker.end : gapPicker.maxEnd,
       category: "task",
       customer_id: null,
       customer_name: candidate.title,
@@ -436,7 +473,16 @@ export function ActivityPlanList({
           <div className="activity-plan-list__main">
             {hideCustomerName && plan.product_name ? (
               <div className="activity-plan-list__customer">
-                {plan.product_name}
+                <span
+                  className="activity-plan-list__link"
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    openProductDetail(plan.product_name);
+                  }}
+                  title="ダブルクリックで商品詳細へ"
+                >
+                  {plan.product_name}
+                </span>
                 {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
               </div>
             ) : (
@@ -648,7 +694,13 @@ export function ActivityPlanList({
             {monthGroups.map((group) => (
               <div key={group.customerName} className="activity-plan-list__group">
                 <h3 className="activity-plan-list__group-title">
-                  {group.customerName}
+                  <span
+                    className="activity-plan-list__link"
+                    onDoubleClick={() => openCustomerDetail(group.customerId)}
+                    title="ダブルクリックで顧客詳細へ"
+                  >
+                    {group.customerName}
+                  </span>
                   <span className="activity-plan-list__group-total">
                     見込み合計 {formatYen(Math.round(group.totalValue))}
                   </span>
@@ -672,7 +724,11 @@ export function ActivityPlanList({
             const gapSegments = gapBeforePlanId.get(plan.plan_id) ?? [];
             const isOverlapping = overlappingPlanIds.has(plan.plan_id);
             const dateLabel =
-              viewMode === "day" && plan.start_time ? plan.start_time : formatDate(plan.plan_date);
+              viewMode === "day" && plan.start_time
+                ? plan.end_time
+                  ? `${plan.start_time}〜${plan.end_time}`
+                  : plan.start_time
+                : formatDate(plan.plan_date);
             return (
               <Fragment key={plan.plan_id}>
                 {gapSegments.map((segment, index) => renderGapSegment(segment, `before-${plan.plan_id}-${index}`))}
@@ -977,13 +1033,21 @@ export function ActivityPlanList({
       <div className="plan-modal-overlay" onClick={closeGapPicker}>
         <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
           <div className="plan-modal__header">
-            <h3>
-              {gapPicker.start}〜{gapPicker.end}にできる作業
-            </h3>
+            <h3>{gapPicker.start}〜にできる作業</h3>
             <button type="button" className="plan-modal__close" onClick={closeGapPicker} aria-label="閉じる">
               ×
             </button>
           </div>
+          <label className="gap-picker__end-field">
+            終了時間
+            <input
+              type="time"
+              value={gapPicker.end}
+              min={gapPicker.start}
+              max={gapPicker.maxEnd}
+              onChange={(event) => setGapPickerEnd(event.target.value)}
+            />
+          </label>
           {gapCandidates.length === 0 ? (
             <p className="activity-plan-list__empty">現在、提案できる候補がありません。</p>
           ) : (

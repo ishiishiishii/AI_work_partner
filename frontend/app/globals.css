@@ -411,8 +411,25 @@ a {
   font-size: 0.8rem;
 }
 
+.gap-picker__end-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+.gap-picker__end-field input {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
 .activity-plan-list__date {
-  width: 3.5rem;
+  width: 6rem;
   flex-shrink: 0;
   color: var(--muted);
   font-size: 0.9rem;
@@ -428,6 +445,15 @@ a {
   align-items: center;
   gap: 0.5rem;
   font-weight: 600;
+}
+
+.activity-plan-list__link {
+  cursor: pointer;
+}
+
+.activity-plan-list__link:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .activity-plan-list__product {
