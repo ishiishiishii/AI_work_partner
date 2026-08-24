@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES } from "@/lib/mockData";
 import type { Customer } from "@/types";
 
 type CustomerTableProps = {
@@ -20,12 +19,10 @@ export function CustomerTable({ customers }: CustomerTableProps) {
           <div className="customer-table__main">
             <div className="customer-table__name">
               <Link href={`/customers/${customer.customer_id}`}>{customer.customer_name}</Link>
-              <span className="badge customer-table__size">
-                {COMPANY_SIZE_NAMES[customer.company_size_id] ?? "規模不明"}
-              </span>
+              <span className="badge customer-table__size">{customer.company_size_name}</span>
             </div>
             <div className="customer-table__meta">
-              {INDUSTRY_NAMES[customer.industry_id] ?? "業種不明"}・{customer.location}
+              {customer.industry_name}・{customer.location}
             </div>
           </div>
         </li>

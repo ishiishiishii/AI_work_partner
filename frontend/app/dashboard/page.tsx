@@ -210,7 +210,7 @@ export default function DashboardPage() {
     // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
     const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
     const candidateDeal = [...deals]
-      .filter((deal) => deal.deal_result_status_id === 1 && !usedDealIds.has(deal.deal_id))
+      .filter((deal) => deal.deal_result_status === "ongoing" && !usedDealIds.has(deal.deal_id))
       .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
     if (!candidateDeal) {
       setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
