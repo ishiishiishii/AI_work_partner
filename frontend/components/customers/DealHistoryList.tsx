@@ -4,10 +4,10 @@ type DealHistoryListProps = {
   deals: Deal[];
 };
 
-const STATUS_CLASS: Record<number, string> = {
-  1: "in_progress",
-  2: "won",
-  3: "lost",
+const STATUS_CLASS: Record<string, string> = {
+  ongoing: "in_progress",
+  won: "won",
+  lost: "lost",
 };
 
 function formatYen(amount: number): string {
@@ -37,7 +37,7 @@ export function DealHistoryList({ deals }: DealHistoryListProps) {
               <span className="deal-history__type">{deal.product_name}</span>
               <span
                 className={`deal-history__status deal-history__status--${
-                  STATUS_CLASS[deal.deal_result_status_id] ?? "in_progress"
+                  STATUS_CLASS[deal.deal_result_status] ?? "in_progress"
                 }`}
               >
                 {deal.deal_result_status_name}

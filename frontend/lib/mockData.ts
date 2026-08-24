@@ -1,8 +1,11 @@
 import type { ActivityPlan, SalesRep } from "@/types";
 
-// industry/company_size/deal_phase/deal_result_status/deal_pattern の名称を返すAPIが
-// まだ無いため、supabase/seed.sql・migration の投入順(= serial の採番順)を前提に
-// ハードコードしている。マスタの並びが変わるとズレるため、名称解決APIが追加され次第そちらに差し替える。
+// 顧客の表示名は GET /api/customers (ai.customer ビュー) が industry_name/
+// company_size_name まで解決して返すため、表示用途にはもう使わない。
+// ここに残しているのは新規顧客登録フォームの業種/企業規模セレクトボックス用で、
+// マスタ一覧を返すAPIがまだ無いため supabase/seed.sql の投入順(= serial の採番順)を
+// 前提にハードコードしている。マスタの並びが変わるとズレるため、マスタ一覧APIが
+// 追加され次第そちらに差し替える。
 export const INDUSTRY_NAMES: Record<number, string> = {
   1: "製造業",
   2: "建設業",
@@ -24,25 +27,13 @@ export const COMPANY_SIZE_NAMES: Record<number, string> = {
   3: "大企業",
 };
 
-export const DEAL_PHASE_NAMES: Record<number, string> = {
-  1: "初回接触",
-  2: "ヒアリング",
-  3: "提案",
-  4: "見積",
-  5: "契約交渉",
-};
-
-export const DEAL_RESULT_STATUS_NAMES: Record<number, string> = {
-  1: "進行中",
-  2: "成約",
-  3: "失注",
-};
-
-export const DEAL_PATTERN_NAMES: Record<number, string> = {
-  1: "新規開拓・大型",
-  2: "新規開拓・小口",
-  3: "既存深耕・大型",
-  4: "既存深耕・小口",
+// deal_result_status テーブルは status_code(英語)しか持たないため、表示用の
+// 日本語名はここで解決する。deal_phase_name・pattern_name 等は ai.* ビューが
+// マスタの日本語名をそのまま返すため、ここでのハードコードは不要。
+export const DEAL_RESULT_STATUS_NAMES: Record<string, string> = {
+  ongoing: "進行中",
+  won: "成約",
+  lost: "失注",
 };
 
 // 担当者一覧を返すAPIがまだ無いため、supabase/seed.sql に実在する18人を直書きしている。

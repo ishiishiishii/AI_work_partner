@@ -11,23 +11,6 @@ from app.services import affinity
 # generator's priority boost so the two stay in sync.
 STALE_THRESHOLD_DAYS = 60
 
-# Company-wide last contact per customer: any rep's deal start, or any logged
-# activity_result -- so imported historical deals (no activity_result rows)
-# still count.
-_LAST_CONTACT_CTE = """
-with last_contact as (
-  select customer_id, max(contact_date) as last_contact_date
-  from (
-    select customer_id, deal_start_date as contact_date from deal
-    union all
-    select customer_id, result_date as contact_date
-    from activity_result
-    where customer_id is not null
-  ) contacts
-  group by customer_id
-)
-"""
-
 
 def _month_to_date(target_month: str) -> date:
     year, month = map(int, target_month.split("-"))
@@ -91,9 +74,9 @@ def list_customers(conn: Connection, rep_id: int | None = None) -> list[dict]:
         # customers are the ones they actually have deals with.
         rows = conn.execute(
             """
-            select distinct c.customer_id, c.customer_name, c.industry_id,
-                   c.company_size_id, c.location, c.primary_rep_id
-            from customer c
+            select distinct c.customer_id, c.customer_name, c.industry_name,
+                   c.company_size_name, c.location, c.primary_rep_id, c.primary_rep_name
+            from ai.customer c
             where c.primary_rep_id = %s
                or exists (
                  select 1 from deal d
@@ -106,9 +89,9 @@ def list_customers(conn: Connection, rep_id: int | None = None) -> list[dict]:
     else:
         rows = conn.execute(
             """
-            select customer_id, customer_name, industry_id, company_size_id,
-                   location, primary_rep_id
-            from customer
+            select customer_id, customer_name, industry_name, company_size_name,
+                   location, primary_rep_id, primary_rep_name
+            from ai.customer
             order by customer_name
             """
         ).fetchall()
@@ -124,16 +107,26 @@ def create_customer(
     location: str,
     primary_rep_id: int | None,
 ) -> dict:
-    row = conn.execute(
+    new_customer_id = conn.execute(
         """
         insert into customer (
           customer_name, industry_id, company_size_id, location, primary_rep_id
         )
         values (%s, %s, %s, %s, %s)
-        returning customer_id, customer_name, industry_id, company_size_id,
-                  location, primary_rep_id
+        returning customer_id
         """,
         (customer_name, industry_id, company_size_id, location, primary_rep_id),
+    ).fetchone()["customer_id"]
+    # Re-read through the AI view so the response carries resolved names
+    # (industry/company size/primary rep) rather than the raw ids just inserted.
+    row = conn.execute(
+        """
+        select customer_id, customer_name, industry_name, company_size_name,
+               location, primary_rep_id, primary_rep_name
+        from ai.customer
+        where customer_id = %s
+        """,
+        (new_customer_id,),
     ).fetchone()
     conn.commit()
     return dict(row)
@@ -147,27 +140,24 @@ def list_stale_customers(
 ) -> list[dict]:
     """Customers with no company-wide contact in threshold_days (or ever)."""
     rows = conn.execute(
-        _LAST_CONTACT_CTE
-        + """
-        select c.customer_id, c.customer_name, c.industry_id, c.company_size_id,
-               c.location, c.primary_rep_id,
-               lc.last_contact_date,
-               (current_date - lc.last_contact_date) as days_since_contact
-        from customer c
-        left join last_contact lc on lc.customer_id = c.customer_id
+        """
+        select ca.customer_id, ca.customer_name, ca.industry_name, ca.company_size_name,
+               ca.location, ca.primary_rep_id, ca.primary_rep_name,
+               ca.last_contact_date, ca.days_since_contact
+        from ai.customer_activity ca
         where (
-          lc.last_contact_date is null
-          or lc.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
+          ca.last_contact_date is null
+          or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
         )
         and (
           %(rep_id)s::int is null
-          or c.primary_rep_id = %(rep_id)s
+          or ca.primary_rep_id = %(rep_id)s
           or exists (
             select 1 from deal d
-            where d.customer_id = c.customer_id and d.rep_id = %(rep_id)s
+            where d.customer_id = ca.customer_id and d.rep_id = %(rep_id)s
           )
         )
-        order by lc.last_contact_date asc nulls first
+        order by ca.last_contact_date asc nulls first
         """,
         {"threshold_days": threshold_days, "rep_id": rep_id},
     ).fetchall()
@@ -178,10 +168,11 @@ def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(
             """
-            select deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
-                   product_id, estimated_amount, win_probability, expected_visit_count,
+            select deal_id, customer_id, customer_name, rep_id, rep_name,
+                   deal_phase_name, deal_result_status, product_name, subcategory_name,
+                   category_name, estimated_amount, win_probability, expected_visit_count,
                    expected_effort_hours, deal_start_date, contract_date
-            from deal
+            from ai.deal
             where rep_id = %s
             order by deal_start_date desc, deal_id desc
             """,
@@ -190,10 +181,11 @@ def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
     else:
         rows = conn.execute(
             """
-            select deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
-                   product_id, estimated_amount, win_probability, expected_visit_count,
+            select deal_id, customer_id, customer_name, rep_id, rep_name,
+                   deal_phase_name, deal_result_status, product_name, subcategory_name,
+                   category_name, estimated_amount, win_probability, expected_visit_count,
                    expected_effort_hours, deal_start_date, contract_date
-            from deal
+            from ai.deal
             order by deal_start_date desc, deal_id desc
             """
         ).fetchall()
@@ -217,7 +209,7 @@ def create_deal(
     # ids), so newly registered deals continue the max+1 by hand. New deals always
     # start 'ongoing' with no contract_date; won/lost is set later via /results,
     # which is the only place the contract_date trigger constraint is satisfied.
-    row = conn.execute(
+    new_deal_id = conn.execute(
         """
         insert into deal (
           deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
@@ -230,9 +222,7 @@ def create_deal(
           (select deal_result_status_id from deal_result_status where status_code = 'ongoing'),
           %s, %s, %s, %s, %s, %s, null
         )
-        returning deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
-                  product_id, estimated_amount, win_probability, expected_visit_count,
-                  expected_effort_hours, deal_start_date, contract_date
+        returning deal_id
         """,
         (
             customer_id,
@@ -245,6 +235,19 @@ def create_deal(
             expected_effort_hours,
             deal_start_date,
         ),
+    ).fetchone()["deal_id"]
+    # Re-read through the AI view so the response carries resolved names
+    # (customer/rep/phase/status/product) rather than the raw ids just inserted.
+    row = conn.execute(
+        """
+        select deal_id, customer_id, customer_name, rep_id, rep_name,
+               deal_phase_name, deal_result_status, product_name, subcategory_name,
+               category_name, estimated_amount, win_probability, expected_visit_count,
+               expected_effort_hours, deal_start_date, contract_date
+        from ai.deal
+        where deal_id = %s
+        """,
+        (new_deal_id,),
     ).fetchone()
     conn.commit()
     return dict(row)
@@ -276,26 +279,23 @@ def list_plans(
     from_date: date | None = None,
     to_date: date | None = None,
 ) -> list[dict]:
-    clauses = ["ap.rep_id = %s"]
+    clauses = ["rep_id = %s"]
     params: list[object] = [rep_id]
     if from_date:
-        clauses.append("ap.plan_date >= %s")
+        clauses.append("plan_date >= %s")
         params.append(from_date)
     if to_date:
-        clauses.append("ap.plan_date <= %s")
+        clauses.append("plan_date <= %s")
         params.append(to_date)
     where = " and ".join(clauses)
     rows = conn.execute(
         f"""
-        select ap.plan_id, ap.rep_id, ap.plan_date, ap.customer_id, ap.deal_id,
-               ap.activity_type, ap.priority, ap.expected_amount, ap.expected_probability,
-               ap.plan_status, ap.is_ai_generated, ap.rationale,
-               p.product_id, p.product_name
-        from activity_plan ap
-        left join deal d on d.deal_id = ap.deal_id
-        left join product p on p.product_id = d.product_id
+        select plan_id, rep_id, plan_date, customer_id, deal_id,
+               activity_type, priority, expected_amount, expected_probability,
+               plan_status, is_ai_generated, rationale, product_name
+        from ai.activity_plan
         where {where}
-        order by ap.plan_date, ap.priority
+        order by plan_date, priority
         """,
         params,
     ).fetchall()
@@ -309,27 +309,21 @@ def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
     # assignment optimization is an explicit Later feature, out of MVP scope).
     return list(
         conn.execute(
-            _LAST_CONTACT_CTE
-            + """
+            """
             select d.deal_id, d.customer_id, d.estimated_amount, d.win_probability,
-                   c.customer_name, i.industry_name, p.product_id, p.product_name,
-                   lc.last_contact_date,
+                   d.customer_name, ca.industry_name, d.product_name,
+                   ca.last_contact_date,
                    (
-                     lc.last_contact_date is null
-                     or lc.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
+                     ca.last_contact_date is null
+                     or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
                    ) as is_stale
-            from deal d
-            join customer c on c.customer_id = d.customer_id
-            join industry i on i.industry_id = c.industry_id
-            join deal_result_status drs
-              on drs.deal_result_status_id = d.deal_result_status_id
-            join product p on p.product_id = d.product_id
-            left join last_contact lc on lc.customer_id = d.customer_id
-            where d.rep_id = %(rep_id)s and drs.status_code = 'ongoing'
+            from ai.deal d
+            join ai.customer_activity ca on ca.customer_id = d.customer_id
+            where d.rep_id = %(rep_id)s and d.deal_result_status = 'ongoing'
             order by
               (case when (
-                 lc.last_contact_date is null
-                 or lc.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
+                 ca.last_contact_date is null
+                 or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
                ) then 1.5 else 1.0 end)
               * (d.estimated_amount * d.win_probability) desc
             """,
@@ -407,7 +401,6 @@ def generate_plans(
             ),
         ).fetchone()
         plan_data = dict(row)
-        plan_data["product_id"] = deal["product_id"]
         plan_data["product_name"] = deal["product_name"]
         created.append(PlanOut.model_validate(plan_data))
 
