@@ -1356,3 +1356,23 @@ insert into sales_target (target_id, rep_id, target_month, target_amount) values
   (108, 18, '2026-08-01', 3560000);
 select setval('sales_target_target_id_seq', (select max(target_id) from sales_target));
 
+-- Daily non-deal tasks (資料作成・新規開拓 etc.) for the "日" view. Previously
+-- only a hardcoded frontend fixture (mockDailyTasks); now real, editable rows
+-- for rep 1 on 2026-08-01, matching what the fixture used to show.
+insert into activity_plan (
+  rep_id, plan_date, start_time, end_time, category, activity_type,
+  priority, is_ai_generated, rationale, title, plan_status
+) values
+  (1, '2026-08-01', '09:00', '09:30', 'task', '資料作成', 2, true,
+   '午後の訪問前に、見積・提案内容を最終確認しておくことを提案しました。',
+   '提案書の最終確認', 'scheduled'),
+  (1, '2026-08-01', '10:00', '11:00', 'task', '新規開拓', 3, true,
+   '午前中の空き時間を使い、新規開拓の候補を増やすことを提案しました。',
+   '新規リストへの架電・飛び込み候補の洗い出し', 'scheduled'),
+  (1, '2026-08-01', '15:00', '15:30', 'task', '電話', 4, true,
+   '訪問後の移動時間を使い、他の見込み客にも短時間で接点を作ることを提案しました。',
+   '既存顧客へのフォロー架電', 'scheduled'),
+  (1, '2026-08-01', '16:30', '17:00', 'task', '資料作成', 5, true,
+   '1日の活動を振り返り、報告書としてまとめる時間を確保しました。',
+   '週次報告書の作成', 'scheduled');
+

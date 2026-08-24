@@ -99,6 +99,10 @@ class PlanOut(OrmModel):
     plan_id: int
     rep_id: int
     plan_date: date
+    start_time: str | None = None
+    end_time: str | None = None
+    category: str = "visit"
+    title: str | None = None
     customer_id: int | None = None
     deal_id: int | None = None
     activity_type: str
@@ -110,6 +114,28 @@ class PlanOut(OrmModel):
     rationale: str | None = None
     product_id: int | None = None
     product_name: str | None = None
+
+
+class PlanCreate(BaseModel):
+    rep_id: int
+    plan_date: date
+    category: str = Field(pattern=r"^(visit|task)$")
+    activity_type: str = "visit"
+    start_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    end_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    title: str | None = None
+    customer_id: int | None = None
+    deal_id: int | None = None
+    priority: int = Field(default=3, ge=1, le=5)
+
+
+class PlanUpdate(BaseModel):
+    start_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    end_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    category: str = Field(pattern=r"^(visit|task)$")
+    activity_type: str
+    title: str | None = None
+    product_name_override: str | None = None
 
 
 class PlanGenerateRequest(BaseModel):

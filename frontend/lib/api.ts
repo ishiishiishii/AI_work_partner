@@ -6,6 +6,7 @@ import {
 } from "@/lib/mockData";
 import type {
   ActivityPlan,
+  ActivityPlanCategory,
   Customer,
   Deal,
   DealResultStatus,
@@ -153,6 +154,10 @@ type ApiPlan = {
   plan_id: number;
   rep_id: number;
   plan_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  category: ActivityPlanCategory;
+  title: string | null;
   customer_id: number | null;
   deal_id: number | null;
   activity_type: string;
@@ -168,16 +173,19 @@ type ApiPlan = {
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
 // 取得直後は常に「未入力」として扱う。実際の結果はボタン操作で記録する。
+// customer_name は、顧客に紐づかない予定(category='task')では title を、
+// 商談に紐づく予定では customer_id から解決した名前を使う。
 function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan {
   return {
     plan_id: row.plan_id,
     rep_id: row.rep_id,
     plan_date: row.plan_date,
-    start_time: null,
-    end_time: null,
-    category: "visit",
+    start_time: row.start_time,
+    end_time: row.end_time,
+    category: row.category,
     customer_id: row.customer_id,
-    customer_name: (row.customer_id && customerNames.get(row.customer_id)) || "(顧客不明)",
+    customer_name:
+      row.title || (row.customer_id && customerNames.get(row.customer_id)) || "(顧客不明)",
     deal_id: row.deal_id,
     product_name: row.product_name,
     activity_type_name: toActivityTypeName(row.activity_type),
@@ -235,6 +243,37 @@ export async function replanActivityPlans(
   if (!replanRes.ok) throw new Error(`再計画に失敗しました (HTTP ${replanRes.status})`);
   const body: { plans: ApiPlan[] } = await replanRes.json();
   return body.plans.map((row) => mapPlan(row, customerNames));
+}
+
+// 予定の手動編集の保存。activity_type_name/customer_name/product_name はコード変換せず
+// そのまま送る(バックエンドの activity_type は自由記述で、EDITABLE_ACTIVITY_TYPES には
+// visit/call/email/online のコード変換対象に無い値も含まれるため)。
+export async function updatePlan(
+  repId: number,
+  planId: number,
+  updates: {
+    start_time: string | null;
+    end_time: string | null;
+    category: ActivityPlanCategory;
+    activity_type_name: string;
+    customer_name: string;
+    product_name: string | null;
+  },
+): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/plans/${planId}?rep_id=${repId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      start_time: updates.start_time,
+      end_time: updates.end_time,
+      category: updates.category,
+      activity_type: updates.activity_type_name,
+      title: updates.customer_name,
+      product_name_override: updates.product_name,
+    }),
+  });
+  if (!res.ok) throw new Error(`予定の更新に失敗しました (HTTP ${res.status})`);
 }
 
 const RESULT_OUTCOME: Record<Exclude<DealResultStatus, "pending">, string> = {
