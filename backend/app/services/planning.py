@@ -483,6 +483,52 @@ def create_result(
     return dict(row)
 
 
+def delete_result(conn: Connection, *, result_id: int, rep_id: int) -> dict:
+    """Undo a recorded result: mirror-image of create_result's side effects."""
+    result = conn.execute(
+        """
+        select result_id, plan_id, rep_id, result_date, customer_id, deal_id,
+               activity_type, outcome, outcome_note, created_at
+        from activity_result
+        where result_id = %s and rep_id = %s
+        """,
+        (result_id, rep_id),
+    ).fetchone()
+    if not result:
+        raise ValueError("result not found")
+
+    if result["deal_id"] and result["outcome"] in {"won", "lost"}:
+        conn.execute(
+            """
+            update deal
+            set deal_result_status_id = (
+                  select deal_result_status_id
+                  from deal_result_status
+                  where status_code = 'ongoing'
+                ),
+                contract_date = null
+            where deal_id = %s and rep_id = %s
+            """,
+            (result["deal_id"], rep_id),
+        )
+        # deal re-opened -> this rep's track record changed again.
+        affinity.recalculate_rep_affinity(conn, rep_id)
+
+    if result["plan_id"]:
+        conn.execute(
+            """
+            update activity_plan
+            set plan_status = 'scheduled'
+            where plan_id = %s and rep_id = %s
+            """,
+            (result["plan_id"], rep_id),
+        )
+
+    conn.execute("delete from activity_result where result_id = %s", (result_id,))
+    conn.commit()
+    return dict(result)
+
+
 def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     target = conn.execute(
         """
