@@ -1,4 +1,4 @@
-"""Create demo Supabase Auth accounts, one per sales rep (EMP001..EMP018).
+"""Create demo Supabase Auth accounts, one per sales rep (EMP001..EMP020).
 
 ログイン機能(フロントの /login)で使うデモアカウントを作成する。
 sales_rep テーブルと違い、Supabase Auth のユーザーは supabase/seed.sql では
@@ -41,6 +41,8 @@ REPS = [
     (16, "石川大輔"),
     (17, "岡本裕子"),
     (18, "後藤大輔"),
+    (19, "新人太郎"),
+    (20, "大重鎮重信"),
 ]
 
 
