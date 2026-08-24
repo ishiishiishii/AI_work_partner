@@ -18,15 +18,14 @@ export type Forecast = {
   achievement_rate: number;
 };
 
-// 担当者の実績を「業界 × 商品カテゴリ × 案件パターン」で集計した実データ
-// (deal_count/win_rateなどはバックエンドの rep_affinity テーブルの計算結果そのまま)
+// AI 参照用の第一正規形ビュー(ai.rep_affinity)の形にそのまま対応させている。
+// 得意分野の判定は業種・商材カテゴリ・案件パターンの組み合わせなので、名前解決済みの
+// 3つの名称で識別する(数値idはAIの説明文にもUIにも不要)。
 export type RepAffinity = {
   rep_id: number;
-  industry_id: number;
+  rep_name: string;
   industry_name: string;
-  category_id: number;
   category_name: string;
-  pattern_id: number;
   pattern_name: string;
   deal_count: number;
   won_count: number;
@@ -37,14 +36,16 @@ export type RepAffinity = {
 
 // 見込み金額・成約確率・ステータスは deal（商談）側に移動したため、
 // 顧客そのものは業種・企業規模・所在地のみを持つ（AGENTS.mdの正規化方針に合わせた）。
-// industry_id/company_size_id を名称に解決するAPIがまだ無いため、当面は数値のまま扱う。
+// industry_name/company_size_name はバックエンドの AI 参照用ビュー(ai.customer)が
+// 名称まで解決して返すため、ここでは id を持たずそのまま表示に使う。
 export type Customer = {
   customer_id: number;
   customer_name: string;
-  industry_id: number;
-  company_size_id: number;
+  industry_name: string;
+  company_size_name: string;
   location: string;
   primary_rep_id: number | null;
+  primary_rep_name: string | null;
 };
 
 export type Product = {
@@ -56,17 +57,21 @@ export type Product = {
   category_name: string;
 };
 
+// AI 参照用ビュー(ai.deal)の形にそのまま対応させている。deal_result_status は
+// DB上の status_code("ongoing"/"won"/"lost")で、表示用の日本語名は
+// deal_result_status_name に別途持たせる(mockData.DEAL_RESULT_STATUS_NAMESで解決)。
 export type Deal = {
   deal_id: number;
   customer_id: number;
   customer_name: string;
   rep_id: number;
-  deal_phase_id: number;
+  rep_name: string;
   deal_phase_name: string;
-  deal_result_status_id: number;
+  deal_result_status: string;
   deal_result_status_name: string;
-  product_id: number;
   product_name: string;
+  subcategory_name: string;
+  category_name: string;
   estimated_amount: number;
   win_probability: number;
   expected_visit_count: number;
@@ -85,8 +90,8 @@ export type ActivityPlan = {
   plan_id: number;
   rep_id: number;
   plan_date: string; // "YYYY-MM-DD"
-  start_time: string | null; // "HH:MM"（日表示のスケジュール用。バックエンドにはまだ無い）
-  end_time: string | null; // "HH:MM"（バックエンドにはまだ無い）
+  start_time: string | null; // "HH:MM"（日表示のスケジュール用）
+  end_time: string | null; // "HH:MM"
   category: ActivityPlanCategory;
   customer_id: number | null;
   customer_name: string;

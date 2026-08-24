@@ -38,19 +38,21 @@ class CustomerCreate(BaseModel):
 class CustomerOut(OrmModel):
     customer_id: int
     customer_name: str
-    industry_id: int
-    company_size_id: int
+    industry_name: str
+    company_size_name: str
     location: str
     primary_rep_id: int | None = None
+    primary_rep_name: str | None = None
 
 
 class StaleCustomerOut(OrmModel):
     customer_id: int
     customer_name: str
-    industry_id: int
-    company_size_id: int
+    industry_name: str
+    company_size_name: str
     location: str
     primary_rep_id: int | None = None
+    primary_rep_name: str | None = None
     last_contact_date: date | None = None
     days_since_contact: int | None = None
 
@@ -70,10 +72,14 @@ class DealCreate(BaseModel):
 class DealOut(OrmModel):
     deal_id: int
     customer_id: int
+    customer_name: str
     rep_id: int
-    deal_phase_id: int
-    deal_result_status_id: int
-    product_id: int
+    rep_name: str
+    deal_phase_name: str
+    deal_result_status: str
+    product_name: str
+    subcategory_name: str
+    category_name: str
     estimated_amount: Decimal
     win_probability: Decimal
     expected_visit_count: int
@@ -84,9 +90,10 @@ class DealOut(OrmModel):
 
 class RepAffinityOut(OrmModel):
     rep_id: int
-    industry_id: int
-    category_id: int
-    pattern_id: int
+    rep_name: str
+    industry_name: str
+    category_name: str
+    pattern_name: str
     deal_count: int
     won_count: int
     win_rate: Decimal
@@ -99,6 +106,10 @@ class PlanOut(OrmModel):
     plan_id: int
     rep_id: int
     plan_date: date
+    start_time: str | None = None
+    end_time: str | None = None
+    category: str = "visit"
+    title: str | None = None
     customer_id: int | None = None
     deal_id: int | None = None
     activity_type: str
@@ -108,8 +119,29 @@ class PlanOut(OrmModel):
     plan_status: str
     is_ai_generated: bool
     rationale: str | None = None
-    product_id: int | None = None
     product_name: str | None = None
+
+
+class PlanCreate(BaseModel):
+    rep_id: int
+    plan_date: date
+    category: str = Field(pattern=r"^(visit|task)$")
+    activity_type: str = "visit"
+    start_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    end_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    title: str | None = None
+    customer_id: int | None = None
+    deal_id: int | None = None
+    priority: int = Field(default=3, ge=1, le=5)
+
+
+class PlanUpdate(BaseModel):
+    start_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    end_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    category: str = Field(pattern=r"^(visit|task)$")
+    activity_type: str
+    title: str | None = None
+    product_name_override: str | None = None
 
 
 class PlanGenerateRequest(BaseModel):

@@ -1,8 +1,11 @@
-import type { ActivityPlan, SalesRep } from "@/types";
+import type { SalesRep } from "@/types";
 
-// industry/company_size/deal_phase/deal_result_status/deal_pattern の名称を返すAPIが
-// まだ無いため、supabase/seed.sql・migration の投入順(= serial の採番順)を前提に
-// ハードコードしている。マスタの並びが変わるとズレるため、名称解決APIが追加され次第そちらに差し替える。
+// 顧客の表示名は GET /api/customers (ai.customer ビュー) が industry_name/
+// company_size_name まで解決して返すため、表示用途にはもう使わない。
+// ここに残しているのは新規顧客登録フォームの業種/企業規模セレクトボックス用で、
+// マスタ一覧を返すAPIがまだ無いため supabase/seed.sql の投入順(= serial の採番順)を
+// 前提にハードコードしている。マスタの並びが変わるとズレるため、マスタ一覧APIが
+// 追加され次第そちらに差し替える。
 export const INDUSTRY_NAMES: Record<number, string> = {
   1: "製造業",
   2: "建設業",
@@ -24,25 +27,13 @@ export const COMPANY_SIZE_NAMES: Record<number, string> = {
   3: "大企業",
 };
 
-export const DEAL_PHASE_NAMES: Record<number, string> = {
-  1: "初回接触",
-  2: "ヒアリング",
-  3: "提案",
-  4: "見積",
-  5: "契約交渉",
-};
-
-export const DEAL_RESULT_STATUS_NAMES: Record<number, string> = {
-  1: "進行中",
-  2: "成約",
-  3: "失注",
-};
-
-export const DEAL_PATTERN_NAMES: Record<number, string> = {
-  1: "新規開拓・大型",
-  2: "新規開拓・小口",
-  3: "既存深耕・大型",
-  4: "既存深耕・小口",
+// deal_result_status テーブルは status_code(英語)しか持たないため、表示用の
+// 日本語名はここで解決する。deal_phase_name・pattern_name 等は ai.* ビューが
+// マスタの日本語名をそのまま返すため、ここでのハードコードは不要。
+export const DEAL_RESULT_STATUS_NAMES: Record<string, string> = {
+  ongoing: "進行中",
+  won: "成約",
+  lost: "失注",
 };
 
 // 担当者一覧を返すAPIがまだ無いため、supabase/seed.sql に実在する18人を直書きしている。
@@ -70,131 +61,3 @@ export const mockSalesReps: SalesRep[] = [
 
 export const mockSalesRep: SalesRep = mockSalesReps[0];
 
-// 「日」表示用の1日のスケジュール。資料作成・新規開拓など、
-// 顧客・商談に紐づかない活動もここでは扱う（customer_id/deal_idは無し）。
-// 実データが来るまでの仮データ。バックエンドの実案件がある2026-08-01を基準にしている。
-export const mockDailyTasks: ActivityPlan[] = [
-  {
-    plan_id: 900101,
-    rep_id: 1,
-    plan_date: "2026-08-01",
-    start_time: "09:00",
-    end_time: "09:30",
-    category: "task",
-    customer_id: null,
-    customer_name: "提案書の最終確認",
-    deal_id: null,
-    product_name: null,
-    activity_type_name: "資料作成",
-    priority: 2,
-    expected_amount: 0,
-    expected_probability: 0,
-    is_ai_generated: true,
-    reasoning_text: "午後の訪問前に、見積・提案内容を最終確認しておくことを提案しました。",
-    result_status: "pending",
-    memo: null,
-    progress_percent: 0,
-  },
-  {
-    plan_id: 900102,
-    rep_id: 1,
-    plan_date: "2026-08-01",
-    start_time: "10:00",
-    end_time: "11:00",
-    category: "task",
-    customer_id: null,
-    customer_name: "新規リストへの架電・飛び込み候補の洗い出し",
-    deal_id: null,
-    product_name: null,
-    activity_type_name: "新規開拓",
-    priority: 3,
-    expected_amount: 0,
-    expected_probability: 0,
-    is_ai_generated: true,
-    reasoning_text: "午前中の空き時間を使い、新規開拓の候補を増やすことを提案しました。",
-    result_status: "pending",
-    memo: null,
-    progress_percent: 0,
-  },
-  {
-    plan_id: 900103,
-    rep_id: 1,
-    plan_date: "2026-08-01",
-    start_time: "15:00",
-    end_time: "15:30",
-    category: "task",
-    customer_id: null,
-    customer_name: "既存顧客へのフォロー架電",
-    deal_id: null,
-    product_name: null,
-    activity_type_name: "電話",
-    priority: 4,
-    expected_amount: 0,
-    expected_probability: 0,
-    is_ai_generated: true,
-    reasoning_text: "訪問後の移動時間を使い、他の見込み客にも短時間で接点を作ることを提案しました。",
-    result_status: "pending",
-    memo: null,
-    progress_percent: 0,
-  },
-  {
-    plan_id: 900104,
-    rep_id: 1,
-    plan_date: "2026-08-01",
-    start_time: "16:30",
-    end_time: "17:30",
-    category: "task",
-    customer_id: null,
-    customer_name: "週次報告書の作成",
-    deal_id: null,
-    product_name: null,
-    activity_type_name: "資料作成",
-    priority: 5,
-    expected_amount: 0,
-    expected_probability: 0,
-    is_ai_generated: true,
-    reasoning_text: "1日の活動を振り返り、報告書としてまとめる時間を確保しました。",
-    result_status: "pending",
-    memo: null,
-    progress_percent: 0,
-  },
-];
-
-// 事務作業の「AI作り直し」で差し替え候補として使う仮の提案プール。
-// 商談のような実データが無いため、ここでは固定の候補から未使用のものを提示する。
-export const mockTaskSuggestions: {
-  title: string;
-  activityTypeName: string;
-  reasoningText: string;
-}[] = [
-  {
-    title: "名刺交換した見込み客のリストアップ",
-    activityTypeName: "新規開拓",
-    reasoningText: "直近の展示会・商談で交換した名刺をリスト化し、新規開拓の候補を増やすことを提案しました。",
-  },
-  {
-    title: "見積書テンプレートの見直し",
-    activityTypeName: "資料作成",
-    reasoningText: "商品カタログの更新に合わせて、見積書テンプレートを最新化しておくことを提案しました。",
-  },
-  {
-    title: "休眠顧客への様子伺いメール送付",
-    activityTypeName: "メール",
-    reasoningText: "しばらく接点の無い既存顧客に、様子伺いのメールで関係を維持することを提案しました。",
-  },
-  {
-    title: "紹介案件の候補リスト作成",
-    activityTypeName: "新規開拓",
-    reasoningText: "既存顧客からの紹介が見込めそうな案件を洗い出し、優先順位をつけることを提案しました。",
-  },
-  {
-    title: "商談メモの整理・共有",
-    activityTypeName: "資料作成",
-    reasoningText: "直近の商談内容をメモから整理し、チームで共有できる状態にしておくことを提案しました。",
-  },
-  {
-    title: "オンライン商談ツールの動作確認",
-    activityTypeName: "Web会議",
-    reasoningText: "来週予定しているオンライン商談に備え、事前に接続・画面共有の動作確認をしておくことを提案しました。",
-  },
-];

@@ -84,9 +84,9 @@ group by classified.rep_id, classified.industry_id, classified.category_id, dp.p
 def list_rep_affinity(conn: Connection, rep_id: int) -> list[dict]:
     rows = conn.execute(
         """
-        select rep_id, industry_id, category_id, pattern_id,
+        select rep_id, rep_name, industry_name, category_name, pattern_name,
                deal_count, won_count, win_rate, avg_won_amount, affinity_score, calculated_at
-        from rep_affinity
+        from ai.rep_affinity
         where rep_id = %s
         order by affinity_score desc
         """,
@@ -118,4 +118,27 @@ def recalculate_rep_affinity(conn: Connection, rep_id: int | None = None) -> lis
             row,
         )
     conn.commit()
-    return list(rows)
+
+    # Re-read through the AI view so the response carries resolved names
+    # (rep/industry/category/pattern) rather than the raw ids just inserted.
+    if rep_id is not None:
+        result = conn.execute(
+            """
+            select rep_id, rep_name, industry_name, category_name, pattern_name,
+                   deal_count, won_count, win_rate, avg_won_amount, affinity_score, calculated_at
+            from ai.rep_affinity
+            where rep_id = %s
+            order by affinity_score desc
+            """,
+            (rep_id,),
+        ).fetchall()
+    else:
+        result = conn.execute(
+            """
+            select rep_id, rep_name, industry_name, category_name, pattern_name,
+                   deal_count, won_count, win_rate, avg_won_amount, affinity_score, calculated_at
+            from ai.rep_affinity
+            order by rep_id, affinity_score desc
+            """
+        ).fetchall()
+    return list(result)

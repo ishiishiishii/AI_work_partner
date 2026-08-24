@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { DealHistoryList } from "@/components/customers/DealHistoryList";
 import { fetchCustomers, fetchDeals } from "@/lib/api";
-import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type { Customer, Deal } from "@/types";
 
@@ -74,18 +73,18 @@ export default function CustomerDetailPage() {
       </Link>
       <h1>{customer.customer_name}</h1>
       <p>
-        {INDUSTRY_NAMES[customer.industry_id] ?? "業種不明"}・{customer.location}
+        {customer.industry_name}・{customer.location}
       </p>
 
       <section className="panel">
         <dl className="goal-card__numbers customer-detail__summary">
           <div>
             <dt>企業規模</dt>
-            <dd>{COMPANY_SIZE_NAMES[customer.company_size_id] ?? "不明"}</dd>
+            <dd>{customer.company_size_name}</dd>
           </div>
           <div>
             <dt>業種</dt>
-            <dd>{INDUSTRY_NAMES[customer.industry_id] ?? "不明"}</dd>
+            <dd>{customer.industry_name}</dd>
           </div>
           <div>
             <dt>所在地</dt>

@@ -43,7 +43,7 @@ export function AiReasoningPanel({ plans, affinities }: AiReasoningPanelProps) {
         <ul className="ai-reasoning__affinities">
           {topAffinities.map((affinity) => (
             <li
-              key={`${affinity.industry_id}-${affinity.category_id}-${affinity.pattern_id}`}
+              key={`${affinity.industry_name}-${affinity.category_name}-${affinity.pattern_name}`}
               className="ai-reasoning__affinity"
             >
               <span className="ai-reasoning__affinity-label">
@@ -57,7 +57,8 @@ export function AiReasoningPanel({ plans, affinities }: AiReasoningPanelProps) {
                 />
               </div>
               <span className="ai-reasoning__affinity-score">
-                勝率{Math.round(affinity.win_rate * 100)}%・平均{formatYen(affinity.avg_won_amount)}
+                勝率{Math.round(affinity.win_rate * 100)}%・{affinity.won_count}/{affinity.deal_count}件・
+                平均成約額{formatYen(affinity.avg_won_amount)}
               </span>
             </li>
           ))}

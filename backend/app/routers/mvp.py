@@ -9,9 +9,11 @@ from app.schemas.models import (
     DealCreate,
     DealOut,
     ForecastOut,
+    PlanCreate,
     PlanGenerateRequest,
     PlanGenerateResponse,
     PlanOut,
+    PlanUpdate,
     ProductOut,
     RepAffinityOut,
     ReplanRequest,
@@ -142,6 +144,45 @@ def get_plans(
             conn, rep_id=rep_id, from_date=from_date, to_date=to_date
         )
     return [PlanOut.model_validate(row) for row in rows]
+
+
+@router.post("/plans", response_model=PlanOut)
+def post_plan(body: PlanCreate) -> PlanOut:
+    with get_connection() as conn:
+        row = planning.create_plan(
+            conn,
+            rep_id=body.rep_id,
+            plan_date=body.plan_date,
+            category=body.category,
+            activity_type=body.activity_type,
+            start_time=body.start_time,
+            end_time=body.end_time,
+            title=body.title,
+            customer_id=body.customer_id,
+            deal_id=body.deal_id,
+            priority=body.priority,
+        )
+    return PlanOut.model_validate(row)
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanOut)
+def patch_plan(plan_id: int, body: PlanUpdate, rep_id: int = Query(...)) -> PlanOut:
+    with get_connection() as conn:
+        try:
+            row = planning.update_plan(
+                conn,
+                plan_id=plan_id,
+                rep_id=rep_id,
+                start_time=body.start_time,
+                end_time=body.end_time,
+                category=body.category,
+                activity_type=body.activity_type,
+                title=body.title,
+                product_name_override=body.product_name_override,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PlanOut.model_validate(row)
 
 
 @router.post("/plans/generate", response_model=PlanGenerateResponse)
