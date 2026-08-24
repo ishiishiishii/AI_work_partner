@@ -1,5 +1,3 @@
-import type { SalesRep } from "@/types";
-
 // 顧客の表示名は GET /api/customers (ai.customer ビュー) が industry_name/
 // company_size_name まで解決して返すため、表示用途にはもう使わない。
 // ここに残しているのは新規顧客登録フォームの業種/企業規模セレクトボックス用で、
@@ -47,67 +45,39 @@ export const DEAL_RESULT_STATUS_NAMES: Record<string, string> = {
   lost: "失注",
 };
 
-// 担当者一覧を返すAPIがまだ無いため、supabase/seed.sql に実在する18人を直書きしている。
-// 名称解決APIが追加され次第、GET /api/sales-reps 相当のAPI呼び出しに差し替える。
-export const mockSalesReps: SalesRep[] = [
-  { rep_id: 1, rep_name: "石川次郎" },
-  { rep_id: 2, rep_name: "村上花子" },
-  { rep_id: 3, rep_name: "小林綾子" },
-  { rep_id: 4, rep_name: "木村さゆり" },
-  { rep_id: 5, rep_name: "加藤拓也" },
-  { rep_id: 6, rep_name: "遠藤直樹" },
-  { rep_id: 7, rep_name: "近藤拓也" },
-  { rep_id: 8, rep_name: "井上愛" },
-  { rep_id: 9, rep_name: "吉田直樹" },
-  { rep_id: 10, rep_name: "高橋健二" },
-  { rep_id: 11, rep_name: "林慎一" },
-  { rep_id: 12, rep_name: "井上健太" },
-  { rep_id: 13, rep_name: "林麻衣" },
-  { rep_id: 14, rep_name: "岡田健二" },
-  { rep_id: 15, rep_name: "吉田陽子" },
-  { rep_id: 16, rep_name: "石川大輔" },
-  { rep_id: 17, rep_name: "岡本裕子" },
-  { rep_id: 18, rep_name: "後藤大輔" },
+// 商談編集フォームのフェーズ選択用。ai.deal ビューは deal_phase_name しか返さないため、
+// 編集APIに送る deal_phase_id を選べるよう、ここだけは id/name の対応を持っておく。
+// マスタ一覧を返すAPIがまだ無いため、supabase/seed.sql の投入順を前提にハードコードしている。
+export const DEAL_PHASE_OPTIONS: { deal_phase_id: number; deal_phase_name: string }[] = [
+  { deal_phase_id: 1, deal_phase_name: "初回接触" },
+  { deal_phase_id: 2, deal_phase_name: "ヒアリング" },
+  { deal_phase_id: 3, deal_phase_name: "提案" },
+  { deal_phase_id: 4, deal_phase_name: "見積" },
+  { deal_phase_id: 5, deal_phase_name: "契約交渉" },
 ];
 
-export const mockSalesRep: SalesRep = mockSalesReps[0];
-
-// 事務作業の「AI作り直し」で差し替え候補として使う仮の提案プール。
-// 商談のような実データが無いため、ここでは固定の候補から未使用のものを提示する。
-export const mockTaskSuggestions: {
-  title: string;
-  activityTypeName: string;
-  reasoningText: string;
-}[] = [
+// 事務作業(category='task')の「対応が難しい」差し替え候補プール。商談と違って実データが
+// 無いため、固定の候補から未使用のものを提示する。この差し替え自体はまだローカル表示のみ
+// (バックエンドへの保存は無い)。
+export const mockTaskSuggestions: { title: string; activityTypeName: string; reasoningText: string }[] = [
   {
-    title: "名刺交換した見込み客のリストアップ",
-    activityTypeName: "新規開拓",
-    reasoningText: "直近の展示会・商談で交換した名刺をリスト化し、新規開拓の候補を増やすことを提案しました。",
-  },
-  {
-    title: "見積書テンプレートの見直し",
+    title: "見積書の見直し",
     activityTypeName: "資料作成",
-    reasoningText: "商品カタログの更新に合わせて、見積書テンプレートを最新化しておくことを提案しました。",
+    reasoningText: "他の予定と重なっていたため、見積内容の見直しに差し替えました。",
   },
   {
-    title: "休眠顧客への様子伺いメール送付",
+    title: "新規リストへの架電",
+    activityTypeName: "新規開拓",
+    reasoningText: "空いた時間を使って新規開拓の候補を増やすことを提案しました。",
+  },
+  {
+    title: "既存顧客へのフォローメール",
     activityTypeName: "メール",
-    reasoningText: "しばらく接点の無い既存顧客に、様子伺いのメールで関係を維持することを提案しました。",
+    reasoningText: "短時間でも接点を作れるよう、フォローメールに差し替えました。",
   },
   {
-    title: "紹介案件の候補リスト作成",
-    activityTypeName: "新規開拓",
-    reasoningText: "既存顧客からの紹介が見込めそうな案件を洗い出し、優先順位をつけることを提案しました。",
-  },
-  {
-    title: "商談メモの整理・共有",
+    title: "週次報告書の作成",
     activityTypeName: "資料作成",
-    reasoningText: "直近の商談内容をメモから整理し、チームで共有できる状態にしておくことを提案しました。",
-  },
-  {
-    title: "オンライン商談ツールの動作確認",
-    activityTypeName: "Web会議",
-    reasoningText: "来週予定しているオンライン商談に備え、事前に接続・画面共有の動作確認をしておくことを提案しました。",
+    reasoningText: "活動の振り返りと報告書作成の時間として提案しました。",
   },
 ];
-

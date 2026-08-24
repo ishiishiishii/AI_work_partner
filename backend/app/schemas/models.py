@@ -87,6 +87,17 @@ class DealOut(OrmModel):
     expected_effort_hours: Decimal
     deal_start_date: date
     contract_date: date | None = None
+    product_id: int
+    deal_phase_id: int
+
+
+class DealUpdate(BaseModel):
+    product_id: int
+    deal_phase_id: int
+    estimated_amount: Decimal = Field(ge=0)
+    win_probability: int = Field(ge=0, le=100)
+    expected_visit_count: int = Field(ge=0)
+    expected_effort_hours: Decimal = Field(ge=0)
 
 
 class RepAffinityOut(OrmModel):
@@ -134,6 +145,9 @@ class PlanCreate(BaseModel):
     customer_id: int | None = None
     deal_id: int | None = None
     priority: int = Field(default=3, ge=1, le=5)
+    expected_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    expected_probability: int = Field(default=0, ge=0, le=100)
+    rationale: str | None = None
 
 
 class PlanUpdate(BaseModel):

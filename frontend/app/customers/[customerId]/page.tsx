@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { DealHistoryList } from "@/components/customers/DealHistoryList";
+import { DealHistoryList, type DealEditFields } from "@/components/customers/DealHistoryList";
 import { NewDealForm } from "@/components/customers/NewDealForm";
-import { createDeal, fetchCustomers, fetchDeals } from "@/lib/api";
+import { createDeal, deleteDeal, fetchCustomers, fetchDeals, fetchProducts, updateDeal } from "@/lib/api";
 import { useRep } from "@/lib/repContext";
-import type { Customer, Deal } from "@/types";
+import type { Customer, Deal, Product } from "@/types";
 
 export default function CustomerDetailPage() {
   const { customerId } = useParams<{ customerId: string }>();
@@ -16,6 +16,7 @@ export default function CustomerDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
 
   const REP_ID = selectedRep?.rep_id ?? null;
 
@@ -29,10 +30,15 @@ export default function CustomerDetailPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const [customers, repDeals] = await Promise.all([fetchCustomers(repId), fetchDeals(repId)]);
+        const [customers, repDeals, allProducts] = await Promise.all([
+          fetchCustomers(repId),
+          fetchDeals(repId),
+          fetchProducts(),
+        ]);
         if (cancelled) return;
         setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
         setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
+        setProducts(allProducts);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -60,6 +66,31 @@ export default function CustomerDetailPage() {
     if (REP_ID === null || !customer) return;
     const created = await createDeal(REP_ID, { ...input, customer_id: customer.customer_id });
     setDeals((prev) => [...prev, created]);
+  }
+
+  async function handleUpdateDeal(dealId: number, updates: DealEditFields) {
+    if (REP_ID === null) return;
+    const previousDeals = deals;
+    setDeals((prev) => prev.map((deal) => (deal.deal_id === dealId ? { ...deal, ...updates } : deal)));
+    try {
+      const updated = await updateDeal(REP_ID, dealId, updates);
+      setDeals((prev) => prev.map((deal) => (deal.deal_id === dealId ? updated : deal)));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "商談の更新に失敗しました");
+      setDeals(previousDeals);
+    }
+  }
+
+  async function handleDeleteDeal(dealId: number) {
+    if (REP_ID === null) return;
+    const previousDeals = deals;
+    setDeals((prev) => prev.filter((deal) => deal.deal_id !== dealId));
+    try {
+      await deleteDeal(REP_ID, dealId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "商談の削除に失敗しました");
+      setDeals(previousDeals);
+    }
   }
 
   if (!selectedRep || isLoading) {
@@ -110,7 +141,12 @@ export default function CustomerDetailPage() {
 
       <section className="panel">
         <h2>商談履歴</h2>
-        <DealHistoryList deals={deals} />
+        <DealHistoryList
+          deals={deals}
+          products={products}
+          onUpdateDeal={handleUpdateDeal}
+          onDeleteDeal={handleDeleteDeal}
+        />
       </section>
 
       <NewDealForm onCreate={handleCreateDeal} />

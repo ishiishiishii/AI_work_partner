@@ -1,3 +1,4 @@
+import type { DealEditFields } from "@/components/customers/DealHistoryList";
 import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
@@ -8,6 +9,7 @@ import type {
   Forecast,
   Product,
   RepAffinity,
+  SalesRep,
   SalesTarget,
   StaleCustomer,
 } from "@/types";
@@ -17,6 +19,13 @@ export function getApiBaseUrl(): string {
     return process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   }
   return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+}
+
+export async function fetchReps(): Promise<SalesRep[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`担当者一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
 }
 
 const ACTIVITY_TYPE_LABELS: Record<string, string> = {
@@ -264,8 +273,9 @@ export async function replanActivityPlans(
 
 // 予定の手動追加の保存。title/customer_id/deal_id の扱いは updatePlan と同じ考え方
 // (title があれば表示上そちらを優先するが、customer_id/deal_id が分かっていれば
-// 商談への紐付けとして残す)。
-export async function createPlan(
+// 商談への紐付けとして残す)。createPlan(差し替え提案の永続化用。plan_id しか返らない)
+// とは用途が異なるため名前を分けている。
+export async function createManualPlan(
   repId: number,
   input: {
     plan_date: string;
@@ -335,6 +345,41 @@ export async function updatePlan(
   if (!res.ok) throw new Error(`予定の更新に失敗しました (HTTP ${res.status})`);
 }
 
+export async function createPlan(
+  repId: number,
+  input: {
+    plan_date: string;
+    category: ActivityPlanCategory;
+    activity_type: string;
+    customer_id: number | null;
+    deal_id: number | null;
+    priority: number;
+    expected_amount?: number;
+    expected_probability?: number;
+    rationale?: string | null;
+    title?: string | null;
+  },
+): Promise<{ plan_id: number }> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/plans`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rep_id: repId, ...input }),
+  });
+  if (!res.ok) throw new Error(`予定の作成に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+// 「対応が難しい」で差し替えられた予定の取り消し用。ソフトキャンセル(plan_status='cancelled')
+// なので、一覧には出なくなるが記録自体は残る。
+export async function cancelPlan(repId: number, planId: number): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/plans/${planId}?rep_id=${repId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`予定の取り消しに失敗しました (HTTP ${res.status})`);
+}
+
 const RESULT_OUTCOME: Record<Exclude<DealResultStatus, "pending">, string> = {
   won: "won",
   lost: "lost",
@@ -399,6 +444,8 @@ type ApiDeal = {
   expected_effort_hours: string | number;
   deal_start_date: string;
   contract_date: string | null;
+  product_id: number;
+  deal_phase_id: number;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -411,9 +458,11 @@ function mapDeal(row: ApiDeal): Deal {
     deal_phase_name: row.deal_phase_name,
     deal_result_status: row.deal_result_status,
     deal_result_status_name: DEAL_RESULT_STATUS_NAMES[row.deal_result_status] ?? "不明",
+    product_id: row.product_id,
     product_name: row.product_name,
     subcategory_name: row.subcategory_name,
     category_name: row.category_name,
+    deal_phase_id: row.deal_phase_id,
     estimated_amount: Number(row.estimated_amount),
     win_probability: Number(row.win_probability),
     expected_visit_count: row.expected_visit_count,
@@ -462,6 +511,29 @@ export async function createDeal(
   });
   if (!res.ok) throw new Error(`商談の登録に失敗しました (HTTP ${res.status})`);
   return mapDeal(await res.json());
+}
+
+export async function updateDeal(
+  repId: number,
+  dealId: number,
+  updates: DealEditFields,
+): Promise<Deal> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/deals/${dealId}?rep_id=${repId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`商談の更新に失敗しました (HTTP ${res.status})`);
+  return mapDeal(await res.json());
+}
+
+export async function deleteDeal(repId: number, dealId: number): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/deals/${dealId}?rep_id=${repId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`商談の削除に失敗しました (HTTP ${res.status})`);
 }
 
 type ApiRepAffinity = {
