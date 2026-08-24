@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { mockTaskSuggestions } from "@/lib/mockData";
 import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
@@ -126,6 +127,12 @@ function parseTimeToMinutes(time: string): number {
   return hours * 60 + minutes;
 }
 
+function formatMinutesToTime(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+}
+
 function formatDurationMinutes(minutes: number): string {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
@@ -182,22 +189,56 @@ function getOverlappingPlanIds(items: ActivityPlan[]): Set<number> {
   return overlapping;
 }
 
-// 時系列順に見て、それまでで一番遅い終了時刻より後に始まる予定の直前に「空き時間」を計算する
-function getGapBeforePlanId(items: ActivityPlan[]): Map<number, number> {
-  const gaps = new Map<number, number>();
+// 営業担当者の勤務時間(9:00〜17:00)。空き時間・お昼休憩の計算はこの枠内で行う
+const WORK_DAY_START_MIN = 9 * 60;
+const WORK_DAY_END_MIN = 17 * 60;
+const LUNCH_START_MIN = 12 * 60;
+const LUNCH_END_MIN = 13 * 60;
+
+type Gap = { kind: "gap" | "lunch"; minutes: number; start: string; end: string };
+
+// [startMin, endMin) の空き時間を、12:00〜13:00のお昼休憩の部分だけ切り出して
+// 前後の「できる作業」候補にできる空き時間(gap)と、休憩(lunch)に分割する
+function splitByLunch(startMin: number, endMin: number): Gap[] {
+  const lunchStart = Math.max(startMin, LUNCH_START_MIN);
+  const lunchEnd = Math.min(endMin, LUNCH_END_MIN);
+  const segments: { kind: "gap" | "lunch"; startMin: number; endMin: number }[] = [];
+  if (lunchStart < lunchEnd) {
+    if (startMin < lunchStart) segments.push({ kind: "gap", startMin, endMin: lunchStart });
+    segments.push({ kind: "lunch", startMin: lunchStart, endMin: lunchEnd });
+    if (lunchEnd < endMin) segments.push({ kind: "gap", startMin: lunchEnd, endMin });
+  } else {
+    segments.push({ kind: "gap", startMin, endMin });
+  }
+  return segments
+    .filter((segment) => segment.endMin > segment.startMin)
+    .map((segment) => ({
+      kind: segment.kind,
+      minutes: segment.endMin - segment.startMin,
+      start: formatMinutesToTime(segment.startMin),
+      end: formatMinutesToTime(segment.endMin),
+    }));
+}
+
+// 時系列順に見て、それまでで一番遅い終了時刻より後に始まる予定の直前に「空き時間」を計算する。
+// 勤務時間(9:00〜17:00)を枠として、始業前の空きは最初の予定の前に、終業までの空きは
+// 最後の予定の後ろ(trailing)に出す
+function getDaySegments(items: ActivityPlan[]): { before: Map<number, Gap[]>; trailing: Gap[] } {
+  const before = new Map<number, Gap[]>();
   const timed = items
     .filter((item) => item.start_time && item.end_time)
     .sort((a, b) => a.start_time!.localeCompare(b.start_time!));
-  let latestEnd: number | null = null;
+  let cursor = WORK_DAY_START_MIN;
   for (const item of timed) {
     const start = parseTimeToMinutes(item.start_time!);
     const end = parseTimeToMinutes(item.end_time!);
-    if (latestEnd !== null && start > latestEnd) {
-      gaps.set(item.plan_id, start - latestEnd);
+    if (start > cursor) {
+      before.set(item.plan_id, splitByLunch(cursor, start));
     }
-    latestEnd = latestEnd === null ? end : Math.max(latestEnd, end);
+    cursor = Math.max(cursor, end);
   }
-  return gaps;
+  const trailing = cursor < WORK_DAY_END_MIN ? splitByLunch(cursor, WORK_DAY_END_MIN) : [];
+  return { before, trailing };
 }
 
 export function ActivityPlanList({
@@ -211,11 +252,12 @@ export function ActivityPlanList({
   onConfirmPlan,
   onUpdateProgress,
 }: ActivityPlanListProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
   const [newPlanDraft, setNewPlanDraft] = useState<ActivityPlan | null>(null);
   const [editDraft, setEditDraft] = useState<(PlanEditFields & { planId: number }) | null>(null);
+  const [gapPicker, setGapPicker] = useState<{ start: string; end: string } | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => {
     const earliest = plans.reduce(
       (min, plan) => (plan.plan_date < min ? plan.plan_date : min),
@@ -260,7 +302,68 @@ export function ActivityPlanList({
 
   // 時間の重複・空き時間は「日」表示でのみ意味があるので、そこだけ計算する
   const overlappingPlanIds = viewMode === "day" ? getOverlappingPlanIds(filtered) : new Set<number>();
-  const gapBeforePlanId = viewMode === "day" ? getGapBeforePlanId(filtered) : new Map<number, number>();
+  const { before: gapBeforePlanId, trailing: trailingGaps } =
+    viewMode === "day" ? getDaySegments(filtered) : { before: new Map<number, Gap[]>(), trailing: [] };
+
+  // 空き時間にできる事務作業の候補(プランA/B/C…)。既にその日の計画で使われている
+  // 候補は除外し、固定プールの中で未使用のものを件数の制限なく全て出す
+  const usedTaskTitles = new Set([...plans, ...dailyTasks].map((item) => item.customer_name));
+  const gapCandidates = mockTaskSuggestions.filter((task) => !usedTaskTitles.has(task.title));
+
+  // 空き時間(gap)はダブルクリックで作業候補を提案できるが、お昼休憩(lunch)はクリック不可の表示のみ
+  function renderGapSegment(segment: Gap, key: string) {
+    if (segment.kind === "lunch") {
+      return (
+        <li key={key} className="activity-plan-list__lunch">
+          昼休憩 {segment.start}〜{segment.end}
+        </li>
+      );
+    }
+    return (
+      <li
+        key={key}
+        className="activity-plan-list__gap"
+        onDoubleClick={() => openGapPicker(segment.start, segment.end)}
+        title="ダブルクリックでこの時間にできる作業を提案"
+      >
+        空き時間 {formatDurationMinutes(segment.minutes)}
+      </li>
+    );
+  }
+
+  function openGapPicker(start: string, end: string) {
+    setGapPicker({ start, end });
+  }
+
+  function closeGapPicker() {
+    setGapPicker(null);
+  }
+
+  function pickGapCandidate(candidate: (typeof mockTaskSuggestions)[number]) {
+    if (!gapPicker) return;
+    onAddPlan({
+      plan_id: -Date.now(),
+      rep_id: repId,
+      plan_date: selectedDate,
+      start_time: gapPicker.start,
+      end_time: gapPicker.end,
+      category: "task",
+      customer_id: null,
+      customer_name: candidate.title,
+      deal_id: null,
+      product_name: null,
+      activity_type_name: candidate.activityTypeName,
+      priority: 3,
+      expected_amount: 0,
+      expected_probability: 0,
+      is_ai_generated: true,
+      reasoning_text: candidate.reasoningText,
+      result_status: "pending",
+      memo: null,
+      progress_percent: 0,
+    });
+    closeGapPicker();
+  }
 
   function getSelectedContactType(plan: ActivityPlan): string {
     return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
@@ -566,17 +669,13 @@ export function ActivityPlanList({
       ) : (
         <ul className="activity-plan-list__items">
           {filtered.map((plan) => {
-            const gapMinutes = gapBeforePlanId.get(plan.plan_id);
+            const gapSegments = gapBeforePlanId.get(plan.plan_id) ?? [];
             const isOverlapping = overlappingPlanIds.has(plan.plan_id);
             const dateLabel =
               viewMode === "day" && plan.start_time ? plan.start_time : formatDate(plan.plan_date);
             return (
               <Fragment key={plan.plan_id}>
-                {gapMinutes !== undefined && (
-                  <li className="activity-plan-list__gap" aria-hidden="true">
-                    空き時間 {formatDurationMinutes(gapMinutes)}
-                  </li>
-                )}
+                {gapSegments.map((segment, index) => renderGapSegment(segment, `before-${plan.plan_id}-${index}`))}
                 <li
                   className={`activity-plan-list__item${
                     isOverlapping ? " activity-plan-list__item--overlap" : ""
@@ -587,6 +686,7 @@ export function ActivityPlanList({
               </Fragment>
             );
           })}
+          {trailingGaps.map((segment, index) => renderGapSegment(segment, `trailing-${index}`))}
         </ul>
       )}
     </section>
@@ -869,6 +969,50 @@ export function ActivityPlanList({
               </div>
             );
           })()}
+        </div>
+      </div>
+    )}
+
+    {gapPicker && (
+      <div className="plan-modal-overlay" onClick={closeGapPicker}>
+        <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="plan-modal__header">
+            <h3>
+              {gapPicker.start}〜{gapPicker.end}にできる作業
+            </h3>
+            <button type="button" className="plan-modal__close" onClick={closeGapPicker} aria-label="閉じる">
+              ×
+            </button>
+          </div>
+          {gapCandidates.length === 0 ? (
+            <p className="activity-plan-list__empty">現在、提案できる候補がありません。</p>
+          ) : (
+            <ul className="gap-picker__options">
+              {gapCandidates.map((candidate, index) => (
+                <li key={candidate.title} className="gap-picker__option">
+                  <div className="gap-picker__option-header">
+                    <span className="badge badge--ai">プラン{String.fromCharCode(65 + index)}</span>
+                    <span
+                      className={`activity-plan-list__type ${
+                        ACTIVITY_TYPE_CLASS[candidate.activityTypeName] ?? "activity-plan-list__type--default"
+                      }`}
+                    >
+                      {candidate.activityTypeName}
+                    </span>
+                  </div>
+                  <div className="gap-picker__option-title">{candidate.title}</div>
+                  <p className="gap-picker__option-reason">{candidate.reasoningText}</p>
+                  <button
+                    type="button"
+                    className="activity-plan-list__result-button"
+                    onClick={() => pickGapCandidate(candidate)}
+                  >
+                    この作業にする
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     )}
