@@ -585,6 +585,134 @@ a {
   color: var(--ink);
 }
 
+.activity-plan-list__clickable {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.activity-plan-list__clickable:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.activity-plan-list__edit-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.plan-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, black 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 100;
+}
+
+.plan-modal {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 28rem;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 32px color-mix(in srgb, black 20%, transparent);
+}
+
+.plan-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.plan-modal__header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.plan-modal__close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.4rem;
+}
+
+.plan-modal__close:hover {
+  color: var(--ink);
+}
+
+.plan-modal__fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.plan-modal__fields dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.plan-modal__fields dd {
+  margin: 0;
+}
+
+.plan-modal__fields dd input,
+.plan-modal__fields dd select {
+  font-size: 0.85rem;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.25rem 0.5rem;
+  background: var(--card);
+  color: var(--ink);
+  width: 100%;
+  max-width: 14rem;
+}
+
+.plan-modal__time-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.plan-modal__time-inputs input {
+  width: auto;
+}
+
+.plan-modal__reasoning {
+  background: color-mix(in srgb, var(--ai) 6%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--ai) 30%, var(--line));
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.plan-modal__reasoning h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  color: var(--ai);
+}
+
+.plan-modal__reasoning p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .replan-banner {
   border-color: var(--ai);
   background: color-mix(in srgb, var(--ai) 6%, var(--card));
