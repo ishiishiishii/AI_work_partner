@@ -1314,6 +1314,25 @@ a {
   border: 1px solid var(--line);
 }
 
+.ai-chat__message--ai p {
+  margin: 0 0 0.5rem;
+}
+
+.ai-chat__message--ai p:last-child {
+  margin-bottom: 0;
+}
+
+.ai-chat__message--ai ul,
+.ai-chat__message--ai ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.ai-chat__message--ai ul:last-child,
+.ai-chat__message--ai ol:last-child {
+  margin-bottom: 0;
+}
+
 .ai-chat__message--user {
   align-self: flex-end;
   background: var(--accent);
