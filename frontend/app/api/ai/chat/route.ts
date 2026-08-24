@@ -1,4 +1,8 @@
-const API_INTERNAL_URL = process.env.API_INTERNAL_URL || "http://api:8000";
+const API_INTERNAL_URL =
+  process.env.API_INTERNAL_URL ||
+  process.env.API_PUBLIC_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:8000";
 
 export const dynamic = "force-dynamic";
 
