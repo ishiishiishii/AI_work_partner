@@ -81,6 +81,18 @@ docker compose up --build
 - フロント: http://localhost:3000
 - API OpenAPI: http://localhost:8000/docs
 
+### 3. ログイン用デモアカウントを作成
+
+フロントの `/login` は Supabase Auth を使っています。`sales_rep` テーブルとは別物のため、
+`supabase start` しただけではログインできません。担当者ごとのデモアカウント
+（EMP001〜EMP018、パスワードは共通で `demo1234`）を、環境ごとに1回作成してください。
+
+```powershell
+docker compose exec api python3 -m scripts.seed_demo_auth_users
+```
+
+既にアカウントがある場合はスキップされるだけなので、何度実行しても安全です。
+
 ## 日常の起動 / 停止
 
 ```powershell
