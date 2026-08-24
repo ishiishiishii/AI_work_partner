@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
+import { ActivityPlanList, type PlanEditFields } from "@/components/dashboard/ActivityPlanList";
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [target, setTarget] = useState<SalesTarget | null>(null);
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
+  const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>(mockDailyTasks);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
@@ -168,6 +169,14 @@ export default function DashboardPage() {
     }
   }
 
+  // 手動編集はローカル表示のみを書き換える(バックエンドへの保存はまだ無い)
+  function handleEditPlan(planId: number, updates: PlanEditFields) {
+    setPlans((prev) => prev.map((plan) => (plan.plan_id === planId ? { ...plan, ...updates } : plan)));
+    setDailyTasks((prev) =>
+      prev.map((task) => (task.plan_id === planId ? { ...task, ...updates } : task)),
+    );
+  }
+
   function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || !target) return;
@@ -188,6 +197,8 @@ export default function DashboardPage() {
       rep_id: candidateDeal.rep_id,
       plan_date: changedPlan.plan_date,
       start_time: null,
+      end_time: null,
+      category: "visit",
       customer_id: candidateDeal.customer_id,
       customer_name: candidateDeal.customer_name,
       deal_id: candidateDeal.deal_id,
@@ -261,9 +272,10 @@ export default function DashboardPage() {
       </div>
       <ActivityPlanList
         plans={plans}
-        dailyTasks={mockDailyTasks}
+        dailyTasks={dailyTasks}
         onResultChange={handleResultChange}
         onRequestAlternative={handleRequestAlternative}
+        onEditPlan={handleEditPlan}
       />
       <AiReasoningPanel plans={plans} affinities={affinities} />
       <AiChatPanel
