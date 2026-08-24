@@ -174,6 +174,8 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     rep_id: row.rep_id,
     plan_date: row.plan_date,
     start_time: null,
+    end_time: null,
+    category: "visit",
     customer_id: row.customer_id,
     customer_name: (row.customer_id && customerNames.get(row.customer_id)) || "(顧客不明)",
     deal_id: row.deal_id,

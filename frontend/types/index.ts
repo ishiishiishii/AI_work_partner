@@ -77,11 +77,17 @@ export type Deal = {
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
 
+// 企業訪問(商談)か、資料作成などの事務作業か。UI上の見た目・操作の出し分けに使う
+// （customer_id/deal_idの有無とは独立。編集で種別だけ切り替えられるようにするため）
+export type ActivityPlanCategory = "visit" | "task";
+
 export type ActivityPlan = {
   plan_id: number;
   rep_id: number;
   plan_date: string; // "YYYY-MM-DD"
   start_time: string | null; // "HH:MM"（日表示のスケジュール用。バックエンドにはまだ無い）
+  end_time: string | null; // "HH:MM"（バックエンドにはまだ無い）
+  category: ActivityPlanCategory;
   customer_id: number | null;
   customer_name: string;
   deal_id: number | null;
