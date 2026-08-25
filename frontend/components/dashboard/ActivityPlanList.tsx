@@ -118,6 +118,49 @@ function getRange(viewMode: ViewMode, selectedDate: string): { start: string; en
   return getMonthRange(selectedDate);
 }
 
+type CalendarDay = { date: string; inRange: boolean };
+
+// 週表示の簡易カレンダー用: その週の月〜日の7日分
+function getWeekDays(dateStr: string): CalendarDay[] {
+  const monday = parseISODate(getWeekRange(dateStr).start);
+  return Array.from({ length: 7 }, (_, i) => ({ date: formatISODate(addDays(monday, i)), inRange: true }));
+}
+
+// 月表示の簡易カレンダー用: 月の1日を含む週の月曜〜末日を含む週の日曜までを埋める。
+// 前後月にはみ出す日付は inRange: false にして薄く表示する
+function getMonthGridDays(dateStr: string): CalendarDay[] {
+  const { start, end } = getMonthRange(dateStr);
+  const monthStart = parseISODate(start);
+  const monthEnd = parseISODate(end);
+  const startWeekday = monthStart.getUTCDay(); // 0(日)〜6(土)
+  const gridStart = addDays(monthStart, startWeekday === 0 ? -6 : 1 - startWeekday);
+  const endWeekday = monthEnd.getUTCDay();
+  const gridEnd = addDays(monthEnd, endWeekday === 0 ? 0 : 7 - endWeekday);
+
+  const days: CalendarDay[] = [];
+  for (let cursor = gridStart; cursor <= gridEnd; cursor = addDays(cursor, 1)) {
+    const iso = formatISODate(cursor);
+    days.push({ date: iso, inRange: iso >= start && iso <= end });
+  }
+  return days;
+}
+
+// 簡易カレンダーの日付セルに「どこの企業に行くか」を出すため、企業訪問(visit)を
+// 日付ごとにまとめる。同じ日に同じ企業への訪問が複数あっても企業名は1つにまとめる
+function groupVisitsByDate(items: ActivityPlan[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const item of items) {
+    if (item.category !== "visit") continue;
+    const list = map.get(item.plan_date);
+    if (list) {
+      if (!list.includes(item.customer_name)) list.push(item.customer_name);
+    } else {
+      map.set(item.plan_date, [item.customer_name]);
+    }
+  }
+  return map;
+}
+
 function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: string }): string {
   if (viewMode === "day") return `${formatDate(range.start)}の活動計画`;
   if (viewMode === "week") return `${formatDate(range.start)}〜${formatDate(range.end)}の活動計画`;
@@ -313,6 +356,13 @@ export function ActivityPlanList({
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
   const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans) : [];
+
+  // 週・月表示の上に出す簡易カレンダー。訪問予定は plans に日付を問わず全期間分入っているので、
+  // 月表示ではみ出す前後月の日付にも訪問があれば表示できる
+  const calendarDays =
+    viewMode === "week" ? getWeekDays(selectedDate) : viewMode === "month" ? getMonthGridDays(selectedDate) : [];
+  const visitsByDate = viewMode === "day" ? new Map<string, string[]>() : groupVisitsByDate(plans);
+  const todayIso = formatISODate(new Date());
 
   const detailPlan =
     newPlanDraft && detailPlanId === newPlanDraft.plan_id
@@ -647,6 +697,11 @@ export function ActivityPlanList({
     setEditDraft(null);
   }
 
+  function jumpToDay(date: string) {
+    setSelectedDate(date);
+    setViewMode("day");
+  }
+
   function handleShift(direction: -1 | 1) {
     const date = parseISODate(selectedDate);
     if (viewMode === "day") {
@@ -687,6 +742,50 @@ export function ActivityPlanList({
           次へ →
         </button>
       </div>
+
+      {viewMode !== "day" && (
+        <div className="mini-calendar">
+          <div className="mini-calendar__weekdays">
+            {["月", "火", "水", "木", "金", "土", "日"].map((label) => (
+              <div key={label} className="mini-calendar__weekday">
+                {label}
+              </div>
+            ))}
+          </div>
+          <div className={`mini-calendar__grid mini-calendar__grid--${viewMode}`}>
+            {calendarDays.map((day) => {
+              const companies = visitsByDate.get(day.date) ?? [];
+              const visibleCompanies = companies.slice(0, 2);
+              const dayNumber = Number(day.date.split("-")[2]);
+              return (
+                <button
+                  type="button"
+                  key={day.date}
+                  className={`mini-calendar__day${day.inRange ? "" : " mini-calendar__day--outside"}${
+                    day.date === selectedDate ? " is-selected" : ""
+                  }${day.date === todayIso ? " is-today" : ""}`}
+                  onClick={() => jumpToDay(day.date)}
+                  title={`クリックで${formatDate(day.date)}の予定へ`}
+                >
+                  <span className="mini-calendar__day-number">{dayNumber}</span>
+                  {visibleCompanies.length > 0 && (
+                    <span className="mini-calendar__day-companies">
+                      {visibleCompanies.map((name) => (
+                        <span key={name} className="mini-calendar__company-chip">
+                          {name}
+                        </span>
+                      ))}
+                      {companies.length > visibleCompanies.length && (
+                        <span className="mini-calendar__more">+{companies.length - visibleCompanies.length}</span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {viewMode === "month" ? (
         monthGroups.length === 0 ? (
