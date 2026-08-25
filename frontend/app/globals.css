@@ -1621,30 +1621,22 @@ a {
   font-size: 1.1rem;
 }
 
-.map-panel__placeholder {
-  position: relative;
+.map-panel__note {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.map-panel__leaflet {
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 16 / 9;
 }
 
-.map-panel__placeholder-image {
+.map-panel__leaflet .leaflet-container {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.map-panel__placeholder-label {
-  position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 0.75rem;
 }
 
 .ai-chat__messages {
