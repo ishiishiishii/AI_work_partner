@@ -474,6 +474,10 @@ type ApiDeal = {
   contract_date: string | null;
   product_id: number;
   deal_phase_id: number;
+  // DealOutがまだcost/profitを返さない(2026-08-25時点)ため常にundefined。
+  // 返るようになった時点でこのままフロント表示に使える。
+  cost?: string | number | null;
+  profit?: string | number | null;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -497,6 +501,8 @@ function mapDeal(row: ApiDeal): Deal {
     expected_effort_hours: Number(row.expected_effort_hours),
     deal_start_date: row.deal_start_date,
     contract_date: row.contract_date,
+    cost: row.cost == null ? null : Number(row.cost),
+    profit: row.profit == null ? null : Number(row.profit),
   };
 }
 
@@ -624,6 +630,7 @@ export async function fetchForecast(repId: number, targetMonth: string): Promise
     target_amount: Number(row.target_amount),
     forecast_amount: Number(row.expected_amount),
     achievement_rate: row.attainment_ratio * 100,
+    open_plan_count: row.open_plan_count,
   };
 }
 

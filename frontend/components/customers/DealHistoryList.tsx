@@ -211,7 +211,12 @@ export function DealHistoryList({
                 </>
               )}
             </div>
-            <div className="deal-history__amount">{formatYen(deal.estimated_amount)}</div>
+            <div className="deal-history__amount">
+              {formatYen(deal.estimated_amount)}
+              {deal.profit != null && (
+                <span className="deal-history__profit">粗利 {formatYen(deal.profit)}</span>
+              )}
+            </div>
           </li>
         );
       })}
