@@ -631,6 +631,7 @@ export async function fetchForecast(repId: number, targetMonth: string): Promise
     target_amount: Number(row.target_amount),
     forecast_amount: Number(row.expected_amount),
     achievement_rate: row.attainment_ratio * 100,
+    open_plan_count: row.open_plan_count,
   };
 }
 

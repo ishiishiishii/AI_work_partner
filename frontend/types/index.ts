@@ -16,6 +16,7 @@ export type Forecast = {
   target_amount: number;
   forecast_amount: number;
   achievement_rate: number;
+  open_plan_count: number; // まだ結果未入力の予定件数
 };
 
 // AI 参照用の第一正規形ビュー(ai.rep_affinity)の形にそのまま対応させている。

@@ -8,6 +8,7 @@ type GoalCardProps = {
   target: SalesTarget;
   forecastAmount: number;
   achievementRate: number;
+  openPlanCount: number;
   onSave: (input: { target_amount: number; target_deal_count: number }) => Promise<void> | void;
 };
 
@@ -20,7 +21,14 @@ function formatMonth(targetMonth: string): string {
   return `${year}年${Number(month)}月`;
 }
 
-export function GoalCard({ rep, target, forecastAmount, achievementRate, onSave }: GoalCardProps) {
+export function GoalCard({
+  rep,
+  target,
+  forecastAmount,
+  achievementRate,
+  openPlanCount,
+  onSave,
+}: GoalCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftAmount, setDraftAmount] = useState(String(target.target_amount));
@@ -135,6 +143,10 @@ export function GoalCard({ rep, target, forecastAmount, achievementRate, onSave 
                 <div>
                   <dt>見込み売上</dt>
                   <dd className="goal-card__forecast">{formatYen(forecastAmount)}</dd>
+                </div>
+                <div>
+                  <dt>未実施の予定</dt>
+                  <dd>{openPlanCount}件</dd>
                 </div>
               </dl>
               <button type="button" className="goal-card__edit-button" onClick={startEditing}>

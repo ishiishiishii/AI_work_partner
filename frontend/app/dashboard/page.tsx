@@ -484,6 +484,7 @@ export default function DashboardPage() {
   // フォールバックする
   const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans);
   const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
+  const openPlanCount = forecast ? forecast.open_plan_count : plans.length;
 
   return (
     <main className="dashboard-main">
@@ -495,6 +496,7 @@ export default function DashboardPage() {
             target={target}
             forecastAmount={forecastAmount}
             achievementRate={achievementRate}
+            openPlanCount={openPlanCount}
             onSave={handleTargetSave}
           />
           {replan && <ReplanBanner info={replan} />}
