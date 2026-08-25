@@ -14,6 +14,27 @@ class SalesRepOut(OrmModel):
     rep_name: str
 
 
+class IndustryOut(OrmModel):
+    industry_id: int
+    industry_name: str
+
+
+class CompanySizeOut(OrmModel):
+    company_size_id: int
+    company_size_name: str
+
+
+class DealPhaseOut(OrmModel):
+    deal_phase_id: int
+    deal_phase_name: str
+
+
+class MastersOut(BaseModel):
+    industries: list[IndustryOut]
+    company_sizes: list[CompanySizeOut]
+    deal_phases: list[DealPhaseOut]
+
+
 class TargetCreate(BaseModel):
     rep_id: int
     target_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
@@ -132,6 +153,7 @@ class PlanOut(OrmModel):
     is_ai_generated: bool
     rationale: str | None = None
     product_name: str | None = None
+    progress_percent: int = 0
 
 
 class PlanCreate(BaseModel):
@@ -157,6 +179,10 @@ class PlanUpdate(BaseModel):
     activity_type: str
     title: str | None = None
     product_name_override: str | None = None
+
+
+class PlanProgressUpdate(BaseModel):
+    progress_percent: int = Field(ge=0, le=100)
 
 
 class PlanGenerateRequest(BaseModel):

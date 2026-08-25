@@ -10,10 +10,12 @@ from app.schemas.models import (
     DealOut,
     DealUpdate,
     ForecastOut,
+    MastersOut,
     PlanCreate,
     PlanGenerateRequest,
     PlanGenerateResponse,
     PlanOut,
+    PlanProgressUpdate,
     PlanUpdate,
     ProductOut,
     RepAffinityOut,
@@ -35,6 +37,12 @@ def get_reps() -> list[SalesRepOut]:
     with get_connection() as conn:
         rows = planning.list_reps(conn)
     return [SalesRepOut.model_validate(row) for row in rows]
+
+
+@router.get("/masters", response_model=MastersOut)
+def get_masters() -> MastersOut:
+    with get_connection() as conn:
+        return MastersOut.model_validate(planning.list_masters(conn))
 
 
 @router.get("/targets", response_model=list[TargetOut])
@@ -231,6 +239,23 @@ def patch_plan(plan_id: int, body: PlanUpdate, rep_id: int = Query(...)) -> Plan
                 activity_type=body.activity_type,
                 title=body.title,
                 product_name_override=body.product_name_override,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PlanOut.model_validate(row)
+
+
+@router.patch("/plans/{plan_id}/progress", response_model=PlanOut)
+def patch_plan_progress(
+    plan_id: int, body: PlanProgressUpdate, rep_id: int = Query(...)
+) -> PlanOut:
+    with get_connection() as conn:
+        try:
+            row = planning.update_plan_progress(
+                conn,
+                plan_id=plan_id,
+                rep_id=rep_id,
+                progress_percent=body.progress_percent,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

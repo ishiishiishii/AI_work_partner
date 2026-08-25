@@ -33,6 +33,7 @@ type ActivityPlanListProps = {
   onAddPlan: (plan: ActivityPlan) => void;
   onConfirmPlan: (planId: number) => void;
   onUpdateProgress: (planId: number, percent: number) => void;
+  onCommitProgress: (planId: number, percent: number) => void;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -253,6 +254,7 @@ export function ActivityPlanList({
   onAddPlan,
   onConfirmPlan,
   onUpdateProgress,
+  onCommitProgress,
 }: ActivityPlanListProps) {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<ViewMode>("day");
@@ -960,6 +962,15 @@ export function ActivityPlanList({
                             step={5}
                             value={detailPlan.progress_percent}
                             onChange={(event) => onUpdateProgress(detailPlan.plan_id, Number(event.target.value))}
+                            onMouseUp={(event) =>
+                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                            }
+                            onTouchEnd={(event) =>
+                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                            }
+                            onKeyUp={(event) =>
+                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                            }
                           />
                         </div>
                       </dd>
