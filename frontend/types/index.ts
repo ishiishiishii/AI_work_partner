@@ -109,6 +109,8 @@ export type Deal = {
   expected_effort_hours: number;
   deal_start_date: string; // "YYYY-MM-DD"
   contract_date: string | null;
+  cost: number; // 原価。ユーザー入力ではなくバックエンドが自動算出(見込み金額の50〜95%)
+  profit: number; // 見込み利益 = estimated_amount - cost(DB側のgenerated column)
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
@@ -135,7 +137,7 @@ export type ActivityPlan = {
   is_ai_generated: boolean;
   reasoning_text: string;
   result_status: DealResultStatus;
-  memo: string | null; // 企業訪問での自由メモ(バックエンドにはまだ無い)
+  memo: string | null; // 企業訪問での自由メモ
   progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う
 };
 
