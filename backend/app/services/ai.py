@@ -128,7 +128,7 @@ def _parse_plan_items(content: str) -> list[Any]:
 # keep working for AI-generated plans too.
 _VALID_ACTIVITY_TYPES = {"訪問", "電話", "メール", "Web会議", "資料作成", "新規開拓"}
 _VALID_CATEGORIES = {"visit", "task"}
-_MAX_PLAN_ITEMS = 40
+_MAX_PLAN_ITEMS = 60
 
 
 def generate_plan_selection(
@@ -190,10 +190,15 @@ def generate_plan_selection(
         "従うべきルール:\n"
         f"- plan_date は{base_date.isoformat()}〜{month_end.isoformat()}の範囲の日付にすること\n"
         "- 同じ deal_id + activity_type の組み合わせを重複させないこと\n"
-        "- 見込み金額(estimated_amount)・確度(win_probability)が高い商談や、"
-        "is_stale が true(長期間接点が無い)の顧客を優先すること\n"
+        "- candidate_deals は商談ステージが進んでいる順(クロージングに近い順)に"
+        "既に並んでいるので、基本的にこの順番を優先すること。"
+        "同程度の優先度であれば is_stale が true(長期間接点が無い)の顧客や、"
+        "見込み金額(estimated_amount)が大きい商談を優先すること\n"
         "- 訪問だけに偏らせず、商談前の資料作成、停滞している商談への電話・メール、"
         "新規開拓の時間なども適度に配置すること\n"
+        "- 稼働日に1件だけ予定を置いて残りを空けたままにしないこと。"
+        "訪問の前後の空き時間には、関連する資料作成・電話・メールや新規開拓を追加で配置し、"
+        "1日の稼働時間(9:00〜18:00、12:00〜13:00は昼休み)をできるだけ埋めること\n"
         "- priority は1(最優先)〜5(低)の整数\n"
         "- rationale は日本語で、金額・確度・接点状況など具体的な数値を根拠に簡潔に述べること\n"
         "- 出力は次のJSON配列のみとし、説明文やコードブロック記法は一切含めないこと:\n"
@@ -216,7 +221,7 @@ def generate_plan_selection(
                     {"role": "user", "content": prompt_json},
                 ],
                 "temperature": 0.3,
-                "max_tokens": 6000,
+                "max_tokens": 8000,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
             timeout=180,

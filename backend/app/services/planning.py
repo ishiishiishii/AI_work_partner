@@ -581,10 +581,11 @@ def update_plan_progress(
 
 
 def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
-    # Stale (churn-risk) customers get a priority boost within this rep's own
-    # candidate list -- this only reorders the rep's own deals, it never
-    # reassigns a deal to a different rep (see AGENTS.md: team-wide
-    # assignment optimization is an explicit Later feature, out of MVP scope).
+    # Priority order: how far along the deal is (deal_phase.sort_order, closer
+    # to close first), then stale (churn-risk) customers within the same
+    # phase -- this only reorders the rep's own deals, it never reassigns a
+    # deal to a different rep (see AGENTS.md: team-wide assignment
+    # optimization is an explicit Later feature, out of MVP scope).
     return list(
         conn.execute(
             """
@@ -597,26 +598,51 @@ def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
                    ) as is_stale
             from ai.deal d
             join ai.customer_activity ca on ca.customer_id = d.customer_id
+            join deal_phase dp on dp.deal_phase_id = d.deal_phase_id
             where d.rep_id = %(rep_id)s and d.deal_result_status = 'ongoing'
             order by
+              dp.sort_order desc,
               (case when (
                  ca.last_contact_date is null
                  or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
-               ) then 1.5 else 1.0 end)
-              * (d.estimated_amount * d.win_probability) desc
+               ) then 1 else 0 end) desc,
+              d.estimated_amount desc
             """,
             {"rep_id": rep_id, "threshold_days": STALE_THRESHOLD_DAYS},
         ).fetchall()
     )
 
 
+def _cap_candidates_to_target(candidates: list[dict], target_amount: Decimal | None) -> list[dict]:
+    """Keep candidates in their given priority order, accumulating
+    estimated_amount, and stop just before the running total would exceed
+    120% of the monthly target -- so a generated plan lands in the
+    100-120% achievement range instead of always pulling in every open deal."""
+    if not target_amount or target_amount <= 0:
+        return candidates
+    cap = target_amount * Decimal("1.2")
+    capped: list[dict] = []
+    running_total = Decimal("0")
+    for deal in candidates:
+        amount = Decimal(deal["estimated_amount"])
+        if running_total + amount > cap and capped:
+            break
+        capped.append(deal)
+        running_total += amount
+    return capped
+
+
+_FALLBACK_FOLLOWUP_TYPES = ("資料作成", "電話", "メール")
+
+
 def _rule_based_plan_decisions(candidates: list[dict], base: date, month: int) -> list[dict]:
     """Fallback used when the AI planner is unreachable or returns nothing
-    usable: same expected-value ordering the AI is asked to reproduce, spread
-    two days apart starting from `base`."""
+    usable: same expected-value ordering the AI is asked to reproduce, one
+    visit per business day plus a same-day follow-up task so the day isn't
+    left mostly idle after a single short visit."""
     decisions = []
     for index, deal in enumerate(candidates):
-        plan_date = base + timedelta(days=index * 2)
+        plan_date = base + timedelta(days=index)
         if plan_date.month != month:
             break
         expected = Decimal(deal["estimated_amount"])
@@ -635,6 +661,7 @@ def _rule_based_plan_decisions(candidates: list[dict], base: date, month: int) -
                 rationale += (
                     " また、これまで接点の記録がなく、顧客流出リスクの観点からも優先度を上げています。"
                 )
+        priority = min(index + 1, 5)
         decisions.append(
             {
                 "category": "visit",
@@ -642,8 +669,23 @@ def _rule_based_plan_decisions(candidates: list[dict], base: date, month: int) -
                 "deal_id": deal["deal_id"],
                 "title": None,
                 "plan_date": plan_date,
-                "priority": min(index + 1, 5),
+                "priority": priority,
                 "rationale": rationale,
+            }
+        )
+        followup_type = _FALLBACK_FOLLOWUP_TYPES[index % len(_FALLBACK_FOLLOWUP_TYPES)]
+        decisions.append(
+            {
+                "category": "task",
+                "activity_type": followup_type,
+                "deal_id": deal["deal_id"],
+                "title": None,
+                "plan_date": plan_date,
+                "priority": min(priority + 1, 5),
+                "rationale": (
+                    f"{deal['customer_name']}への訪問に合わせ、空き時間で{followup_type}を行い"
+                    "準備・フォローを進めます。"
+                ),
             }
         )
     return decisions
@@ -670,6 +712,89 @@ _LUNCH_END_MINUTES = 13 * 60
 def _minutes_to_hhmm(total_minutes: int) -> str:
     hours, minutes = divmod(total_minutes, 60)
     return f"{hours:02d}:{minutes:02d}"
+
+
+_IDLE_FILL_TARGET_MINUTES = 420
+_MAX_ITEMS_PER_DAY = 5
+_FILLER_ACTIVITY_TYPES = ("資料作成", "電話", "メール", "新規開拓")
+
+# Deal-less busywork used once the target-capped candidate pool (see
+# _cap_candidates_to_target) runs out. These carry no deal_id, so they add
+# nothing to expected_amount/forecast -- filling idle time must never pull in
+# deals beyond what's needed to hit the target just to look busy.
+_GENERIC_FILLER_TASKS = (
+    ("資料作成", "週次報告書の作成", "報告・数字管理の事務作業として、空き時間に週次報告書を作成します。"),
+    ("新規開拓", "新規開拓リストの更新", "来月以降の商談創出に向けて、空き時間で新規開拓リストを整理します。"),
+    ("資料作成", "提案資料テンプレートの整備", "既存の提案資料・見積テンプレートを見直し、次の商談ですぐ使えるよう整備します。"),
+    ("新規開拓", "業界動向のリサーチ", "担当業界の最新動向を調べ、新規開拓や既存提案のネタとして整理します。"),
+)
+
+
+def _fill_idle_days(decisions: list[dict], candidates: list[dict]) -> None:
+    """Top up days that already have at least one activity but still leave
+    most of the working day idle (a single 1-hour item followed by an empty
+    day is exactly what made the day view hard to read). Doesn't invent
+    brand-new active days -- only shrinks gaps within days already in use.
+    Prefers deals left over from the target-capped candidate list; once
+    those run out, falls back to deal-less busywork so idle-filling never
+    overshoots the month's target."""
+    used_deal_ids = {d["deal_id"] for d in decisions if d["deal_id"] is not None}
+    leftover = [c for c in candidates if c["deal_id"] not in used_deal_ids]
+
+    by_date: dict[date, list[dict]] = {}
+    for decision in decisions:
+        by_date.setdefault(decision["plan_date"], []).append(decision)
+    if not by_date:
+        return
+
+    leftover_index = 0
+    for plan_date, day_decisions in by_date.items():
+        total_minutes = sum(
+            _ACTIVITY_DURATION_MINUTES.get(d["activity_type"], 60) for d in day_decisions
+        )
+        # Each generic filler may appear at most once per day -- repeating the
+        # exact same task title on one day looks like a bug, not a fuller
+        # schedule, so a day stops filling once its unique options run out
+        # rather than duplicating one.
+        used_generic_today: set[int] = set()
+        while total_minutes < _IDLE_FILL_TARGET_MINUTES and len(day_decisions) < _MAX_ITEMS_PER_DAY:
+            if leftover_index < len(leftover):
+                deal = leftover[leftover_index]
+                leftover_index += 1
+                activity_type = _FILLER_ACTIVITY_TYPES[len(day_decisions) % len(_FILLER_ACTIVITY_TYPES)]
+                new_decision = {
+                    "category": "task",
+                    "activity_type": activity_type,
+                    "deal_id": deal["deal_id"],
+                    "title": None,
+                    "plan_date": plan_date,
+                    "priority": 5,
+                    "rationale": (
+                        f"{deal['customer_name']}は見込み {Decimal(deal['estimated_amount']):,.0f} 円・"
+                        f"確度 {deal['win_probability']}% の商談があるため、空き時間を使って"
+                        f"{activity_type}を進めます。"
+                    ),
+                }
+                used_deal_ids.add(deal["deal_id"])
+            else:
+                available = [i for i in range(len(_GENERIC_FILLER_TASKS)) if i not in used_generic_today]
+                if not available:
+                    break
+                generic_index = available[0]
+                used_generic_today.add(generic_index)
+                activity_type, title, rationale = _GENERIC_FILLER_TASKS[generic_index]
+                new_decision = {
+                    "category": "task",
+                    "activity_type": activity_type,
+                    "deal_id": None,
+                    "title": title,
+                    "plan_date": plan_date,
+                    "priority": 5,
+                    "rationale": rationale,
+                }
+            decisions.append(new_decision)
+            day_decisions.append(new_decision)
+            total_minutes += _ACTIVITY_DURATION_MINUTES.get(new_decision["activity_type"], 60)
 
 
 def _assign_time_slots(decisions: list[dict]) -> None:
@@ -722,16 +847,21 @@ def generate_plans(
         (rep_id, base, target_month),
     )
 
-    candidates = _candidate_deals(conn, rep_id)
+    all_candidates = _candidate_deals(conn, rep_id)
+    sales_target = conn.execute(
+        "select target_amount, target_deal_count from sales_target where rep_id = %s and target_month = %s",
+        (rep_id, _month_to_date(target_month)),
+    ).fetchone()
+    target_amount = Decimal(sales_target["target_amount"]) if sales_target else None
+    # all_candidates is already ranked by priority (deal_phase progress, then
+    # stale/amount); cap it to the deals needed to land the plan in the
+    # 100-120% achievement range instead of pulling in every open deal.
+    candidates = _cap_candidates_to_target(all_candidates, target_amount)
     candidates_by_id = {deal["deal_id"]: deal for deal in candidates}
 
     decisions: list[dict] = []
     used_ai = False
     if candidates:
-        sales_target = conn.execute(
-            "select target_amount, target_deal_count from sales_target where rep_id = %s and target_month = %s",
-            (rep_id, _month_to_date(target_month)),
-        ).fetchone()
         try:
             decisions = ai.generate_plan_selection(
                 conn,
@@ -739,9 +869,9 @@ def generate_plans(
                 target_month=target_month,
                 base_date=base,
                 month_end=month_end,
-                # _candidate_deals is already ranked by expected value; capping
-                # keeps the prompt (and latency) bounded for reps with 100+
-                # open deals without dropping the deals actually worth planning.
+                # candidates is already capped to the target range; the extra
+                # slice keeps the prompt (and latency) bounded for reps with
+                # 100+ open deals without dropping the deals worth planning.
                 candidates=candidates[:40],
                 sales_target=sales_target,
             )
@@ -749,6 +879,7 @@ def generate_plans(
         except ai.AiPlanningError:
             decisions = _rule_based_plan_decisions(candidates, base, month)
 
+    _fill_idle_days(decisions, candidates)
     _assign_time_slots(decisions)
 
     created: list[PlanOut] = []
@@ -918,17 +1049,18 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     if not target:
         raise ValueError("target not found")
 
-    # 成約(won)は満額、失注(lost)は0円、それ以外(対応前 or 延期等)は確率按分で計上する。
+    # 成約(won)は満額、失注(lost)は0円、それ以外(対応前 or 延期等)も見込み金額を
+    # 確率按分せずそのまま計上する(確度は候補選定の優先順位づけにのみ使う)。
     # plan_status='done' の予定は活動結果(activity_result)を紐づけて実際の結果を反映し、
-    # 未対応(scheduled)のままの予定だけ確率按分にする(フロントの calcForecastAmount と同じ考え方)。
+    # 未対応(scheduled)のままの予定は expected_amount をそのまま計上する
+    # (フロントの calcForecastAmount と同じ考え方)。
     plan_stats = conn.execute(
         """
         select
           coalesce(sum(
             case
-              when ap.plan_status = 'done' and latest.outcome = 'won' then ap.expected_amount
               when ap.plan_status = 'done' and latest.outcome = 'lost' then 0
-              else ap.expected_amount * ap.expected_probability / 100.0
+              else ap.expected_amount
             end
           ), 0) as expected_amount,
           count(*) filter (where ap.plan_status = 'scheduled')::int as open_plan_count
