@@ -2,9 +2,8 @@
 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { useEffect } from "react";
-import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
-import { boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { boundsForPositions, boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
 import type { Customer, Territory } from "@/types";
 
 // leafletのデフォルトマーカー画像はCSS相対パス経由で読み込まれる前提になっており、
@@ -31,16 +30,10 @@ const JAPAN_BOUNDS: [[number, number], [number, number]] = [
   [45.5, 145.8],
 ];
 
-const INITIAL_ZOOM_BOOST = 4;
-
-function ZoomBoost() {
-  const map = useMap();
-  useEffect(() => {
-    map.setZoom(map.getZoom() + INITIAL_ZOOM_BOOST);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return null;
-}
+// ピンを囲む余白(ピクセル指定なので、都市1つ分でも県またぎでも見た目の余白が揃う)。
+// maxZoomは、ピンが1件しかない・1箇所に密集している時に寄りすぎて建物レベルまで
+// 拡大されるのを防ぐための上限。
+const FIT_BOUNDS_OPTIONS = { padding: [32, 32] as [number, number], maxZoom: 11 };
 
 export function MapPanel({ customers, territory }: MapPanelProps) {
   // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
@@ -57,14 +50,23 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
     position: coordinatesForCustomer(customer),
   }));
 
-  const bounds = territory ? boundsForPrefectures(territory.prefectures) : JAPAN_BOUNDS;
+  const bounds =
+    pins.length > 0
+      ? boundsForPositions(pins.map((pin) => pin.position))
+      : territory
+        ? boundsForPrefectures(territory.prefectures)
+        : JAPAN_BOUNDS;
 
   return (
     <section className="panel map-panel">
       <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
       <div className="map-panel__leaflet">
-        <MapContainer key={territory?.branch_name ?? "japan"} bounds={bounds} scrollWheelZoom={false}>
-          <ZoomBoost />
+        <MapContainer
+          key={territory?.branch_name ?? "japan"}
+          bounds={bounds}
+          boundsOptions={FIT_BOUNDS_OPTIONS}
+          scrollWheelZoom={false}
+        >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
