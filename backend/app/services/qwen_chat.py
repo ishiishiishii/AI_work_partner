@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import httpx
@@ -40,8 +41,11 @@ def ask(
     context: dict[str, Any],
 ) -> ChatResult:
     context_json = json.dumps(context, ensure_ascii=False, default=str)[:40_000]
+    today = date.today().isoformat()
     system_prompt = (
         "あなたは営業担当者を支援するAI Work Partnerです。"
+        f"今日の日付は{today}です。「今月」「今週」「残り期間」など日付が関わる質問は、"
+        "この日付を基準に判断してください。"
         "必ず日本語で、結論を先に、具体的かつ簡潔に回答してください。"
         "以下のダッシュボードデータを事実情報として利用してください。"
         "データに無い事実を推測で断定せず、不足している場合はその旨を伝えてください。"

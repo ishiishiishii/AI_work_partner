@@ -38,7 +38,14 @@ import type {
   SalesTarget,
 } from "@/types";
 
-const TARGET_MONTH = "2026-08";
+// 以前は "2026-08" にハードコードされており、実際の日付とズレていた
+// (AIチャットにも「今日」を伝えていなかった。backend/app/services/qwen_chat.py 参照)。
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+const TARGET_MONTH = getCurrentMonth();
 
 export default function DashboardPage() {
   const { selectedRep } = useRep();
