@@ -16,6 +16,7 @@ export type Forecast = {
   target_amount: number;
   forecast_amount: number;
   achievement_rate: number;
+  open_plan_count: number; // まだ結果未入力の予定件数
 };
 
 // AI 参照用の第一正規形ビュー(ai.rep_affinity)の形にそのまま対応させている。
@@ -109,6 +110,10 @@ export type Deal = {
   expected_effort_hours: number;
   deal_start_date: string; // "YYYY-MM-DD"
   contract_date: string | null;
+  // 原価・粗利。DB(deal.cost/profit)には既に入っているが、DealOut APIはまだ
+  // 返していない(2026-08-25時点)。返るようになるまでは常にundefined。
+  cost?: number | null;
+  profit?: number | null;
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";

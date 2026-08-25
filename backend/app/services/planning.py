@@ -1,3 +1,4 @@
+import calendar
 import math
 import random
 from datetime import date, timedelta
@@ -6,7 +7,7 @@ from decimal import Decimal
 from psycopg import Connection
 
 from app.schemas.models import PlanOut
-from app.services import affinity
+from app.services import affinity, ai
 
 # A customer counts as "stale" (churn-risk, company-wide) with no visit or
 # deal in this many days. Shared by list_stale_customers and the plan
@@ -609,32 +610,11 @@ def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
     )
 
 
-def generate_plans(
-    conn: Connection,
-    *,
-    rep_id: int,
-    target_month: str,
-    start_date: date | None = None,
-) -> list[PlanOut]:
-    """Skeleton planner: clear future scheduled AI plans and recreate from open deals."""
-    year, month = map(int, target_month.split("-"))
-    base = start_date or date(year, month, 1)
-
-    conn.execute(
-        """
-        delete from activity_plan
-        where rep_id = %s
-          and category = 'visit'
-          and is_ai_generated = true
-          and plan_status = 'scheduled'
-          and plan_date >= %s
-          and to_char(plan_date, 'YYYY-MM') = %s
-        """,
-        (rep_id, base, target_month),
-    )
-
-    candidates = _candidate_deals(conn, rep_id)
-    created: list[PlanOut] = []
+def _rule_based_plan_decisions(candidates: list[dict], base: date, month: int) -> list[dict]:
+    """Fallback used when the AI planner is unreachable or returns nothing
+    usable: same expected-value ordering the AI is asked to reproduce, spread
+    two days apart starting from `base`."""
+    decisions = []
     for index, deal in enumerate(candidates):
         plan_date = base + timedelta(days=index * 2)
         if plan_date.month != month:
@@ -655,35 +635,161 @@ def generate_plans(
                 rationale += (
                     " また、これまで接点の記録がなく、顧客流出リスクの観点からも優先度を上げています。"
                 )
+        decisions.append(
+            {
+                "category": "visit",
+                "activity_type": "訪問",
+                "deal_id": deal["deal_id"],
+                "title": None,
+                "plan_date": plan_date,
+                "priority": min(index + 1, 5),
+                "rationale": rationale,
+            }
+        )
+    return decisions
+
+
+# Typical duration per activity_type, used to pack each day into sequential
+# time blocks. The AI (and the rule-based fallback) only decide what/when
+# (date)/why -- exact clock times are computed here deterministically so
+# they're always valid and non-overlapping, same reasoning as never trusting
+# AI-provided amounts (see generate_plan_selection's docstring).
+_ACTIVITY_DURATION_MINUTES = {
+    "訪問": 90,
+    "Web会議": 45,
+    "電話": 20,
+    "メール": 15,
+    "資料作成": 60,
+    "新規開拓": 60,
+}
+_DAY_START_MINUTES = 9 * 60
+_LUNCH_START_MINUTES = 12 * 60
+_LUNCH_END_MINUTES = 13 * 60
+
+
+def _minutes_to_hhmm(total_minutes: int) -> str:
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def _assign_time_slots(decisions: list[dict]) -> None:
+    """Mutate each decision in place, adding start_time/end_time: pack same-day
+    activities back-to-back from 09:00 in priority order, skipping lunch."""
+    by_date: dict[date, list[dict]] = {}
+    for decision in decisions:
+        by_date.setdefault(decision["plan_date"], []).append(decision)
+
+    for day_decisions in by_date.values():
+        day_decisions.sort(key=lambda d: d["priority"])
+        cursor = _DAY_START_MINUTES
+        for decision in day_decisions:
+            if _LUNCH_START_MINUTES <= cursor < _LUNCH_END_MINUTES:
+                cursor = _LUNCH_END_MINUTES
+            duration = _ACTIVITY_DURATION_MINUTES.get(decision["activity_type"], 60)
+            decision["start_time"] = _minutes_to_hhmm(cursor)
+            cursor += duration
+            decision["end_time"] = _minutes_to_hhmm(cursor)
+
+
+def generate_plans(
+    conn: Connection,
+    *,
+    rep_id: int,
+    target_month: str,
+    start_date: date | None = None,
+) -> tuple[list[PlanOut], bool]:
+    """Clear future scheduled AI plans and recreate from open deals.
+
+    Deal selection, scheduling, priority, and rationale are asked of the AI
+    planner (Qwen); if it's unreachable or returns nothing usable, falls back
+    to the deterministic expected-value ordering so plan generation never
+    breaks (AGENTS.md: AI stays a replaceable boundary). Returns the created
+    plans plus whether the AI planner was actually used.
+    """
+    year, month = map(int, target_month.split("-"))
+    base = start_date or date(year, month, 1)
+    month_end = date(year, month, calendar.monthrange(year, month)[1])
+
+    conn.execute(
+        """
+        delete from activity_plan
+        where rep_id = %s
+          and is_ai_generated = true
+          and plan_status = 'scheduled'
+          and plan_date >= %s
+          and to_char(plan_date, 'YYYY-MM') = %s
+        """,
+        (rep_id, base, target_month),
+    )
+
+    candidates = _candidate_deals(conn, rep_id)
+    candidates_by_id = {deal["deal_id"]: deal for deal in candidates}
+
+    decisions: list[dict] = []
+    used_ai = False
+    if candidates:
+        sales_target = conn.execute(
+            "select target_amount, target_deal_count from sales_target where rep_id = %s and target_month = %s",
+            (rep_id, _month_to_date(target_month)),
+        ).fetchone()
+        try:
+            decisions = ai.generate_plan_selection(
+                conn,
+                rep_id=rep_id,
+                target_month=target_month,
+                base_date=base,
+                month_end=month_end,
+                # _candidate_deals is already ranked by expected value; capping
+                # keeps the prompt (and latency) bounded for reps with 100+
+                # open deals without dropping the deals actually worth planning.
+                candidates=candidates[:40],
+                sales_target=sales_target,
+            )
+            used_ai = True
+        except ai.AiPlanningError:
+            decisions = _rule_based_plan_decisions(candidates, base, month)
+
+    _assign_time_slots(decisions)
+
+    created: list[PlanOut] = []
+    for decision in decisions:
+        deal = candidates_by_id.get(decision["deal_id"]) if decision["deal_id"] is not None else None
+        expected = Decimal(deal["estimated_amount"]) if deal else Decimal("0")
+        probability = int(deal["win_probability"]) if deal else 0
         row = conn.execute(
             """
             insert into activity_plan (
-              rep_id, plan_date, customer_id, deal_id, activity_type, priority,
-              expected_amount, expected_probability, plan_status,
-              is_ai_generated, rationale
+              rep_id, plan_date, start_time, end_time, category, title, customer_id,
+              deal_id, activity_type, priority, expected_amount, expected_probability,
+              plan_status, is_ai_generated, rationale
             )
-            values (%s, %s, %s, %s, 'visit', %s, %s, %s, 'scheduled', true, %s)
-            returning plan_id, rep_id, plan_date, customer_id, deal_id, activity_type,
-                      priority, expected_amount, expected_probability, plan_status,
-                      is_ai_generated, rationale
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', true, %s)
+            returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
+                      customer_id, deal_id, activity_type, priority, expected_amount,
+                      expected_probability, plan_status, is_ai_generated, rationale
             """,
             (
                 rep_id,
-                plan_date,
-                deal["customer_id"],
-                deal["deal_id"],
-                min(index + 1, 5),
+                decision["plan_date"],
+                decision["start_time"],
+                decision["end_time"],
+                decision["category"],
+                decision["title"],
+                deal["customer_id"] if deal else None,
+                decision["deal_id"],
+                decision["activity_type"],
+                decision["priority"],
                 expected,
                 probability,
-                rationale,
+                decision["rationale"],
             ),
         ).fetchone()
         plan_data = dict(row)
-        plan_data["product_name"] = deal["product_name"]
+        plan_data["product_name"] = deal["product_name"] if deal else None
         created.append(PlanOut.model_validate(plan_data))
 
     conn.commit()
-    return created
+    return created, used_ai
 
 
 def create_result(
