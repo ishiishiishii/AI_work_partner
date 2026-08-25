@@ -1,3 +1,5 @@
+import math
+import random
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -221,6 +223,33 @@ def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
     return list(rows)
 
 
+def _customer_branch(conn: Connection, customer_id: int) -> str | None:
+    row = conn.execute(
+        """
+        select b.branch_name
+        from customer c
+        join prefecture p on starts_with(c.location, p.prefecture_name)
+        join branch b on b.branch_id = p.branch_id
+        where c.customer_id = %s
+        """,
+        (customer_id,),
+    ).fetchone()
+    return row["branch_name"] if row else None
+
+
+def _rep_branch(conn: Connection, rep_id: int) -> str | None:
+    row = conn.execute(
+        """
+        select b.branch_name
+        from sales_rep r
+        join branch b on b.branch_id = r.branch_id
+        where r.rep_id = %s
+        """,
+        (rep_id,),
+    ).fetchone()
+    return row["branch_name"] if row else None
+
+
 def create_deal(
     conn: Connection,
     *,
@@ -234,6 +263,25 @@ def create_deal(
     expected_effort_hours: Decimal,
     deal_start_date: date,
 ) -> dict:
+    # New deals (unlike imported/seeded history, which predates branch
+    # assignment) must be logged by a rep whose branch covers the customer's
+    # location -- otherwise the AI plan/rationale layer could end up
+    # suggesting a rep visit a customer far outside their territory.
+    customer_branch = _customer_branch(conn, customer_id)
+    rep_branch = _rep_branch(conn, rep_id)
+    if customer_branch is not None and rep_branch is not None and customer_branch != rep_branch:
+        raise ValueError(
+            f"この顧客の所在地は{customer_branch}支店の管轄です。"
+            f"{rep_branch}支店の担当者はこの顧客の商談を新規登録できません。"
+        )
+
+    # cost has no user input (same as seed.sql's demo data): a random integer
+    # between 50% and 95% of estimated_amount, so profit stays meaningful.
+    amount = int(estimated_amount)
+    cost_low = math.ceil(amount * 0.5)
+    cost_high = max(cost_low, math.floor(amount * 0.95))
+    cost = random.randint(cost_low, cost_high)
+
     # deal_id has no owning sequence (AGENTS.md: it preserves the imported CSV's
     # ids), so newly registered deals continue the max+1 by hand. New deals always
     # start 'ongoing' with no contract_date; won/lost is set later via /results,
@@ -242,14 +290,14 @@ def create_deal(
         """
         insert into deal (
           deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
-          product_id, estimated_amount, win_probability, expected_visit_count,
+          product_id, estimated_amount, cost, win_probability, expected_visit_count,
           expected_effort_hours, deal_start_date, contract_date
         )
         values (
           (select coalesce(max(deal_id), 0) + 1 from deal),
           %s, %s, %s,
           (select deal_result_status_id from deal_result_status where status_code = 'ongoing'),
-          %s, %s, %s, %s, %s, %s, null
+          %s, %s, %s, %s, %s, %s, %s, null
         )
         returning deal_id
         """,
@@ -259,6 +307,7 @@ def create_deal(
             deal_phase_id,
             product_id,
             estimated_amount,
+            cost,
             win_probability,
             expected_visit_count,
             expected_effort_hours,
