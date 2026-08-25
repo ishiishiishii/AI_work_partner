@@ -103,14 +103,15 @@ export function coordinatesForCustomer(customer: {
 }
 
 // 担当エリア(都道府県名の配列)の庁所在地群を包む範囲を返す。地図の初期表示に使う。
-// estimateCoordinates のズレ(最大約±0.3度)がはみ出さないよう、余白を持たせている。
+// ほとんどの顧客は市区町村レベルの実座標(coordinatesForCustomer)なので、県庁所在地の
+// 近くに収まる。余白は初期ズームを大きく(=その地域を大きく)見せるため控えめにしている。
 export function boundsForPrefectures(prefectures: string[]): [[number, number], [number, number]] {
   const coords = prefectures
     .map((name) => PREFECTURE_COORDS[name])
     .filter((coord): coord is [number, number] => coord !== undefined);
   const base: [number, number][] = coords.length > 0 ? coords : [PREFECTURE_COORDS["東京都"]];
 
-  const margin = 0.5;
+  const margin = 0.2;
   const lats = base.map(([lat]) => lat);
   const lngs = base.map(([, lng]) => lng);
   return [

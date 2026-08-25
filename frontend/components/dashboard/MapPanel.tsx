@@ -43,20 +43,13 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
   const pins = scopedCustomers.map((customer) => ({
     customer,
     position: coordinatesForCustomer(customer),
-    isGeocoded: customer.lat !== null && customer.lng !== null,
   }));
-  const geocodedCount = pins.filter((pin) => pin.isGeocoded).length;
 
   const bounds = territory ? boundsForPrefectures(territory.prefectures) : JAPAN_BOUNDS;
 
   return (
     <section className="panel map-panel">
       <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
-      <p className="map-panel__note">
-        番地はデモ用の架空データのため考慮していませんが、市区町村までは実在の位置です
-        {pins.length > 0 && geocodedCount < pins.length && "(一部、位置情報の取得が完了するまでは都道府県内のおおよその位置で表示されます)"}
-        。
-      </p>
       <div className="map-panel__leaflet">
         <MapContainer bounds={bounds} scrollWheelZoom={false}>
           <TileLayer
