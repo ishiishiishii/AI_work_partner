@@ -10,6 +10,7 @@ type GoalCardProps = {
   achievementRate: number;
   openPlanCount: number;
   onSave: (input: { target_amount: number; target_deal_count: number }) => Promise<void> | void;
+  willGeneratePlan?: boolean;
 };
 
 function formatYen(amount: number): string {
@@ -28,6 +29,7 @@ export function GoalCard({
   achievementRate,
   openPlanCount,
   onSave,
+  willGeneratePlan = false,
 }: GoalCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -110,6 +112,9 @@ export function GoalCard({
                   onChange={(event) => setDraftCount(event.target.value)}
                 />
               </label>
+              {willGeneratePlan && (
+                <p className="goal-card__hint">保存すると、AIが今月の活動計画を作成します</p>
+              )}
               <div className="goal-card__actions">
                 <button
                   type="button"
