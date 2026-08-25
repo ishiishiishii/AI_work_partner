@@ -265,7 +265,7 @@ def patch_plan_progress(
 @router.post("/plans/generate", response_model=PlanGenerateResponse)
 def post_plans_generate(body: PlanGenerateRequest) -> PlanGenerateResponse:
     with get_connection() as conn:
-        plans = planning.generate_plans(
+        plans, used_ai = planning.generate_plans(
             conn,
             rep_id=body.rep_id,
             target_month=body.target_month,
@@ -273,14 +273,16 @@ def post_plans_generate(body: PlanGenerateRequest) -> PlanGenerateResponse:
         )
     return PlanGenerateResponse(
         plans=plans,
-        message="Generated a skeleton plan from open deals (expected value order).",
+        message="AIが商談候補から計画を生成しました。"
+        if used_ai
+        else "AIに接続できなかったため、簡易ロジックで計画を生成しました。",
     )
 
 
 @router.post("/plans/replan", response_model=PlanGenerateResponse)
 def post_plans_replan(body: ReplanRequest) -> PlanGenerateResponse:
     with get_connection() as conn:
-        plans = planning.generate_plans(
+        plans, used_ai = planning.generate_plans(
             conn,
             rep_id=body.rep_id,
             target_month=body.target_month,
@@ -288,7 +290,9 @@ def post_plans_replan(body: ReplanRequest) -> PlanGenerateResponse:
         )
     return PlanGenerateResponse(
         plans=plans,
-        message="Replanned from remaining open deals after latest outcomes.",
+        message="AIが直近の結果を踏まえて再計画しました。"
+        if used_ai
+        else "AIに接続できなかったため、簡易ロジックで再計画しました。",
     )
 
 
