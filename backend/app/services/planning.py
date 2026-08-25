@@ -198,7 +198,8 @@ _AI_DEAL_COLUMNS = """
     deal_id, customer_id, customer_name, rep_id, rep_name,
     deal_phase_name, deal_result_status, product_name, subcategory_name,
     category_name, estimated_amount, win_probability, expected_visit_count,
-    expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id
+    expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id,
+    cost, profit
 """
 
 
@@ -422,7 +423,7 @@ def list_plans(
         select plan_id, rep_id, plan_date, start_time, end_time, category, title,
                customer_id, deal_id, activity_type, priority, expected_amount,
                expected_probability, plan_status, is_ai_generated, rationale, product_name,
-               progress_percent
+               progress_percent, memo
         from ai.activity_plan
         where {where}
         order by plan_date, priority
@@ -460,7 +461,8 @@ def create_plan(
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name, progress_percent
+                  null::int as product_id, null::text as product_name, progress_percent,
+                  null::text as memo
         """,
         (
             rep_id,
@@ -492,7 +494,7 @@ def cancel_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name, progress_percent
+                  null::int as product_id, null::text as product_name, progress_percent, memo
         """,
         (plan_id, rep_id),
     ).fetchone()
@@ -513,6 +515,7 @@ def update_plan(
     activity_type: str,
     title: str | None,
     product_name_override: str | None,
+    memo: str | None,
 ) -> dict:
     row = conn.execute(
         """
@@ -522,7 +525,8 @@ def update_plan(
             category = %s,
             activity_type = %s,
             title = %s,
-            product_name_override = %s
+            product_name_override = %s,
+            memo = %s
         where ap.plan_id = %s and ap.rep_id = %s
         returning ap.plan_id, ap.rep_id, ap.plan_date, ap.start_time, ap.end_time,
                   ap.category, ap.title, ap.customer_id, ap.deal_id, ap.activity_type,
@@ -538,9 +542,20 @@ def update_plan(
                       where d.deal_id = ap.deal_id
                     )
                   ) as product_name,
-                  ap.progress_percent
+                  ap.progress_percent,
+                  ap.memo
         """,
-        (start_time, end_time, category, activity_type, title, product_name_override, plan_id, rep_id),
+        (
+            start_time,
+            end_time,
+            category,
+            activity_type,
+            title,
+            product_name_override,
+            memo,
+            plan_id,
+            rep_id,
+        ),
     ).fetchone()
     if not row:
         raise ValueError("plan not found")
@@ -570,7 +585,8 @@ def update_plan_progress(
                       where d.deal_id = ap.deal_id
                     )
                   ) as product_name,
-                  ap.progress_percent
+                  ap.progress_percent,
+                  ap.memo
         """,
         (progress_percent, plan_id, rep_id),
     ).fetchone()

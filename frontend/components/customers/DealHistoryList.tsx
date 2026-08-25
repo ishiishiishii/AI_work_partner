@@ -192,6 +192,7 @@ export function DealHistoryList({
                     {deal.deal_phase_name}・成約確率{deal.win_probability}%
                     {deal.contract_date && `・契約日 ${formatDate(deal.contract_date)}`}
                   </p>
+                  <p className="deal-history__note">原価 {formatYen(deal.cost)}</p>
                   <div className="activity-plan-list__edit-actions">
                     <button
                       type="button"

@@ -239,6 +239,7 @@ def patch_plan(plan_id: int, body: PlanUpdate, rep_id: int = Query(...)) -> Plan
                 activity_type=body.activity_type,
                 title=body.title,
                 product_name_override=body.product_name_override,
+                memo=body.memo,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
