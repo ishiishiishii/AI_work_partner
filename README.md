@@ -91,6 +91,14 @@ docker compose up --build
 
 既にアカウントがある場合はスキップされるだけなので、何度実行しても安全です。
 
+### 4. AIチャット機能を使うには
+
+`/api/ai/chat`はQwen(vLLM、OpenAI互換API)に接続します。接続先は`.env`の`AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL`で、`.env.example`にはプレースホルダしか入っていません。
+
+- `.env`は`.gitignore`対象で、`git pull`しても他の人の値は共有されません。実際に動いている値(Qwenサーバーの実IP・ポート・APIキー)は、Slack等の非公開の手段でチームメンバーから直接教えてもらってください
+- `AI_BASE_URL`に`host.docker.internal`が使えるのは、Qwenサーバーを**自分自身のPCで**動かしている場合だけです。他のメンバーのGPU機で動かしている場合は、そのマシンのLAN上の実IP(例: `http://192.168.x.x:8080/v1`)を指定する必要があります
+- `.env`を書き換えた後は、`docker compose restart api`では反映されません（環境変数はコンテナ作成時に固定されるため）。`docker compose up -d api`でコンテナを作り直してください
+
 ## GitHub Codespaces でスマホ等の別端末から確認する
 
 同じLANに繋げない端末（スマホ等）で `/login` などを確認したい場合、`.devcontainer` を使って
@@ -102,7 +110,6 @@ LAN外からは繋がらないため、Codespaces のポート転送URLを使う
    ```bash
    supabase start
    supabase status   # anon key / service_role key を .env に反映
-   docker compose exec api python3 -m scripts.seed_demo_auth_users
    docker compose up --build -d
    ```
 3. VS Code の **Ports** パネルで `3000` / `8000` / `55321` の **Visibility** を `Public` に変更
@@ -156,3 +163,4 @@ supabase stop
 - **API が Supabase に繋がらない**: Docker Desktop が起動していること、`supabase start` 済みであること、`.env` のキーが `supabase status` と一致していることを確認。
 - **フロントで API が失敗する**: ブラウザからは `NEXT_PUBLIC_API_URL=http://localhost:8000` を使います（コンテナ名 `api` はブラウザから解決できません）。
 - **Windows でファイル変更が検知されない**: `WATCHPACK_POLLING=true` を compose に設定済みです。
+- **AIチャットが `Qwen APIに接続できませんでした` を返す**: `.env` の `AI_BASE_URL` が未設定 or 自分のPCに向いたままになっていないか確認してください（上記「AIチャット機能を使うには」を参照）。
