@@ -4,10 +4,10 @@
   --ink: #1c1917;
   --muted: #57534e;
   --line: #d6d3d1;
-  --accent: #0f766e;
+  --accent: #a91400;
   --card: #ffffff;
   --ok: #166534;
-  --warn: #9a3412;
+  --warn: #e5631f;
   --ai: #b45309;
 }
 
@@ -22,7 +22,7 @@ body {
   min-height: 100%;
   font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
   background:
-    radial-gradient(circle at top left, #e7f5f2 0%, transparent 40%),
+    radial-gradient(circle at top left, #fdece0 0%, transparent 40%),
     linear-gradient(180deg, #f6f4ef 0%, #ece7df 100%);
   color: var(--ink);
 }
@@ -286,6 +286,97 @@ a {
 .activity-plan-list__nav button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.mini-calendar {
+  margin-bottom: 1rem;
+}
+
+.mini-calendar__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.mini-calendar__weekday {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.mini-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.35rem;
+}
+
+.mini-calendar__grid--week .mini-calendar__day {
+  min-height: 6rem;
+}
+
+.mini-calendar__day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
+  min-height: 4.25rem;
+  padding: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mini-calendar__day:hover {
+  border-color: var(--accent);
+}
+
+.mini-calendar__day--outside {
+  opacity: 0.45;
+}
+
+.mini-calendar__day.is-today .mini-calendar__day-number {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.mini-calendar__day.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+}
+
+.mini-calendar__day-number {
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.mini-calendar__day-companies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.mini-calendar__company-chip {
+  font-size: 0.68rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.mini-calendar__more {
+  font-size: 0.68rem;
+  color: var(--muted);
 }
 
 .plan-fab {
