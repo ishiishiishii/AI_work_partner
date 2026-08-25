@@ -33,6 +33,7 @@ type ActivityPlanListProps = {
   onAddPlan: (plan: ActivityPlan) => void;
   onConfirmPlan: (planId: number) => void;
   onUpdateProgress: (planId: number, percent: number) => void;
+  onCommitProgress: (planId: number, percent: number) => void;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -117,77 +118,54 @@ function getRange(viewMode: ViewMode, selectedDate: string): { start: string; en
   return getMonthRange(selectedDate);
 }
 
+type CalendarDay = { date: string; inRange: boolean };
+
+// 週表示の簡易カレンダー用: その週の月〜日の7日分
+function getWeekDays(dateStr: string): CalendarDay[] {
+  const monday = parseISODate(getWeekRange(dateStr).start);
+  return Array.from({ length: 7 }, (_, i) => ({ date: formatISODate(addDays(monday, i)), inRange: true }));
+}
+
+// 月表示の簡易カレンダー用: 月の1日を含む週の月曜〜末日を含む週の日曜までを埋める。
+// 前後月にはみ出す日付は inRange: false にして薄く表示する
+function getMonthGridDays(dateStr: string): CalendarDay[] {
+  const { start, end } = getMonthRange(dateStr);
+  const monthStart = parseISODate(start);
+  const monthEnd = parseISODate(end);
+  const startWeekday = monthStart.getUTCDay(); // 0(日)〜6(土)
+  const gridStart = addDays(monthStart, startWeekday === 0 ? -6 : 1 - startWeekday);
+  const endWeekday = monthEnd.getUTCDay();
+  const gridEnd = addDays(monthEnd, endWeekday === 0 ? 0 : 7 - endWeekday);
+
+  const days: CalendarDay[] = [];
+  for (let cursor = gridStart; cursor <= gridEnd; cursor = addDays(cursor, 1)) {
+    const iso = formatISODate(cursor);
+    days.push({ date: iso, inRange: iso >= start && iso <= end });
+  }
+  return days;
+}
+
+// 簡易カレンダーの日付セルに「どこの企業に行くか」を出すため、企業訪問(visit)を
+// 日付ごとにまとめる。同じ日に同じ企業への訪問が複数あっても企業名は1つにまとめる
+function groupVisitsByDate(items: ActivityPlan[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const item of items) {
+    if (item.category !== "visit") continue;
+    const list = map.get(item.plan_date);
+    if (list) {
+      if (!list.includes(item.customer_name)) list.push(item.customer_name);
+    } else {
+      map.set(item.plan_date, [item.customer_name]);
+    }
+  }
+  return map;
+}
+
 function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: string }): string {
   if (viewMode === "day") return `${formatDate(range.start)}の活動計画`;
   if (viewMode === "week") return `${formatDate(range.start)}〜${formatDate(range.end)}の活動計画`;
   const [year, month] = range.start.split("-");
   return `${year}年${Number(month)}月に狙うべき企業`;
-}
-
-type CalendarCell = { date: string; inMonth: boolean; items: ActivityPlan[] };
-
-// 「月」表示に、既存の企業別一覧(狙うべき企業リスト)とは別に、月全体を一望できる
-// カレンダーグリッドを上部に追加する。月曜始まりで、前後月の日付も枠を埋めるために含める
-// (中身は無し、inMonth=false でグレーアウト表示に使う)。
-function buildMonthCalendar(range: { start: string; end: string }, items: ActivityPlan[]): CalendarCell[][] {
-  const itemsByDate = new Map<string, ActivityPlan[]>();
-  for (const item of items) {
-    const list = itemsByDate.get(item.plan_date);
-    if (list) {
-      list.push(item);
-    } else {
-      itemsByDate.set(item.plan_date, [item]);
-    }
-  }
-
-  const gridStart = getWeekRange(range.start).start;
-  const gridEnd = getWeekRange(range.end).end;
-  const weeks: CalendarCell[][] = [];
-  let cursor = parseISODate(gridStart);
-  while (formatISODate(cursor) <= gridEnd) {
-    const week: CalendarCell[] = [];
-    for (let i = 0; i < 7; i++) {
-      const iso = formatISODate(cursor);
-      week.push({
-        date: iso,
-        inMonth: iso >= range.start && iso <= range.end,
-        items: itemsByDate.get(iso) ?? [],
-      });
-      cursor = addDays(cursor, 1);
-    }
-    weeks.push(week);
-  }
-  return weeks;
-}
-
-type WeekColumn = { date: string; items: ActivityPlan[] };
-
-// 「週」表示を、時刻順の縦一列リストから、曜日ごとに列を分けたカレンダー形式にする。
-// week の range は既に月曜始まりの7日間ちょうどなので、そのまま1日ずつ列にする。
-function buildWeekColumns(range: { start: string; end: string }, items: ActivityPlan[]): WeekColumn[] {
-  const itemsByDate = new Map<string, ActivityPlan[]>();
-  for (const item of items) {
-    const list = itemsByDate.get(item.plan_date);
-    if (list) {
-      list.push(item);
-    } else {
-      itemsByDate.set(item.plan_date, [item]);
-    }
-  }
-
-  const columns: WeekColumn[] = [];
-  let cursor = parseISODate(range.start);
-  for (let i = 0; i < 7; i++) {
-    const iso = formatISODate(cursor);
-    const sorted = (itemsByDate.get(iso) ?? []).slice().sort((a, b) => {
-      const timeA = a.start_time ?? "99:99";
-      const timeB = b.start_time ?? "99:99";
-      return timeA.localeCompare(timeB) || a.priority - b.priority;
-    });
-    columns.push({ date: iso, items: sorted });
-    cursor = addDays(cursor, 1);
-  }
-  return columns;
 }
 
 function parseTimeToMinutes(time: string): number {
@@ -319,6 +297,7 @@ export function ActivityPlanList({
   onAddPlan,
   onConfirmPlan,
   onUpdateProgress,
+  onCommitProgress,
 }: ActivityPlanListProps) {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<ViewMode>("day");
@@ -377,18 +356,12 @@ export function ActivityPlanList({
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
   const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans) : [];
-  // カレンダーグリッドは訪問・事務作業の両方を対象にする(下の企業別一覧は訪問のみ)。
-  // plans/dailyTasks はレップの全期間分を持っているので、ここで月の範囲に絞り込む。
-  const monthCalendar =
-    viewMode === "month"
-      ? buildMonthCalendar(
-          range,
-          [...plans, ...dailyTasks].filter(
-            (item) => item.plan_date >= range.start && item.plan_date <= range.end,
-          ),
-        )
-      : [];
-  const weekColumns = viewMode === "week" ? buildWeekColumns(range, filtered) : [];
+
+  // 週・月表示の上に出す簡易カレンダー。訪問予定は plans に日付を問わず全期間分入っているので、
+  // 月表示ではみ出す前後月の日付にも訪問があれば表示できる
+  const calendarDays =
+    viewMode === "week" ? getWeekDays(selectedDate) : viewMode === "month" ? getMonthGridDays(selectedDate) : [];
+  const visitsByDate = viewMode === "day" ? new Map<string, string[]>() : groupVisitsByDate(plans);
   const todayIso = formatISODate(new Date());
 
   const detailPlan =
@@ -724,6 +697,11 @@ export function ActivityPlanList({
     setEditDraft(null);
   }
 
+  function jumpToDay(date: string) {
+    setSelectedDate(date);
+    setViewMode("day");
+  }
+
   function handleShift(direction: -1 | 1) {
     const date = parseISODate(selectedDate);
     if (viewMode === "day") {
@@ -765,56 +743,46 @@ export function ActivityPlanList({
         </button>
       </div>
 
-      {viewMode === "month" && (
-        <div className="activity-plan-list__calendar">
-          <div className="activity-plan-list__calendar-weekdays">
+      {viewMode !== "day" && (
+        <div className="mini-calendar">
+          <div className="mini-calendar__weekdays">
             {["月", "火", "水", "木", "金", "土", "日"].map((label) => (
-              <div key={label} className="activity-plan-list__calendar-weekday">
+              <div key={label} className="mini-calendar__weekday">
                 {label}
               </div>
             ))}
           </div>
-          <div className="activity-plan-list__calendar-grid">
-            {monthCalendar.flat().map((cell) => (
-              <button
-                type="button"
-                key={cell.date}
-                className={`activity-plan-list__calendar-cell${cell.inMonth ? "" : " is-outside"}${
-                  cell.date === todayIso ? " is-today" : ""
-                }`}
-                onClick={() => {
-                  setSelectedDate(cell.date);
-                  setViewMode("day");
-                }}
-                title={`${cell.date}の予定を見る`}
-              >
-                <div className="activity-plan-list__calendar-cell-header">
-                  <span className="activity-plan-list__calendar-date">{Number(cell.date.slice(-2))}</span>
-                  {cell.items.length > 0 && (
-                    <span className="activity-plan-list__calendar-count">{cell.items.length}件</span>
+          <div className={`mini-calendar__grid mini-calendar__grid--${viewMode}`}>
+            {calendarDays.map((day) => {
+              const companies = visitsByDate.get(day.date) ?? [];
+              const visibleCompanies = companies.slice(0, 2);
+              const dayNumber = Number(day.date.split("-")[2]);
+              return (
+                <button
+                  type="button"
+                  key={day.date}
+                  className={`mini-calendar__day${day.inRange ? "" : " mini-calendar__day--outside"}${
+                    day.date === selectedDate ? " is-selected" : ""
+                  }${day.date === todayIso ? " is-today" : ""}`}
+                  onClick={() => jumpToDay(day.date)}
+                  title={`クリックで${formatDate(day.date)}の予定へ`}
+                >
+                  <span className="mini-calendar__day-number">{dayNumber}</span>
+                  {visibleCompanies.length > 0 && (
+                    <span className="mini-calendar__day-companies">
+                      {visibleCompanies.map((name) => (
+                        <span key={name} className="mini-calendar__company-chip">
+                          {name}
+                        </span>
+                      ))}
+                      {companies.length > visibleCompanies.length && (
+                        <span className="mini-calendar__more">+{companies.length - visibleCompanies.length}</span>
+                      )}
+                    </span>
                   )}
-                </div>
-                {cell.items.length > 0 && (
-                  <div className="activity-plan-list__calendar-cell-items">
-                    {cell.items.slice(0, 3).map((item) => (
-                      <span
-                        key={item.plan_id}
-                        className={`activity-plan-list__calendar-item ${
-                          ACTIVITY_TYPE_CLASS[item.activity_type_name] ?? "activity-plan-list__type--default"
-                        }`}
-                      >
-                        {item.customer_name}
-                      </span>
-                    ))}
-                    {cell.items.length > 3 && (
-                      <span className="activity-plan-list__calendar-item-more">
-                        ほか{cell.items.length - 3}件
-                      </span>
-                    )}
-                  </div>
-                )}
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -849,55 +817,6 @@ export function ActivityPlanList({
             ))}
           </div>
         )
-      ) : viewMode === "week" ? (
-        <div className="activity-plan-list__week-grid">
-          {weekColumns.map((column) => {
-            const weekday = "日月火水木金土"[parseISODate(column.date).getUTCDay()];
-            return (
-              <div
-                key={column.date}
-                className={`activity-plan-list__week-column${
-                  column.date === todayIso ? " is-today" : ""
-                }`}
-              >
-                <div className="activity-plan-list__week-column-header">
-                  <span className="activity-plan-list__week-column-weekday">{weekday}</span>
-                  <span className="activity-plan-list__week-column-date">
-                    {Number(column.date.slice(-2))}
-                  </span>
-                </div>
-                {column.items.length === 0 ? (
-                  <p className="activity-plan-list__week-column-empty">予定なし</p>
-                ) : (
-                  <ul className="activity-plan-list__week-column-items">
-                    {column.items.map((item) => (
-                      <li key={item.plan_id}>
-                        <button
-                          type="button"
-                          className="activity-plan-list__week-card"
-                          onDoubleClick={() => openDetail(item)}
-                          title="ダブルクリックで詳細を表示"
-                        >
-                          {item.start_time && (
-                            <span className="activity-plan-list__week-card-time">{item.start_time}</span>
-                          )}
-                          <span className="activity-plan-list__week-card-name">{item.customer_name}</span>
-                          <span
-                            className={`activity-plan-list__type ${
-                              ACTIVITY_TYPE_CLASS[item.activity_type_name] ?? "activity-plan-list__type--default"
-                            }`}
-                          >
-                            {item.activity_type_name}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-        </div>
       ) : filtered.length === 0 ? (
         <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
       ) : (
@@ -1142,6 +1061,15 @@ export function ActivityPlanList({
                             step={5}
                             value={detailPlan.progress_percent}
                             onChange={(event) => onUpdateProgress(detailPlan.plan_id, Number(event.target.value))}
+                            onMouseUp={(event) =>
+                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                            }
+                            onTouchEnd={(event) =>
+                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                            }
+                            onKeyUp={(event) =>
+                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                            }
                           />
                         </div>
                       </dd>

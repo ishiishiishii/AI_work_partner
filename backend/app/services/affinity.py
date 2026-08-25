@@ -95,8 +95,20 @@ def list_rep_affinity(conn: Connection, rep_id: int) -> list[dict]:
     return list(rows)
 
 
+
+# Arbitrary constant key for a transaction-scoped advisory lock (auto-released on
+# commit/rollback). Two callers rebuilding the same rep's rows concurrently (e.g. the
+# dashboard and the affinity page both recalculating on load) would otherwise both see
+# the pre-delete rows, both delete them, then race to re-insert the same primary keys --
+# the loser gets a UniqueViolation once the winner commits. Serializing the whole
+# delete+insert body behind this lock makes concurrent calls queue instead of racing.
+_RECALCULATE_LOCK_KEY = 872346123
+
+
 def recalculate_rep_affinity(conn: Connection, rep_id: int | None = None) -> list[dict]:
     """Rebuild rep_affinity for one rep, or every rep when rep_id is None."""
+    conn.execute("select pg_advisory_xact_lock(%s)", (_RECALCULATE_LOCK_KEY,)).fetchone()
+
     rows = conn.execute(_AFFINITY_QUERY, {"rep_id": rep_id}).fetchall()
 
     if rep_id is not None:

@@ -28,6 +28,28 @@ def list_reps(conn: Connection) -> list[dict]:
     return list(rows)
 
 
+def list_masters(conn: Connection) -> dict:
+    """Industry/company size/deal phase master lists, for select-box options in
+    forms that need to submit the id (customer/deal creation, deal editing).
+    Frontend previously hardcoded these (see frontend/lib/mockData.ts history)
+    because no API existed yet and the ids had to match seed.sql's insertion
+    order."""
+    industries = conn.execute(
+        "select industry_id, industry_name from industry order by industry_id"
+    ).fetchall()
+    company_sizes = conn.execute(
+        "select company_size_id, company_size_name from company_size_master order by company_size_id"
+    ).fetchall()
+    deal_phases = conn.execute(
+        "select deal_phase_id, deal_phase_name from deal_phase order by sort_order"
+    ).fetchall()
+    return {
+        "industries": list(industries),
+        "company_sizes": list(company_sizes),
+        "deal_phases": list(deal_phases),
+    }
+
+
 def list_targets(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(
@@ -349,7 +371,8 @@ def list_plans(
         f"""
         select plan_id, rep_id, plan_date, start_time, end_time, category, title,
                customer_id, deal_id, activity_type, priority, expected_amount,
-               expected_probability, plan_status, is_ai_generated, rationale, product_name
+               expected_probability, plan_status, is_ai_generated, rationale, product_name,
+               progress_percent
         from ai.activity_plan
         where {where}
         order by plan_date, priority
@@ -387,7 +410,7 @@ def create_plan(
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name
+                  null::int as product_id, null::text as product_name, progress_percent
         """,
         (
             rep_id,
@@ -419,7 +442,7 @@ def cancel_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name
+                  null::int as product_id, null::text as product_name, progress_percent
         """,
         (plan_id, rep_id),
     ).fetchone()
@@ -464,9 +487,42 @@ def update_plan(
                       join product p on p.product_id = d.product_id
                       where d.deal_id = ap.deal_id
                     )
-                  ) as product_name
+                  ) as product_name,
+                  ap.progress_percent
         """,
         (start_time, end_time, category, activity_type, title, product_name_override, plan_id, rep_id),
+    ).fetchone()
+    if not row:
+        raise ValueError("plan not found")
+    conn.commit()
+    return dict(row)
+
+
+def update_plan_progress(
+    conn: Connection, *, plan_id: int, rep_id: int, progress_percent: int
+) -> dict:
+    row = conn.execute(
+        """
+        update activity_plan ap
+        set progress_percent = %s
+        where ap.plan_id = %s and ap.rep_id = %s
+        returning ap.plan_id, ap.rep_id, ap.plan_date, ap.start_time, ap.end_time,
+                  ap.category, ap.title, ap.customer_id, ap.deal_id, ap.activity_type,
+                  ap.priority, ap.expected_amount, ap.expected_probability, ap.plan_status,
+                  ap.is_ai_generated, ap.rationale,
+                  (select d.product_id from deal d where d.deal_id = ap.deal_id) as product_id,
+                  coalesce(
+                    ap.product_name_override,
+                    (
+                      select p.product_name
+                      from deal d
+                      join product p on p.product_id = d.product_id
+                      where d.deal_id = ap.deal_id
+                    )
+                  ) as product_name,
+                  ap.progress_percent
+        """,
+        (progress_percent, plan_id, rep_id),
     ).fetchone()
     if not row:
         raise ValueError("plan not found")

@@ -7,6 +7,7 @@ import type {
   Deal,
   DealResultStatus,
   Forecast,
+  Masters,
   Product,
   RepAffinity,
   SalesRep,
@@ -25,6 +26,16 @@ export async function fetchReps(): Promise<SalesRep[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps`, { cache: "no-store" });
   if (!res.ok) throw new Error(`担当者一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+// 業種・企業規模・商談フェーズのマスタ一覧(新規登録・編集フォームのセレクトボックス用)。
+// 以前は supabase/seed.sql の投入順を前提にフロントへハードコードしていた
+// (frontend/lib/mockData.ts の旧 INDUSTRY_NAMES 等)。
+export async function fetchMasters(): Promise<Masters> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/masters`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`マスタ一覧の取得に失敗しました (HTTP ${res.status})`);
   return res.json();
 }
 
@@ -193,6 +204,7 @@ type ApiPlan = {
   is_ai_generated: boolean;
   rationale: string | null;
   product_name: string | null;
+  progress_percent: number;
 };
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
@@ -220,7 +232,7 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     reasoning_text: row.rationale ?? "",
     result_status: "pending",
     memo: null,
-    progress_percent: 0,
+    progress_percent: row.progress_percent,
   };
 }
 
@@ -343,6 +355,22 @@ export async function updatePlan(
     }),
   });
   if (!res.ok) throw new Error(`予定の更新に失敗しました (HTTP ${res.status})`);
+}
+
+// 事務作業の進捗スライダーは操作中に何度も onChange が飛ぶため、呼び出し側は
+// ドラッグ完了時(onMouseUp/onTouchEnd)にだけこれを呼ぶこと。
+export async function updatePlanProgress(
+  repId: number,
+  planId: number,
+  progressPercent: number,
+): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/plans/${planId}/progress?rep_id=${repId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ progress_percent: progressPercent }),
+  });
+  if (!res.ok) throw new Error(`進捗の保存に失敗しました (HTTP ${res.status})`);
 }
 
 export async function createPlan(
