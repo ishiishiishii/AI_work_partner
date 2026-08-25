@@ -64,6 +64,11 @@ export type Customer = {
   has_relationship: boolean;
   website: string | null;
   contact_name: string | null;
+  // 市区町村レベルの実座標(国土地理院APIでジオコーディング済みの場合のみ)。
+  // 未ジオコーディングの間はnull。地図表示では lib/geo.ts の coordinatesForCustomer が
+  // nullの場合に都道府県+ランダムズレへフォールバックする。
+  lat: number | null;
+  lng: number | null;
 };
 
 // 新規顧客登録フォームの「顧客名で検索」候補。他の担当者が登録済みの同名顧客

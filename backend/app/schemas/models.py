@@ -76,6 +76,10 @@ class CustomerOut(OrmModel):
     has_relationship: bool = True
     website: str | None = None
     contact_name: str | None = None
+    # 市区町村レベルの実座標(国土地理院APIでジオコーディング済みの場合のみ)。
+    # 未ジオコーディングの間はNoneで、フロント側が都道府県+ランダムズレにフォールバックする。
+    lat: float | None = None
+    lng: float | None = None
 
 
 # 新規顧客登録フォームの「顧客名で検索」用。他の担当者が登録済みの同名顧客が

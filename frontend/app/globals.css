@@ -197,6 +197,12 @@ a {
   outline-offset: 1px;
 }
 
+.goal-card__hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
 .goal-card__actions {
   display: flex;
   gap: 0.5rem;
@@ -1709,12 +1715,6 @@ a {
 .map-panel h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
-}
-
-.map-panel__note {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
-  color: var(--muted);
 }
 
 .map-panel__leaflet {

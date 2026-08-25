@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from app.db import get_connection
 from app.schemas.models import (
@@ -31,7 +31,7 @@ from app.schemas.models import (
     TargetOut,
     TerritoryOut,
 )
-from app.services import affinity, planning
+from app.services import affinity, geocoding, planning
 
 router = APIRouter(prefix="/api", tags=["mvp"])
 
@@ -79,10 +79,19 @@ def post_target(body: TargetCreate) -> TargetOut:
 
 
 @router.get("/customers", response_model=list[CustomerOut])
-def get_customers(rep_id: int | None = None) -> list[CustomerOut]:
+def get_customers(background_tasks: BackgroundTasks, rep_id: int | None = None) -> list[CustomerOut]:
     with get_connection() as conn:
         rows = planning.list_customers(conn, rep_id)
+    # 未ジオコーディングの顧客を少しずつ埋める(レスポンスは待たせない)。db resetのたびに
+    # lat/lngは消えるが、api再起動有無に関わらず通常のアクセスが続けば自然に埋まっていく
+    # -- コンテナ再起動タイミングに賭けた仕組みにはしない(過去のログイン問題と同じ轍を踏まない)。
+    background_tasks.add_task(_backfill_customer_coordinates)
     return [CustomerOut.model_validate(row) for row in rows]
+
+
+def _backfill_customer_coordinates() -> None:
+    with get_connection() as conn:
+        geocoding.backfill_customer_coordinates(conn)
 
 
 @router.post("/customers", response_model=CustomerOut)

@@ -7,7 +7,7 @@ from decimal import Decimal
 from psycopg import Connection
 
 from app.schemas.models import PlanOut
-from app.services import affinity, ai
+from app.services import affinity, ai, geocoding
 
 # A customer counts as "stale" (churn-risk, company-wide) with no visit or
 # deal in this many days. Shared by list_stale_customers and the plan
@@ -167,7 +167,7 @@ def list_customers(conn: Connection, rep_id: int | None = None) -> list[dict]:
             """
             select distinct c.customer_id, c.customer_name, c.industry_name,
                    c.company_size_name, c.location, c.primary_rep_id, c.primary_rep_name,
-                   c.website, c.contact_name,
+                   c.website, c.contact_name, c.lat, c.lng,
                    (p.branch_id is null or p.branch_id = r.branch_id) as in_territory,
                    coalesce(
                      c.primary_rep_id = %s
@@ -196,7 +196,7 @@ def list_customers(conn: Connection, rep_id: int | None = None) -> list[dict]:
             """
             select customer_id, customer_name, industry_name, company_size_name,
                    location, primary_rep_id, primary_rep_name, website, contact_name,
-                   true as in_territory, true as has_relationship
+                   lat, lng, true as in_territory, true as has_relationship
             from ai.customer
             order by customer_name
             """
@@ -215,16 +215,32 @@ def create_customer(
     website: str | None = None,
     contact_name: str | None = None,
 ) -> dict:
+    # 1件だけなので、登録操作の一部として同期的にジオコーディングを試みる(数百ms程度)。
+    # 失敗しても登録自体は止めない -- lat/lngはNULLのままになり、フロント側が
+    # 都道府県+ランダムズレにフォールバックする(geocoding.py参照)。
+    coords = geocoding.geocode_customer_location(location)
+    lat, lng = coords if coords is not None else (None, None)
+
     new_customer_id = conn.execute(
         """
         insert into customer (
           customer_name, industry_id, company_size_id, location, primary_rep_id,
-          website, contact_name
+          website, contact_name, lat, lng
         )
-        values (%s, %s, %s, %s, %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         returning customer_id
         """,
-        (customer_name, industry_id, company_size_id, location, primary_rep_id, website, contact_name),
+        (
+            customer_name,
+            industry_id,
+            company_size_id,
+            location,
+            primary_rep_id,
+            website,
+            contact_name,
+            lat,
+            lng,
+        ),
     ).fetchone()["customer_id"]
     # Re-read through the AI view so the response carries resolved names
     # (industry/company size/primary rep) rather than the raw ids just
@@ -235,6 +251,7 @@ def create_customer(
         """
         select c.customer_id, c.customer_name, c.industry_name, c.company_size_name,
                c.location, c.primary_rep_id, c.primary_rep_name, c.website, c.contact_name,
+               c.lat, c.lng,
                coalesce(p.branch_id is null or p.branch_id = r.branch_id, true) as in_territory,
                (c.primary_rep_id is not null) as has_relationship
         from ai.customer c

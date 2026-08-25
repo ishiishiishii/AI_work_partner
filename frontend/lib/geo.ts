@@ -87,19 +87,47 @@ export function estimateCoordinates(location: string, customerId: number): [numb
   return [baseLat + jitterLat, baseLng + jitterLng];
 }
 
-// 担当エリア(都道府県名の配列)の庁所在地群を包む範囲を返す。地図の初期表示に使う。
-// estimateCoordinates のズレ(最大約±0.3度)がはみ出さないよう、余白を持たせている。
+// 国土地理院APIで市区町村レベルの実座標が取れている顧客はそちらを優先し、
+// まだジオコーディングが済んでいない(バックエンドがバックグラウンドで少しずつ埋めている
+// 途中の)顧客だけ、従来の都道府県+ランダムズレにフォールバックする。
+export function coordinatesForCustomer(customer: {
+  location: string;
+  customer_id: number;
+  lat: number | null;
+  lng: number | null;
+}): [number, number] {
+  if (customer.lat !== null && customer.lng !== null) {
+    return [customer.lat, customer.lng];
+  }
+  return estimateCoordinates(customer.location, customer.customer_id);
+}
+
+// 担当エリア(都道府県名の配列)の庁所在地群を包む範囲を返す。ピンが1件も無い時
+// (読み込み中・顧客0件)の地図の初期表示に使うフォールバック。
 export function boundsForPrefectures(prefectures: string[]): [[number, number], [number, number]] {
   const coords = prefectures
     .map((name) => PREFECTURE_COORDS[name])
     .filter((coord): coord is [number, number] => coord !== undefined);
   const base: [number, number][] = coords.length > 0 ? coords : [PREFECTURE_COORDS["東京都"]];
 
-  const margin = 0.5;
+  const margin = 0.2;
   const lats = base.map(([lat]) => lat);
   const lngs = base.map(([, lng]) => lng);
   return [
     [Math.min(...lats) - margin, Math.min(...lngs) - margin],
     [Math.max(...lats) + margin, Math.max(...lngs) + margin],
+  ];
+}
+
+// 実際に表示するピンの座標そのものを包む範囲を返す。県庁所在地ベースの概算ではなく
+// 実データに合わせるので、顧客が1都市に集中していれば自然にその街まで寄って表示され、
+// 複数県に散らばっていれば自然にそれを収める倍率になる(地図側のpaddingピクセルで
+// 見た目の余白を調整する。lib/components/dashboard/MapPanel.tsx参照)。
+export function boundsForPositions(positions: [number, number][]): [[number, number], [number, number]] {
+  const lats = positions.map(([lat]) => lat);
+  const lngs = positions.map(([, lng]) => lng);
+  return [
+    [Math.min(...lats), Math.min(...lngs)],
+    [Math.max(...lats), Math.max(...lngs)],
   ];
 }

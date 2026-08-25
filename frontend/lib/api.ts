@@ -132,6 +132,8 @@ type ApiCustomer = {
   has_relationship: boolean;
   website: string | null;
   contact_name: string | null;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 function mapCustomer(row: ApiCustomer): Customer {
@@ -147,6 +149,8 @@ function mapCustomer(row: ApiCustomer): Customer {
     has_relationship: row.has_relationship,
     website: row.website,
     contact_name: row.contact_name,
+    lat: row.lat ?? null,
+    lng: row.lng ?? null,
   };
 }
 
