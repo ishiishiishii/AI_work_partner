@@ -197,6 +197,12 @@ a {
   outline-offset: 1px;
 }
 
+.goal-card__hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
 .goal-card__actions {
   display: flex;
   gap: 0.5rem;

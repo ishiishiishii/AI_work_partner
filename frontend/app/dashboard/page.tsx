@@ -73,6 +73,9 @@ export default function DashboardPage() {
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
+  const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
+  const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
 
@@ -101,14 +104,9 @@ export default function DashboardPage() {
         ]);
         if (cancelled) return;
 
-        // 訪問系の計画が1件も無ければ、初回だけAIに作ってもらう
-        // (顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない)
+        // 顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない
         const initialVisitPlans = fetchedPlans.filter((plan) => plan.category === "visit");
-        const resolvedVisitPlans =
-          initialVisitPlans.length > 0
-            ? initialVisitPlans
-            : await generateActivityPlans(repId, TARGET_MONTH);
-        if (cancelled) return;
+        setNeedsInitialPlan(initialVisitPlans.length === 0);
 
         // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(repId);
@@ -128,7 +126,7 @@ export default function DashboardPage() {
             target_deal_count: 0,
           },
         );
-        setPlans(resolvedVisitPlans);
+        setPlans(initialVisitPlans);
         setDailyTasks(fetchedPlans.filter((plan) => plan.category === "task"));
         setAffinities(fetchedAffinities);
         setDeals(fetchedDeals);
@@ -152,9 +150,30 @@ export default function DashboardPage() {
 
   async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
     if (REP_ID === null) return;
-    const updated = await saveSalesTarget(REP_ID, TARGET_MONTH, input);
+    const repId = REP_ID;
+    const updated = await saveSalesTarget(repId, TARGET_MONTH, input);
     setTarget(updated);
-    await refreshForecast(REP_ID);
+    await refreshForecast(repId);
+
+    // 目標保存はここで完了させ(GoalCard側の「保存中...」を即座に終える)、
+    // まだ計画が無い月の初回AI生成は裏側で別途走らせる(数分かかり得るため)
+    if (needsInitialPlan) {
+      void generateInitialPlan(repId);
+    }
+  }
+
+  async function generateInitialPlan(repId: number) {
+    setIsGeneratingInitialPlan(true);
+    try {
+      const generated = await generateActivityPlans(repId, TARGET_MONTH);
+      setPlans(generated);
+      setNeedsInitialPlan(false);
+      await refreshForecast(repId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
+    } finally {
+      setIsGeneratingInitialPlan(false);
+    }
   }
 
   async function handleRegenerate() {
@@ -514,19 +533,28 @@ export default function DashboardPage() {
             achievementRate={achievementRate}
             openPlanCount={openPlanCount}
             onSave={handleTargetSave}
+            willGeneratePlan={needsInitialPlan}
           />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
-          <div className="regenerate-bar">
-            <button
-              type="button"
-              className="regenerate-button"
-              onClick={handleRegenerate}
-              disabled={isRegenerating}
-            >
-              {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
-            </button>
-          </div>
+          {needsInitialPlan ? (
+            <p className="activity-plan-list__empty">
+              {isGeneratingInitialPlan
+                ? "AIが今月の活動計画を作成しています(数分かかる場合があります)..."
+                : "目標を保存すると、AIが今月の活動計画を作成します。"}
+            </p>
+          ) : (
+            <div className="regenerate-bar">
+              <button
+                type="button"
+                className="regenerate-button"
+                onClick={handleRegenerate}
+                disabled={isRegenerating}
+              >
+                {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
+              </button>
+            </div>
+          )}
           <ActivityPlanList
             repId={selectedRep.rep_id}
             plans={plans}
