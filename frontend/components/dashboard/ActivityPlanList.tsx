@@ -124,6 +124,42 @@ function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: strin
   return `${year}年${Number(month)}月に狙うべき企業`;
 }
 
+type CalendarCell = { date: string; inMonth: boolean; items: ActivityPlan[] };
+
+// 「月」表示に、既存の企業別一覧(狙うべき企業リスト)とは別に、月全体を一望できる
+// カレンダーグリッドを上部に追加する。月曜始まりで、前後月の日付も枠を埋めるために含める
+// (中身は無し、inMonth=false でグレーアウト表示に使う)。
+function buildMonthCalendar(range: { start: string; end: string }, items: ActivityPlan[]): CalendarCell[][] {
+  const itemsByDate = new Map<string, ActivityPlan[]>();
+  for (const item of items) {
+    const list = itemsByDate.get(item.plan_date);
+    if (list) {
+      list.push(item);
+    } else {
+      itemsByDate.set(item.plan_date, [item]);
+    }
+  }
+
+  const gridStart = getWeekRange(range.start).start;
+  const gridEnd = getWeekRange(range.end).end;
+  const weeks: CalendarCell[][] = [];
+  let cursor = parseISODate(gridStart);
+  while (formatISODate(cursor) <= gridEnd) {
+    const week: CalendarCell[] = [];
+    for (let i = 0; i < 7; i++) {
+      const iso = formatISODate(cursor);
+      week.push({
+        date: iso,
+        inMonth: iso >= range.start && iso <= range.end,
+        items: itemsByDate.get(iso) ?? [],
+      });
+      cursor = addDays(cursor, 1);
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
 function parseTimeToMinutes(time: string): number {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
@@ -311,6 +347,18 @@ export function ActivityPlanList({
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
   const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans) : [];
+  // カレンダーグリッドは訪問・事務作業の両方を対象にする(下の企業別一覧は訪問のみ)。
+  // plans/dailyTasks はレップの全期間分を持っているので、ここで月の範囲に絞り込む。
+  const monthCalendar =
+    viewMode === "month"
+      ? buildMonthCalendar(
+          range,
+          [...plans, ...dailyTasks].filter(
+            (item) => item.plan_date >= range.start && item.plan_date <= range.end,
+          ),
+        )
+      : [];
+  const todayIso = formatISODate(new Date());
 
   const detailPlan =
     newPlanDraft && detailPlanId === newPlanDraft.plan_id
@@ -685,6 +733,39 @@ export function ActivityPlanList({
           次へ →
         </button>
       </div>
+
+      {viewMode === "month" && (
+        <div className="activity-plan-list__calendar">
+          <div className="activity-plan-list__calendar-weekdays">
+            {["月", "火", "水", "木", "金", "土", "日"].map((label) => (
+              <div key={label} className="activity-plan-list__calendar-weekday">
+                {label}
+              </div>
+            ))}
+          </div>
+          <div className="activity-plan-list__calendar-grid">
+            {monthCalendar.flat().map((cell) => (
+              <button
+                type="button"
+                key={cell.date}
+                className={`activity-plan-list__calendar-cell${cell.inMonth ? "" : " is-outside"}${
+                  cell.date === todayIso ? " is-today" : ""
+                }`}
+                onClick={() => {
+                  setSelectedDate(cell.date);
+                  setViewMode("day");
+                }}
+                title={`${cell.date}の予定を見る`}
+              >
+                <span className="activity-plan-list__calendar-date">{Number(cell.date.slice(-2))}</span>
+                {cell.items.length > 0 && (
+                  <span className="activity-plan-list__calendar-count">{cell.items.length}件</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {viewMode === "month" ? (
         monthGroups.length === 0 ? (

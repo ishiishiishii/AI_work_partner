@@ -288,6 +288,67 @@ a {
   color: var(--accent);
 }
 
+.activity-plan-list__calendar {
+  margin-bottom: 1.5rem;
+}
+
+.activity-plan-list__calendar-weekdays,
+.activity-plan-list__calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.4rem;
+}
+
+.activity-plan-list__calendar-weekday {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding-bottom: 0.25rem;
+}
+
+.activity-plan-list__calendar-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-height: 4rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.4rem;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.activity-plan-list__calendar-cell:hover {
+  border-color: var(--accent);
+}
+
+.activity-plan-list__calendar-cell.is-outside {
+  opacity: 0.4;
+}
+
+.activity-plan-list__calendar-cell.is-today {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.activity-plan-list__calendar-date {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.activity-plan-list__calendar-count {
+  align-self: flex-end;
+  margin-top: auto;
+  font-size: 0.7rem;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+
 .plan-fab {
   position: fixed;
   right: 1.5rem;
