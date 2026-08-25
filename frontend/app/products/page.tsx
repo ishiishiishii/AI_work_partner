@@ -42,7 +42,7 @@ export default function ProductsPage() {
   }
 
   return (
-    <main>
+    <main className="wide-main">
       <h1>商品カタログ</h1>
       <p>取り扱っている商品をカテゴリ・サブカテゴリ別に確認できます。</p>
 
