@@ -14,6 +14,11 @@ class SalesRepOut(OrmModel):
     rep_name: str
 
 
+class TerritoryOut(BaseModel):
+    branch_name: str
+    prefectures: list[str]
+
+
 class IndustryOut(OrmModel):
     industry_id: int
     industry_name: str
@@ -110,6 +115,8 @@ class DealOut(OrmModel):
     contract_date: date | None = None
     product_id: int
     deal_phase_id: int
+    cost: Decimal
+    profit: Decimal
 
 
 class DealUpdate(BaseModel):
@@ -154,6 +161,7 @@ class PlanOut(OrmModel):
     rationale: str | None = None
     product_name: str | None = None
     progress_percent: int = 0
+    memo: str | None = None
 
 
 class PlanCreate(BaseModel):
@@ -179,6 +187,7 @@ class PlanUpdate(BaseModel):
     activity_type: str
     title: str | None = None
     product_name_override: str | None = None
+    memo: str | None = None
 
 
 class PlanProgressUpdate(BaseModel):

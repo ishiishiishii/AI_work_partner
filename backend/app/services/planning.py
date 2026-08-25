@@ -198,7 +198,8 @@ _AI_DEAL_COLUMNS = """
     deal_id, customer_id, customer_name, rep_id, rep_name,
     deal_phase_name, deal_result_status, product_name, subcategory_name,
     category_name, estimated_amount, win_probability, expected_visit_count,
-    expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id
+    expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id,
+    cost, profit
 """
 
 
@@ -249,6 +250,31 @@ def _rep_branch(conn: Connection, rep_id: int) -> str | None:
         (rep_id,),
     ).fetchone()
     return row["branch_name"] if row else None
+
+
+def get_rep_territory(conn: Connection, rep_id: int) -> dict | None:
+    """The rep's branch and the prefectures it covers (see `prefecture` /
+    `branch` tables, 20260826100000). Used to scope the customer map to a
+    rep's own territory instead of showing the whole country."""
+    branch_row = conn.execute(
+        """
+        select b.branch_id, b.branch_name
+        from sales_rep r
+        join branch b on b.branch_id = r.branch_id
+        where r.rep_id = %s
+        """,
+        (rep_id,),
+    ).fetchone()
+    if not branch_row:
+        return None
+    prefecture_rows = conn.execute(
+        "select prefecture_name from prefecture where branch_id = %s order by prefecture_name",
+        (branch_row["branch_id"],),
+    ).fetchall()
+    return {
+        "branch_name": branch_row["branch_name"],
+        "prefectures": [row["prefecture_name"] for row in prefecture_rows],
+    }
 
 
 def create_deal(
@@ -422,7 +448,7 @@ def list_plans(
         select plan_id, rep_id, plan_date, start_time, end_time, category, title,
                customer_id, deal_id, activity_type, priority, expected_amount,
                expected_probability, plan_status, is_ai_generated, rationale, product_name,
-               progress_percent
+               progress_percent, memo
         from ai.activity_plan
         where {where}
         order by plan_date, priority
@@ -460,7 +486,8 @@ def create_plan(
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name, progress_percent
+                  null::int as product_id, null::text as product_name, progress_percent,
+                  null::text as memo
         """,
         (
             rep_id,
@@ -492,7 +519,7 @@ def cancel_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name, progress_percent
+                  null::int as product_id, null::text as product_name, progress_percent, memo
         """,
         (plan_id, rep_id),
     ).fetchone()
@@ -513,6 +540,7 @@ def update_plan(
     activity_type: str,
     title: str | None,
     product_name_override: str | None,
+    memo: str | None,
 ) -> dict:
     row = conn.execute(
         """
@@ -522,7 +550,8 @@ def update_plan(
             category = %s,
             activity_type = %s,
             title = %s,
-            product_name_override = %s
+            product_name_override = %s,
+            memo = %s
         where ap.plan_id = %s and ap.rep_id = %s
         returning ap.plan_id, ap.rep_id, ap.plan_date, ap.start_time, ap.end_time,
                   ap.category, ap.title, ap.customer_id, ap.deal_id, ap.activity_type,
@@ -538,9 +567,20 @@ def update_plan(
                       where d.deal_id = ap.deal_id
                     )
                   ) as product_name,
-                  ap.progress_percent
+                  ap.progress_percent,
+                  ap.memo
         """,
-        (start_time, end_time, category, activity_type, title, product_name_override, plan_id, rep_id),
+        (
+            start_time,
+            end_time,
+            category,
+            activity_type,
+            title,
+            product_name_override,
+            memo,
+            plan_id,
+            rep_id,
+        ),
     ).fetchone()
     if not row:
         raise ValueError("plan not found")
@@ -570,7 +610,8 @@ def update_plan_progress(
                       where d.deal_id = ap.deal_id
                     )
                   ) as product_name,
-                  ap.progress_percent
+                  ap.progress_percent,
+                  ap.memo
         """,
         (progress_percent, plan_id, rep_id),
     ).fetchone()
