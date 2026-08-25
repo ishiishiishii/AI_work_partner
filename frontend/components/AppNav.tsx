@@ -16,6 +16,7 @@ export function AppNav() {
       <Link href="/dashboard">ダッシュボード</Link>
       <Link href="/customers">顧客一覧</Link>
       <Link href="/products">商品カタログ</Link>
+      <Link href="/affinity">得意分野</Link>
       <RepSwitcher />
     </nav>
   );

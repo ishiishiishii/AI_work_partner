@@ -5,6 +5,7 @@ import { ActivityPlanList, type PlanEditFields } from "@/components/dashboard/Ac
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
+import { MapPanel } from "@/components/dashboard/MapPanel";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
   cancelPlan,
@@ -521,7 +522,8 @@ export default function DashboardPage() {
             plans={plans}
             affinities={affinities}
           />
-          <AiReasoningPanel plans={plans} affinities={affinities} />
+          <MapPanel />
+          <AiReasoningPanel plans={plans} />
         </div>
       </div>
     </main>
