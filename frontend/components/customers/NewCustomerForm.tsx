@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { fetchMasters } from "@/lib/api";
 import type { CompanySize, Industry } from "@/types";
 
 type NewCustomerFormProps = {
-  industries: Industry[];
-  companySizes: CompanySize[];
   onCreate: (input: {
     customer_name: string;
     industry_id: number;
@@ -14,25 +13,34 @@ type NewCustomerFormProps = {
   }) => Promise<void>;
 };
 
-function makeInitialDraft(industries: Industry[], companySizes: CompanySize[]) {
-  return {
-    customer_name: "",
-    industry_id: industries[0] ? String(industries[0].industry_id) : "",
-    company_size_id: companySizes[0] ? String(companySizes[0].company_size_id) : "",
-    location: "",
-  };
-}
+const initialDraft = {
+  customer_name: "",
+  industry_id: "",
+  company_size_id: "",
+  location: "",
+};
 
-export function NewCustomerForm({ industries, companySizes, onCreate }: NewCustomerFormProps) {
-  const [draft, setDraft] = useState(() => makeInitialDraft(industries, companySizes));
+export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
+  const [industries, setIndustries] = useState<Industry[]>([]);
+  const [companySizes, setCompanySizes] = useState<CompanySize[]>([]);
+  const [draft, setDraft] = useState(initialDraft);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft((prev) =>
-      prev.industry_id || prev.company_size_id ? prev : makeInitialDraft(industries, companySizes),
-    );
-  }, [industries, companySizes]);
+    fetchMasters()
+      .then((masters) => {
+        setIndustries(masters.industries);
+        setCompanySizes(masters.company_sizes);
+        setDraft((prev) => ({
+          ...prev,
+          industry_id: prev.industry_id || String(masters.industries[0]?.industry_id ?? ""),
+          company_size_id:
+            prev.company_size_id || String(masters.company_sizes[0]?.company_size_id ?? ""),
+        }));
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "マスタ一覧の取得に失敗しました"));
+  }, []);
 
   const isValid =
     draft.customer_name.trim().length > 0 &&
@@ -53,7 +61,7 @@ export function NewCustomerForm({ industries, companySizes, onCreate }: NewCusto
         company_size_id: Number(draft.company_size_id),
         location: draft.location.trim(),
       });
-      setDraft(makeInitialDraft(industries, companySizes));
+      setDraft({ ...initialDraft, industry_id: draft.industry_id, company_size_id: draft.company_size_id });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
     } finally {

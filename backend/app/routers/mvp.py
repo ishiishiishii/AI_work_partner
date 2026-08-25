@@ -4,19 +4,18 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.db import get_connection
 from app.schemas.models import (
-    CompanySizeOut,
     CustomerCreate,
     CustomerOut,
     DealCreate,
     DealOut,
-    DealPhaseOut,
     DealUpdate,
     ForecastOut,
-    IndustryOut,
+    MastersOut,
     PlanCreate,
     PlanGenerateRequest,
     PlanGenerateResponse,
     PlanOut,
+    PlanProgressUpdate,
     PlanUpdate,
     ProductOut,
     RepAffinityOut,
@@ -40,25 +39,10 @@ def get_reps() -> list[SalesRepOut]:
     return [SalesRepOut.model_validate(row) for row in rows]
 
 
-@router.get("/industries", response_model=list[IndustryOut])
-def get_industries() -> list[IndustryOut]:
+@router.get("/masters", response_model=MastersOut)
+def get_masters() -> MastersOut:
     with get_connection() as conn:
-        rows = planning.list_industries(conn)
-    return [IndustryOut.model_validate(row) for row in rows]
-
-
-@router.get("/company-sizes", response_model=list[CompanySizeOut])
-def get_company_sizes() -> list[CompanySizeOut]:
-    with get_connection() as conn:
-        rows = planning.list_company_sizes(conn)
-    return [CompanySizeOut.model_validate(row) for row in rows]
-
-
-@router.get("/deal-phases", response_model=list[DealPhaseOut])
-def get_deal_phases() -> list[DealPhaseOut]:
-    with get_connection() as conn:
-        rows = planning.list_deal_phases(conn)
-    return [DealPhaseOut.model_validate(row) for row in rows]
+        return MastersOut.model_validate(planning.list_masters(conn))
 
 
 @router.get("/targets", response_model=list[TargetOut])
@@ -255,6 +239,23 @@ def patch_plan(plan_id: int, body: PlanUpdate, rep_id: int = Query(...)) -> Plan
                 activity_type=body.activity_type,
                 title=body.title,
                 product_name_override=body.product_name_override,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PlanOut.model_validate(row)
+
+
+@router.patch("/plans/{plan_id}/progress", response_model=PlanOut)
+def patch_plan_progress(
+    plan_id: int, body: PlanProgressUpdate, rep_id: int = Query(...)
+) -> PlanOut:
+    with get_connection() as conn:
+        try:
+            row = planning.update_plan_progress(
+                conn,
+                plan_id=plan_id,
+                rep_id=rep_id,
+                progress_percent=body.progress_percent,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

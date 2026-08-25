@@ -27,7 +27,12 @@ class CompanySizeOut(OrmModel):
 class DealPhaseOut(OrmModel):
     deal_phase_id: int
     deal_phase_name: str
-    sort_order: int
+
+
+class MastersOut(BaseModel):
+    industries: list[IndustryOut]
+    company_sizes: list[CompanySizeOut]
+    deal_phases: list[DealPhaseOut]
 
 
 class TargetCreate(BaseModel):
@@ -148,6 +153,7 @@ class PlanOut(OrmModel):
     is_ai_generated: bool
     rationale: str | None = None
     product_name: str | None = None
+    progress_percent: int = 0
 
 
 class PlanCreate(BaseModel):
@@ -173,6 +179,10 @@ class PlanUpdate(BaseModel):
     activity_type: str
     title: str | None = None
     product_name_override: str | None = None
+
+
+class PlanProgressUpdate(BaseModel):
+    progress_percent: int = Field(ge=0, le=100)
 
 
 class PlanGenerateRequest(BaseModel):

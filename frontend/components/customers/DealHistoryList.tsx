@@ -36,7 +36,13 @@ function formatDate(dateStr: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}(${weekday})`;
 }
 
-export function DealHistoryList({ deals, products, dealPhases, onUpdateDeal, onDeleteDeal }: DealHistoryListProps) {
+export function DealHistoryList({
+  deals,
+  products,
+  dealPhases,
+  onUpdateDeal,
+  onDeleteDeal,
+}: DealHistoryListProps) {
   const [editDraft, setEditDraft] = useState<(DealEditFields & { dealId: number }) | null>(null);
 
   const sorted = [...deals].sort((a, b) => b.deal_start_date.localeCompare(a.deal_start_date));

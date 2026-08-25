@@ -23,6 +23,7 @@ import {
   replanActivityPlans,
   saveSalesTarget,
   updatePlan,
+  updatePlanProgress,
 } from "@/lib/api";
 import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
@@ -293,7 +294,8 @@ export default function DashboardPage() {
     );
   }
 
-  // 事務作業の進捗もローカル表示のみ(バックエンドへの保存はまだ無い)
+  // スライダー操作中は見た目だけ即時更新する(ドラッグ中に onChange が連発するため、
+  // バックエンドへの保存はドラッグ完了時の handleCommitProgress にまとめる)。
   function handleUpdateProgress(planId: number, percent: number) {
     setPlans((prev) =>
       prev.map((plan) => (plan.plan_id === planId ? { ...plan, progress_percent: percent } : plan)),
@@ -301,6 +303,15 @@ export default function DashboardPage() {
     setDailyTasks((prev) =>
       prev.map((task) => (task.plan_id === planId ? { ...task, progress_percent: percent } : task)),
     );
+  }
+
+  async function handleCommitProgress(planId: number, percent: number) {
+    if (REP_ID === null) return;
+    try {
+      await updatePlanProgress(REP_ID, planId, percent);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "進捗の保存に失敗しました");
+    }
   }
 
   async function handleRequestAlternative(planId: number) {
@@ -318,39 +329,58 @@ export default function DashboardPage() {
         return;
       }
 
-      const candidate: ActivityPlan = {
-        plan_id: -Date.now(),
-        rep_id: changedPlan.rep_id,
-        plan_date: changedPlan.plan_date,
-        // 時間が(手動編集などで)設定済みならそのまま引き継ぐ
-        start_time: changedPlan.start_time,
-        end_time: changedPlan.end_time,
-        category: "task",
-        customer_id: null,
-        customer_name: candidateTask.title,
-        deal_id: null,
-        product_name: null,
-        activity_type_name: candidateTask.activityTypeName,
-        priority: changedPlan.priority,
-        expected_amount: 0,
-        expected_probability: 0,
-        is_ai_generated: true,
-        reasoning_text: candidateTask.reasoningText,
-        result_status: "pending",
-        memo: null,
-        progress_percent: 0,
-      };
+      try {
+        // 商談側(下)と同じく、差し替え候補を実在の予定として登録し元の予定は取り消す
+        // (どちらもバックエンドに反映。以前はローカル専用の plan_id しか持たず、
+        // リロードすると消えていた)。
+        const created = await createPlan(REP_ID, {
+          plan_date: changedPlan.plan_date,
+          category: "task",
+          activity_type: candidateTask.activityTypeName,
+          customer_id: null,
+          deal_id: null,
+          priority: changedPlan.priority,
+          title: candidateTask.title,
+          rationale: candidateTask.reasoningText,
+        });
+        await cancelPlan(REP_ID, planId);
 
-      if (foundInPlans) {
-        setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(candidate));
-      } else {
-        setDailyTasks((prev) => prev.filter((task) => task.plan_id !== planId).concat(candidate));
+        const candidate: ActivityPlan = {
+          plan_id: created.plan_id,
+          rep_id: changedPlan.rep_id,
+          plan_date: changedPlan.plan_date,
+          // 時間が(手動編集などで)設定済みならそのまま引き継ぐ
+          start_time: changedPlan.start_time,
+          end_time: changedPlan.end_time,
+          category: "task",
+          customer_id: null,
+          customer_name: candidateTask.title,
+          deal_id: null,
+          product_name: null,
+          activity_type_name: candidateTask.activityTypeName,
+          priority: changedPlan.priority,
+          expected_amount: 0,
+          expected_probability: 0,
+          is_ai_generated: true,
+          reasoning_text: candidateTask.reasoningText,
+          result_status: "pending",
+          memo: null,
+          progress_percent: 0,
+        };
+
+        if (foundInPlans) {
+          setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(candidate));
+        } else {
+          setDailyTasks((prev) => prev.filter((task) => task.plan_id !== planId).concat(candidate));
+        }
+        setReplan({
+          before_achievement_rate: calcAchievementRate(plans, target.target_amount),
+          after_achievement_rate: calcAchievementRate(plans, target.target_amount),
+          reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが「${candidate.customer_name}」に差し替えました`,
+        });
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "予定の差し替えに失敗しました");
       }
-      setReplan({
-        before_achievement_rate: calcAchievementRate(plans, target.target_amount),
-        after_achievement_rate: calcAchievementRate(plans, target.target_amount),
-        reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが「${candidate.customer_name}」に差し替えました`,
-      });
       return;
     }
 
@@ -482,6 +512,7 @@ export default function DashboardPage() {
             onAddPlan={handleAddPlan}
             onConfirmPlan={handleConfirmPlan}
             onUpdateProgress={handleUpdateProgress}
+            onCommitProgress={handleCommitProgress}
           />
         </div>
         <div className="dashboard-layout__sidebar">

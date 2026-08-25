@@ -4,15 +4,9 @@ import { useEffect, useState } from "react";
 import { CustomerTable } from "@/components/customers/CustomerTable";
 import { NewCustomerForm } from "@/components/customers/NewCustomerForm";
 import { StaleCustomerList } from "@/components/customers/StaleCustomerList";
-import {
-  createCustomer,
-  fetchCompanySizes,
-  fetchCustomers,
-  fetchIndustries,
-  fetchStaleCustomers,
-} from "@/lib/api";
+import { createCustomer, fetchCustomers, fetchStaleCustomers } from "@/lib/api";
 import { useRep } from "@/lib/repContext";
-import type { CompanySize, Customer, Industry, StaleCustomer } from "@/types";
+import type { Customer, StaleCustomer } from "@/types";
 
 export default function CustomersPage() {
   const { selectedRep } = useRep();
@@ -21,8 +15,6 @@ export default function CustomersPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [staleCustomers, setStaleCustomers] = useState<StaleCustomer[]>([]);
-  const [industries, setIndustries] = useState<Industry[]>([]);
-  const [companySizes, setCompanySizes] = useState<CompanySize[]>([]);
 
   useEffect(() => {
     if (REP_ID === null) return;
@@ -33,17 +25,13 @@ export default function CustomersPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const [fetched, fetchedStale, fetchedIndustries, fetchedCompanySizes] = await Promise.all([
+        const [fetched, fetchedStale] = await Promise.all([
           fetchCustomers(repId),
           fetchStaleCustomers(repId),
-          fetchIndustries(),
-          fetchCompanySizes(),
         ]);
         if (!cancelled) {
           setCustomers(fetched);
           setStaleCustomers(fetchedStale);
-          setIndustries(fetchedIndustries);
-          setCompanySizes(fetchedCompanySizes);
         }
       } catch (error) {
         if (!cancelled) {
@@ -109,7 +97,7 @@ export default function CustomersPage() {
         </div>
       )}
 
-      <NewCustomerForm industries={industries} companySizes={companySizes} onCreate={handleCreate} />
+      <NewCustomerForm onCreate={handleCreate} />
     </main>
   );
 }

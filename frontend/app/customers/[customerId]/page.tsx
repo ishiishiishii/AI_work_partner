@@ -9,8 +9,8 @@ import {
   createDeal,
   deleteDeal,
   fetchCustomers,
-  fetchDealPhases,
   fetchDeals,
+  fetchMasters,
   fetchProducts,
   updateDeal,
 } from "@/lib/api";
@@ -39,17 +39,17 @@ export default function CustomerDetailPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const [customers, repDeals, allProducts, allDealPhases] = await Promise.all([
+        const [customers, repDeals, allProducts, masters] = await Promise.all([
           fetchCustomers(repId),
           fetchDeals(repId),
           fetchProducts(),
-          fetchDealPhases(),
+          fetchMasters(),
         ]);
         if (cancelled) return;
         setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
         setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
         setProducts(allProducts);
-        setDealPhases(allDealPhases);
+        setDealPhases(masters.deal_phases);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -161,7 +161,7 @@ export default function CustomerDetailPage() {
         />
       </section>
 
-      <NewDealForm dealPhases={dealPhases} onCreate={handleCreateDeal} />
+      <NewDealForm onCreate={handleCreateDeal} />
     </main>
   );
 }

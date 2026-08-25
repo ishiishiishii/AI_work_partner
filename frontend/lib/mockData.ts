@@ -10,8 +10,8 @@ export const DEAL_RESULT_STATUS_NAMES: Record<string, string> = {
 };
 
 // 事務作業(category='task')の「対応が難しい」差し替え候補プール。商談と違って実データが
-// 無いため、固定の候補から未使用のものを提示する。この差し替え自体はまだローカル表示のみ
-// (バックエンドへの保存は無い)。
+// 無いため、固定の候補から未使用のものを提示する。差し替え自体は POST /api/plans で
+// 実在の予定として保存する(dashboard/page.tsx の handleRequestAlternative 参照)。
 export const mockTaskSuggestions: { title: string; activityTypeName: string; reasoningText: string }[] = [
   {
     title: "見積書の見直し",
