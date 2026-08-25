@@ -512,8 +512,8 @@ export function ActivityPlanList({
       <>
         <div
           className="activity-plan-list__clickable"
-          onDoubleClick={() => openDetail(plan)}
-          title="ダブルクリックで詳細を表示"
+          onClick={() => openDetail(plan)}
+          title="クリックで詳細を表示"
         >
           {dateLabel !== null && <div className="activity-plan-list__date">{dateLabel}</div>}
           <div className="activity-plan-list__main">
@@ -521,7 +521,7 @@ export function ActivityPlanList({
               <div className="activity-plan-list__customer">
                 <span
                   className="activity-plan-list__link"
-                  onDoubleClick={(event) => {
+                  onClick={(event) => {
                     event.stopPropagation();
                     openProductDetail(plan.product_name);
                   }}
@@ -804,8 +804,8 @@ export function ActivityPlanList({
                 <h3 className="activity-plan-list__group-title">
                   <span
                     className="activity-plan-list__link"
-                    onDoubleClick={() => openCustomerDetail(group.customerId)}
-                    title="ダブルクリックで顧客詳細へ"
+                    onClick={() => openCustomerDetail(group.customerId)}
+                    title="クリックで顧客詳細へ"
                   >
                     {group.customerName}
                   </span>
