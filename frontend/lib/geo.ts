@@ -87,6 +87,21 @@ export function estimateCoordinates(location: string, customerId: number): [numb
   return [baseLat + jitterLat, baseLng + jitterLng];
 }
 
+// 国土地理院APIで市区町村レベルの実座標が取れている顧客はそちらを優先し、
+// まだジオコーディングが済んでいない(バックエンドがバックグラウンドで少しずつ埋めている
+// 途中の)顧客だけ、従来の都道府県+ランダムズレにフォールバックする。
+export function coordinatesForCustomer(customer: {
+  location: string;
+  customer_id: number;
+  lat: number | null;
+  lng: number | null;
+}): [number, number] {
+  if (customer.lat !== null && customer.lng !== null) {
+    return [customer.lat, customer.lng];
+  }
+  return estimateCoordinates(customer.location, customer.customer_id);
+}
+
 // 担当エリア(都道府県名の配列)の庁所在地群を包む範囲を返す。地図の初期表示に使う。
 // estimateCoordinates のズレ(最大約±0.3度)がはみ出さないよう、余白を持たせている。
 export function boundsForPrefectures(prefectures: string[]): [[number, number], [number, number]] {

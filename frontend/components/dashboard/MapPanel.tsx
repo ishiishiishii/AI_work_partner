@@ -3,7 +3,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
-import { boundsForPrefectures, estimateCoordinates, locationPrefecture } from "@/lib/geo";
+import { boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
 import type { Customer, Territory } from "@/types";
 
 // leafletのデフォルトマーカー画像はCSS相対パス経由で読み込まれる前提になっており、
@@ -42,8 +42,10 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
 
   const pins = scopedCustomers.map((customer) => ({
     customer,
-    position: estimateCoordinates(customer.location, customer.customer_id),
+    position: coordinatesForCustomer(customer),
+    isGeocoded: customer.lat !== null && customer.lng !== null,
   }));
+  const geocodedCount = pins.filter((pin) => pin.isGeocoded).length;
 
   const bounds = territory ? boundsForPrefectures(territory.prefectures) : JAPAN_BOUNDS;
 
@@ -51,7 +53,9 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
     <section className="panel map-panel">
       <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
       <p className="map-panel__note">
-        住所の番地はデモ用の架空データのため、ピンの位置は都道府県内のおおよその位置です。
+        番地はデモ用の架空データのため考慮していませんが、市区町村までは実在の位置です
+        {pins.length > 0 && geocodedCount < pins.length && "(一部、位置情報の取得が完了するまでは都道府県内のおおよその位置で表示されます)"}
+        。
       </p>
       <div className="map-panel__leaflet">
         <MapContainer bounds={bounds} scrollWheelZoom={false}>
