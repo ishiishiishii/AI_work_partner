@@ -160,6 +160,36 @@ function buildMonthCalendar(range: { start: string; end: string }, items: Activi
   return weeks;
 }
 
+type WeekColumn = { date: string; items: ActivityPlan[] };
+
+// 「週」表示を、時刻順の縦一列リストから、曜日ごとに列を分けたカレンダー形式にする。
+// week の range は既に月曜始まりの7日間ちょうどなので、そのまま1日ずつ列にする。
+function buildWeekColumns(range: { start: string; end: string }, items: ActivityPlan[]): WeekColumn[] {
+  const itemsByDate = new Map<string, ActivityPlan[]>();
+  for (const item of items) {
+    const list = itemsByDate.get(item.plan_date);
+    if (list) {
+      list.push(item);
+    } else {
+      itemsByDate.set(item.plan_date, [item]);
+    }
+  }
+
+  const columns: WeekColumn[] = [];
+  let cursor = parseISODate(range.start);
+  for (let i = 0; i < 7; i++) {
+    const iso = formatISODate(cursor);
+    const sorted = (itemsByDate.get(iso) ?? []).slice().sort((a, b) => {
+      const timeA = a.start_time ?? "99:99";
+      const timeB = b.start_time ?? "99:99";
+      return timeA.localeCompare(timeB) || a.priority - b.priority;
+    });
+    columns.push({ date: iso, items: sorted });
+    cursor = addDays(cursor, 1);
+  }
+  return columns;
+}
+
 function parseTimeToMinutes(time: string): number {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
@@ -358,6 +388,7 @@ export function ActivityPlanList({
           ),
         )
       : [];
+  const weekColumns = viewMode === "week" ? buildWeekColumns(range, filtered) : [];
   const todayIso = formatISODate(new Date());
 
   const detailPlan =
@@ -757,9 +788,30 @@ export function ActivityPlanList({
                 }}
                 title={`${cell.date}の予定を見る`}
               >
-                <span className="activity-plan-list__calendar-date">{Number(cell.date.slice(-2))}</span>
+                <div className="activity-plan-list__calendar-cell-header">
+                  <span className="activity-plan-list__calendar-date">{Number(cell.date.slice(-2))}</span>
+                  {cell.items.length > 0 && (
+                    <span className="activity-plan-list__calendar-count">{cell.items.length}件</span>
+                  )}
+                </div>
                 {cell.items.length > 0 && (
-                  <span className="activity-plan-list__calendar-count">{cell.items.length}件</span>
+                  <div className="activity-plan-list__calendar-cell-items">
+                    {cell.items.slice(0, 3).map((item) => (
+                      <span
+                        key={item.plan_id}
+                        className={`activity-plan-list__calendar-item ${
+                          ACTIVITY_TYPE_CLASS[item.activity_type_name] ?? "activity-plan-list__type--default"
+                        }`}
+                      >
+                        {item.customer_name}
+                      </span>
+                    ))}
+                    {cell.items.length > 3 && (
+                      <span className="activity-plan-list__calendar-item-more">
+                        ほか{cell.items.length - 3}件
+                      </span>
+                    )}
+                  </div>
                 )}
               </button>
             ))}
@@ -797,6 +849,55 @@ export function ActivityPlanList({
             ))}
           </div>
         )
+      ) : viewMode === "week" ? (
+        <div className="activity-plan-list__week-grid">
+          {weekColumns.map((column) => {
+            const weekday = "日月火水木金土"[parseISODate(column.date).getUTCDay()];
+            return (
+              <div
+                key={column.date}
+                className={`activity-plan-list__week-column${
+                  column.date === todayIso ? " is-today" : ""
+                }`}
+              >
+                <div className="activity-plan-list__week-column-header">
+                  <span className="activity-plan-list__week-column-weekday">{weekday}</span>
+                  <span className="activity-plan-list__week-column-date">
+                    {Number(column.date.slice(-2))}
+                  </span>
+                </div>
+                {column.items.length === 0 ? (
+                  <p className="activity-plan-list__week-column-empty">予定なし</p>
+                ) : (
+                  <ul className="activity-plan-list__week-column-items">
+                    {column.items.map((item) => (
+                      <li key={item.plan_id}>
+                        <button
+                          type="button"
+                          className="activity-plan-list__week-card"
+                          onDoubleClick={() => openDetail(item)}
+                          title="ダブルクリックで詳細を表示"
+                        >
+                          {item.start_time && (
+                            <span className="activity-plan-list__week-card-time">{item.start_time}</span>
+                          )}
+                          <span className="activity-plan-list__week-card-name">{item.customer_name}</span>
+                          <span
+                            className={`activity-plan-list__type ${
+                              ACTIVITY_TYPE_CLASS[item.activity_type_name] ?? "activity-plan-list__type--default"
+                            }`}
+                          >
+                            {item.activity_type_name}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : filtered.length === 0 ? (
         <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
       ) : (
