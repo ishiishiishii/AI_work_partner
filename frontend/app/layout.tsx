@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppNav } from "@/components/AppNav";
+import { QuickAddPlanProvider } from "@/lib/quickAddPlanContext";
 import { RepProvider } from "@/lib/repContext";
 import "./globals.css";
 
@@ -17,8 +18,10 @@ export default function RootLayout({
     <html lang="ja">
       <body>
         <RepProvider>
-          <AppNav />
-          {children}
+          <QuickAddPlanProvider>
+            <AppNav />
+            {children}
+          </QuickAddPlanProvider>
         </RepProvider>
       </body>
     </html>

@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { fetchProducts } from "@/lib/api";
 import { mockTaskSuggestions } from "@/lib/mockData";
+import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
 import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
@@ -300,6 +301,7 @@ export function ActivityPlanList({
   onCommitProgress,
 }: ActivityPlanListProps) {
   const router = useRouter();
+  const { setOpenRichPlanCreator } = useQuickAddPlan();
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
@@ -659,6 +661,20 @@ export function ActivityPlanList({
       memo: draft.memo,
     });
   }
+
+  // 全ページ共通のQuickAddFab(右下＋)が「予定」を選んだとき、この元々の詳細
+  // フォームへ委譲できるようにContextへ登録する。マウント中(=ダッシュボード
+  // 表示中)だけ登録し、離れたら解除する。refで包むのは、登録自体は最初の
+  // 1回だけで良い一方、呼び出し時には常に最新のstartCreate(selectedDateなど
+  // を閉じ込めた版)を使いたいため。
+  const startCreateRef = useRef(startCreate);
+  useEffect(() => {
+    startCreateRef.current = startCreate;
+  });
+  useEffect(() => {
+    setOpenRichPlanCreator(() => startCreateRef.current());
+    return () => setOpenRichPlanCreator(null);
+  }, [setOpenRichPlanCreator]);
 
   function cancelEdit() {
     if (newPlanDraft) {
@@ -1198,9 +1214,6 @@ export function ActivityPlanList({
       </div>
     )}
 
-    <button type="button" className="plan-fab" onClick={() => startCreate()} aria-label="予定を追加" title="予定を追加">
-      ＋
-    </button>
     </>
   );
 }

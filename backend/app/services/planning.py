@@ -98,30 +98,105 @@ def upsert_target(
     return _format_target(row)
 
 
+def list_deadlines(conn: Connection, rep_id: int | None = None) -> list[dict]:
+    if rep_id:
+        rows = conn.execute(
+            """
+            select deadline_id, rep_id, title, due_date, customer_id, deal_id,
+                   is_done, memo, created_at
+            from deadline
+            where rep_id = %s
+            order by due_date
+            """,
+            (rep_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            select deadline_id, rep_id, title, due_date, customer_id, deal_id,
+                   is_done, memo, created_at
+            from deadline
+            order by due_date
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_deadline(
+    conn: Connection,
+    *,
+    rep_id: int,
+    title: str,
+    due_date: date,
+    customer_id: int | None,
+    deal_id: int | None,
+    memo: str | None,
+) -> dict:
+    row = conn.execute(
+        """
+        insert into deadline (rep_id, title, due_date, customer_id, deal_id, memo)
+        values (%s, %s, %s, %s, %s, %s)
+        returning deadline_id, rep_id, title, due_date, customer_id, deal_id,
+                  is_done, memo, created_at
+        """,
+        (rep_id, title, due_date, customer_id, deal_id, memo),
+    ).fetchone()
+    conn.commit()
+    return dict(row)
+
+
 def list_customers(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
-        # primary_rep_id is rarely set in the imported dataset, so a rep's
-        # customers are the ones they actually have deals with.
+        # Scope candidate discovery to the rep's own territory (see
+        # `prefecture`/`branch`, 20260826100000 -- same mapping
+        # _customer_branch/_rep_branch use for the deal-creation check
+        # below), but never hide a customer the rep already has a real
+        # relationship with (assigned as primary, or an existing deal --
+        # imported deal history predates branch assignment and regularly
+        # crosses territory, see create_deal's comment). A customer whose
+        # location doesn't match any known prefecture (p.branch_id is null)
+        # can't be judged in- or out-of-territory, so it's treated as in
+        # territory too. in_territory is surfaced so the frontend can call
+        # out the exception cases separately (e.g. a rep transferred from
+        # another branch, keeping their prior customers) rather than mixing
+        # them silently into the main list. has_relationship is surfaced
+        # too, so the frontend can further split the in-territory set into
+        # customers the rep already has (registered/deal history) versus
+        # untouched candidates in their own area.
         rows = conn.execute(
             """
             select distinct c.customer_id, c.customer_name, c.industry_name,
                    c.company_size_name, c.location, c.primary_rep_id, c.primary_rep_name,
-                   c.lat, c.lng
+                   c.website, c.contact_name, c.lat, c.lng,
+                   (p.branch_id is null or p.branch_id = r.branch_id) as in_territory,
+                   coalesce(
+                     c.primary_rep_id = %s
+                     or exists (
+                       select 1 from deal d
+                       where d.customer_id = c.customer_id and d.rep_id = %s
+                     ),
+                     false
+                   ) as has_relationship
             from ai.customer c
-            where c.primary_rep_id = %s
+            join sales_rep r on r.rep_id = %s
+            left join prefecture p on starts_with(c.location, p.prefecture_name)
+            where p.branch_id is null
+               or p.branch_id = r.branch_id
+               or c.primary_rep_id = %s
                or exists (
                  select 1 from deal d
                  where d.customer_id = c.customer_id and d.rep_id = %s
                )
             order by c.customer_name
             """,
-            (rep_id, rep_id),
+            (rep_id, rep_id, rep_id, rep_id, rep_id),
         ).fetchall()
     else:
         rows = conn.execute(
             """
             select customer_id, customer_name, industry_name, company_size_name,
-                   location, primary_rep_id, primary_rep_name, lat, lng
+                   location, primary_rep_id, primary_rep_name, website, contact_name,
+                   lat, lng, true as in_territory, true as has_relationship
             from ai.customer
             order by customer_name
             """
@@ -137,6 +212,8 @@ def create_customer(
     company_size_id: int,
     location: str,
     primary_rep_id: int | None,
+    website: str | None = None,
+    contact_name: str | None = None,
 ) -> dict:
     # 1件だけなので、登録操作の一部として同期的にジオコーディングを試みる(数百ms程度)。
     # 失敗しても登録自体は止めない -- lat/lngはNULLのままになり、フロント側が
@@ -147,26 +224,68 @@ def create_customer(
     new_customer_id = conn.execute(
         """
         insert into customer (
-          customer_name, industry_id, company_size_id, location, primary_rep_id, lat, lng
+          customer_name, industry_id, company_size_id, location, primary_rep_id,
+          website, contact_name, lat, lng
         )
-        values (%s, %s, %s, %s, %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         returning customer_id
         """,
-        (customer_name, industry_id, company_size_id, location, primary_rep_id, lat, lng),
+        (
+            customer_name,
+            industry_id,
+            company_size_id,
+            location,
+            primary_rep_id,
+            website,
+            contact_name,
+            lat,
+            lng,
+        ),
     ).fetchone()["customer_id"]
     # Re-read through the AI view so the response carries resolved names
-    # (industry/company size/primary rep) rather than the raw ids just inserted.
+    # (industry/company size/primary rep) rather than the raw ids just
+    # inserted, plus in_territory relative to the assigned primary rep (no
+    # primary rep, or an unresolvable location, both default to true --
+    # see list_customers' comment on the same convention).
     row = conn.execute(
         """
-        select customer_id, customer_name, industry_name, company_size_name,
-               location, primary_rep_id, primary_rep_name, lat, lng
-        from ai.customer
-        where customer_id = %s
+        select c.customer_id, c.customer_name, c.industry_name, c.company_size_name,
+               c.location, c.primary_rep_id, c.primary_rep_name, c.website, c.contact_name,
+               c.lat, c.lng,
+               coalesce(p.branch_id is null or p.branch_id = r.branch_id, true) as in_territory,
+               (c.primary_rep_id is not null) as has_relationship
+        from ai.customer c
+        left join sales_rep r on r.rep_id = c.primary_rep_id
+        left join prefecture p on starts_with(c.location, p.prefecture_name)
+        where c.customer_id = %s
         """,
         (new_customer_id,),
     ).fetchone()
     conn.commit()
     return dict(row)
+
+
+# 新規顧客登録フォームの「顧客名で検索」用。territoryやhas_relationshipで絞らず
+# 全担当者の登録済み顧客から名称の部分一致で探す(他の担当者がすでに登録済みの
+# 顧客と気づけるようにするための重複防止機能なので、自分のエリア外・無関係でも
+# ヒットさせる必要がある)。list_customersと違い業種/企業規模はid込みで返す
+# (選択時にフォームのセレクトボックスへそのまま反映するため)。
+def search_customers(conn: Connection, *, query: str, limit: int = 8) -> list[dict]:
+    rows = conn.execute(
+        """
+        select c.customer_id, c.customer_name, c.industry_id, i.industry_name,
+               c.company_size_id, csm.company_size_name, c.location,
+               c.website, c.contact_name
+        from customer c
+        join industry i on i.industry_id = c.industry_id
+        join company_size_master csm on csm.company_size_id = c.company_size_id
+        where c.customer_name ilike %s
+        order by c.customer_name
+        limit %s
+        """,
+        (f"%{query}%", limit),
+    ).fetchall()
+    return list(rows)
 
 
 def list_stale_customers(
@@ -175,19 +294,37 @@ def list_stale_customers(
     threshold_days: int = STALE_THRESHOLD_DAYS,
     rep_id: int | None = None,
 ) -> list[dict]:
-    """Customers with no company-wide contact in threshold_days (or ever)."""
+    """Customers with no company-wide contact in threshold_days (or ever),
+    scoped to the rep's territory the same way list_customers is (with the
+    same existing-relationship exception -- see list_customers' comment)."""
     rows = conn.execute(
         """
         select ca.customer_id, ca.customer_name, ca.industry_name, ca.company_size_name,
                ca.location, ca.primary_rep_id, ca.primary_rep_name,
-               ca.last_contact_date, ca.days_since_contact
+               ca.last_contact_date, ca.days_since_contact,
+               coalesce(p.branch_id is null or p.branch_id = r.branch_id, true) as in_territory,
+               coalesce(
+                 %(rep_id)s::int is not null
+                 and (
+                   ca.primary_rep_id = %(rep_id)s
+                   or exists (
+                     select 1 from deal d
+                     where d.customer_id = ca.customer_id and d.rep_id = %(rep_id)s
+                   )
+                 ),
+                 false
+               ) as has_relationship
         from ai.customer_activity ca
+        left join prefecture p on starts_with(ca.location, p.prefecture_name)
+        left join sales_rep r on r.rep_id = %(rep_id)s
         where (
           ca.last_contact_date is null
           or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
         )
         and (
           %(rep_id)s::int is null
+          or p.branch_id is null
+          or p.branch_id = r.branch_id
           or ca.primary_rep_id = %(rep_id)s
           or exists (
             select 1 from deal d

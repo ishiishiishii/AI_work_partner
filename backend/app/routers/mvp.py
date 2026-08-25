@@ -6,6 +6,9 @@ from app.db import get_connection
 from app.schemas.models import (
     CustomerCreate,
     CustomerOut,
+    CustomerSuggestionOut,
+    DeadlineCreate,
+    DeadlineOut,
     DealCreate,
     DealOut,
     DealUpdate,
@@ -102,10 +105,21 @@ def post_customer(body: CustomerCreate) -> CustomerOut:
                 company_size_id=body.company_size_id,
                 location=body.location,
                 primary_rep_id=body.primary_rep_id,
+                website=body.website,
+                contact_name=body.contact_name,
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CustomerOut.model_validate(row)
+
+
+# 新規顧客登録フォームの「顧客名で検索」候補用。担当エリアやhas_relationshipで
+# 絞らず、全担当者の登録済み顧客から部分一致で探す(重複登録に気づけるように)。
+@router.get("/customers/search", response_model=list[CustomerSuggestionOut])
+def get_customer_search(q: str = Query(min_length=1)) -> list[CustomerSuggestionOut]:
+    with get_connection() as conn:
+        rows = planning.search_customers(conn, query=q)
+    return [CustomerSuggestionOut.model_validate(row) for row in rows]
 
 
 @router.get("/customers/stale", response_model=list[StaleCustomerOut])
@@ -118,6 +132,31 @@ def get_stale_customers(
             conn, threshold_days=threshold_days, rep_id=rep_id
         )
     return [StaleCustomerOut.model_validate(row) for row in rows]
+
+
+@router.get("/deadlines", response_model=list[DeadlineOut])
+def get_deadlines(rep_id: int | None = None) -> list[DeadlineOut]:
+    with get_connection() as conn:
+        rows = planning.list_deadlines(conn, rep_id)
+    return [DeadlineOut.model_validate(row) for row in rows]
+
+
+@router.post("/deadlines", response_model=DeadlineOut)
+def post_deadline(body: DeadlineCreate) -> DeadlineOut:
+    with get_connection() as conn:
+        try:
+            row = planning.create_deadline(
+                conn,
+                rep_id=body.rep_id,
+                title=body.title,
+                due_date=body.due_date,
+                customer_id=body.customer_id,
+                deal_id=body.deal_id,
+                memo=body.memo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DeadlineOut.model_validate(row)
 
 
 @router.get("/deals", response_model=list[DealOut])
