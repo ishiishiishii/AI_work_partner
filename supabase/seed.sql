@@ -33,28 +33,72 @@ insert into deal_result_status (status_code) values
   ('won'),
   ('lost');
 
--- Explicit rep_id values from sales_rep.csv (authoritative; sales_target.csv references these ids).
-insert into sales_rep (rep_id, rep_name) values
-  (1, '石川次郎'),
-  (2, '村上花子'),
-  (3, '小林綾子'),
-  (4, '木村さゆり'),
-  (5, '加藤拓也'),
-  (6, '遠藤直樹'),
-  (7, '近藤拓也'),
-  (8, '井上愛'),
-  (9, '吉田直樹'),
-  (10, '高橋健二'),
-  (11, '林慎一'),
-  (12, '井上健太'),
-  (13, '林麻衣'),
-  (14, '岡田健二'),
-  (15, '吉田陽子'),
-  (16, '石川大輔'),
-  (17, '岡本裕子'),
-  (18, '後藤大輔'),
-  (19, '新人太郎'),
-  (20, '大重鎮重信');
+-- Sales branches (7 offices); sales_rep.branch_id is assigned round-robin
+-- below so all 50 reps are spread as evenly as possible across them.
+insert into branch (branch_name) values
+  ('札幌'),
+  ('仙台'),
+  ('東京'),
+  ('中部'),
+  ('神戸'),
+  ('広島'),
+  ('九州');
+
+-- Explicit rep_id values from sales_rep.csv (authoritative; sales_target.csv references these ids)
+-- for reps 1-18. Reps 19-48 are additional demo headcount; 新人太郎/大重鎮重信 were moved from
+-- 19/20 to 49/50 to make room for them (deal/activity_plan seed rows below reference reps by
+-- rep_name, not rep_id, so this renumbering does not require any other changes).
+insert into sales_rep (rep_id, rep_name, branch_id) values
+  (1, '石川次郎', (select branch_id from branch where branch_name = '札幌')),
+  (2, '村上花子', (select branch_id from branch where branch_name = '仙台')),
+  (3, '小林綾子', (select branch_id from branch where branch_name = '東京')),
+  (4, '木村さゆり', (select branch_id from branch where branch_name = '中部')),
+  (5, '加藤拓也', (select branch_id from branch where branch_name = '神戸')),
+  (6, '遠藤直樹', (select branch_id from branch where branch_name = '広島')),
+  (7, '近藤拓也', (select branch_id from branch where branch_name = '九州')),
+  (8, '井上愛', (select branch_id from branch where branch_name = '札幌')),
+  (9, '吉田直樹', (select branch_id from branch where branch_name = '仙台')),
+  (10, '高橋健二', (select branch_id from branch where branch_name = '東京')),
+  (11, '林慎一', (select branch_id from branch where branch_name = '中部')),
+  (12, '井上健太', (select branch_id from branch where branch_name = '神戸')),
+  (13, '林麻衣', (select branch_id from branch where branch_name = '広島')),
+  (14, '岡田健二', (select branch_id from branch where branch_name = '九州')),
+  (15, '吉田陽子', (select branch_id from branch where branch_name = '札幌')),
+  (16, '石川大輔', (select branch_id from branch where branch_name = '仙台')),
+  (17, '岡本裕子', (select branch_id from branch where branch_name = '東京')),
+  (18, '後藤大輔', (select branch_id from branch where branch_name = '中部')),
+  (19, '中村健一', (select branch_id from branch where branch_name = '神戸')),
+  (20, '斎藤美咲', (select branch_id from branch where branch_name = '広島')),
+  (21, '渡辺翔太', (select branch_id from branch where branch_name = '九州')),
+  (22, '山本奈々', (select branch_id from branch where branch_name = '札幌')),
+  (23, '清水大地', (select branch_id from branch where branch_name = '仙台')),
+  (24, '田中萌', (select branch_id from branch where branch_name = '東京')),
+  (25, '中島隼人', (select branch_id from branch where branch_name = '中部')),
+  (26, '藤田結衣', (select branch_id from branch where branch_name = '神戸')),
+  (27, '橋本亮', (select branch_id from branch where branch_name = '広島')),
+  (28, '松本さくら', (select branch_id from branch where branch_name = '九州')),
+  (29, '福田拓海', (select branch_id from branch where branch_name = '札幌')),
+  (30, '西村優子', (select branch_id from branch where branch_name = '仙台')),
+  (31, '青木涼太', (select branch_id from branch where branch_name = '東京')),
+  (32, '長谷川舞', (select branch_id from branch where branch_name = '中部')),
+  (33, '前田悠斗', (select branch_id from branch where branch_name = '神戸')),
+  (34, '岡本莉子', (select branch_id from branch where branch_name = '広島')),
+  (35, '坂本蓮', (select branch_id from branch where branch_name = '九州')),
+  (36, '山口愛美', (select branch_id from branch where branch_name = '札幌')),
+  (37, '中野颯太', (select branch_id from branch where branch_name = '仙台')),
+  (38, '小川瑠奈', (select branch_id from branch where branch_name = '東京')),
+  (39, '石井健太郎', (select branch_id from branch where branch_name = '中部')),
+  (40, '森田ひかり', (select branch_id from branch where branch_name = '神戸')),
+  (41, '池田大輝', (select branch_id from branch where branch_name = '広島')),
+  (42, '横山楓', (select branch_id from branch where branch_name = '九州')),
+  (43, '木下陽菜', (select branch_id from branch where branch_name = '札幌')),
+  (44, '菅原駿', (select branch_id from branch where branch_name = '仙台')),
+  (45, '村田美月', (select branch_id from branch where branch_name = '東京')),
+  (46, '佐野健', (select branch_id from branch where branch_name = '中部')),
+  (47, '本田琴音', (select branch_id from branch where branch_name = '神戸')),
+  (48, '大野拓', (select branch_id from branch where branch_name = '広島')),
+  (49, '新人太郎', (select branch_id from branch where branch_name = '九州')),
+  (50, '大重鎮重信', (select branch_id from branch where branch_name = '札幌'));
 select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
 
 
