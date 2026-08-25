@@ -13,6 +13,7 @@ import type {
   SalesRep,
   SalesTarget,
   StaleCustomer,
+  Territory,
 } from "@/types";
 
 export function getApiBaseUrl(): string {
@@ -26,6 +27,14 @@ export async function fetchReps(): Promise<SalesRep[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps`, { cache: "no-store" });
   if (!res.ok) throw new Error(`担当者一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+// 担当者の営業所が管轄する都道府県一覧(地図の表示範囲・顧客の絞り込みに使う)。
+export async function fetchRepTerritory(repId: number): Promise<Territory> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/territory`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`担当エリアの取得に失敗しました (HTTP ${res.status})`);
   return res.json();
 }
 

@@ -26,6 +26,7 @@ from app.schemas.models import (
     StaleCustomerOut,
     TargetCreate,
     TargetOut,
+    TerritoryOut,
 )
 from app.services import affinity, planning
 
@@ -37,6 +38,15 @@ def get_reps() -> list[SalesRepOut]:
     with get_connection() as conn:
         rows = planning.list_reps(conn)
     return [SalesRepOut.model_validate(row) for row in rows]
+
+
+@router.get("/reps/{rep_id}/territory", response_model=TerritoryOut)
+def get_rep_territory(rep_id: int) -> TerritoryOut:
+    with get_connection() as conn:
+        row = planning.get_rep_territory(conn, rep_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="rep not found")
+    return TerritoryOut.model_validate(row)
 
 
 @router.get("/masters", response_model=MastersOut)

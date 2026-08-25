@@ -1,11 +1,11 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { ActivityPlanList, type PlanEditFields } from "@/components/dashboard/ActivityPlanList";
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
-import { MapPanel } from "@/components/dashboard/MapPanel";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import {
   cancelPlan,
@@ -13,9 +13,11 @@ import {
   createPlan,
   deleteActivityResult,
   fetchActivityPlans,
+  fetchCustomers,
   fetchDeals,
   fetchForecast,
   fetchRepAffinity,
+  fetchRepTerritory,
   fetchSalesTarget,
   generateActivityPlans,
   postActivityResult,
@@ -30,13 +32,21 @@ import { mockTaskSuggestions } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type {
   ActivityPlan,
+  Customer,
   Deal,
   DealResultStatus,
   Forecast,
   RepAffinity,
   ReplanInfo,
   SalesTarget,
+  Territory,
 } from "@/types";
+
+// leafletはブラウザのwindow/documentに直接依存しておりSSR不可なため、
+// Next.jsのサーバー描画パスに乗らないよう動的import(ssr:false)にする。
+const MapPanel = dynamic(() => import("@/components/dashboard/MapPanel").then((m) => m.MapPanel), {
+  ssr: false,
+});
 
 // 以前は "2026-08" にハードコードされており、実際の日付とズレていた
 // (AIチャットにも「今日」を伝えていなかった。backend/app/services/qwen_chat.py 参照)。
@@ -56,6 +66,8 @@ export default function DashboardPage() {
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
   const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [territory, setTerritory] = useState<Territory | null>(null);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
@@ -100,9 +112,11 @@ export default function DashboardPage() {
 
         // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(repId);
-        const [fetchedAffinities, fetchedDeals] = await Promise.all([
+        const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
           fetchRepAffinity(repId),
           fetchDeals(repId),
+          fetchCustomers(repId),
+          fetchRepTerritory(repId),
         ]);
         if (cancelled) return;
 
@@ -118,6 +132,8 @@ export default function DashboardPage() {
         setDailyTasks(fetchedPlans.filter((plan) => plan.category === "task"));
         setAffinities(fetchedAffinities);
         setDeals(fetchedDeals);
+        setCustomers(fetchedCustomers);
+        setTerritory(fetchedTerritory);
         await refreshForecast(repId);
       } catch (error) {
         if (!cancelled) {
@@ -531,7 +547,7 @@ export default function DashboardPage() {
             plans={plans}
             affinities={affinities}
           />
-          <MapPanel />
+          <MapPanel customers={customers} territory={territory} />
           <AiReasoningPanel plans={plans} />
         </div>
       </div>
