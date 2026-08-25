@@ -126,6 +126,8 @@ type ApiCustomer = {
   location: string;
   primary_rep_id: number | null;
   primary_rep_name: string | null;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 function mapCustomer(row: ApiCustomer): Customer {
@@ -137,6 +139,8 @@ function mapCustomer(row: ApiCustomer): Customer {
     location: row.location,
     primary_rep_id: row.primary_rep_id,
     primary_rep_name: row.primary_rep_name,
+    lat: row.lat ?? null,
+    lng: row.lng ?? null,
   };
 }
 

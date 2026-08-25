@@ -53,6 +53,11 @@ export type Customer = {
   location: string;
   primary_rep_id: number | null;
   primary_rep_name: string | null;
+  // 市区町村レベルの実座標(国土地理院APIでジオコーディング済みの場合のみ)。
+  // 未ジオコーディングの間はnull。地図表示では lib/geo.ts の coordinatesForCustomer が
+  // nullの場合に都道府県+ランダムズレへフォールバックする。
+  lat: number | null;
+  lng: number | null;
 };
 
 // 休眠顧客(しばらく接点の無い顧客)一覧。Customer に加えて最終接点日と

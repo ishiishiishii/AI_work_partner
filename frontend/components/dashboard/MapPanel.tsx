@@ -3,7 +3,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
-import { boundsForPrefectures, estimateCoordinates, locationPrefecture } from "@/lib/geo";
+import { boundsForPositions, boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
 import type { Customer, Territory } from "@/types";
 
 // leafletのデフォルトマーカー画像はCSS相対パス経由で読み込まれる前提になっており、
@@ -30,6 +30,11 @@ const JAPAN_BOUNDS: [[number, number], [number, number]] = [
   [45.5, 145.8],
 ];
 
+// ピンを囲む余白(ピクセル指定なので、都市1つ分でも県またぎでも見た目の余白が揃う)。
+// maxZoomは、ピンが1件しかない・1箇所に密集している時に寄りすぎて建物レベルまで
+// 拡大されるのを防ぐための上限。
+const FIT_BOUNDS_OPTIONS = { padding: [32, 32] as [number, number], maxZoom: 11 };
+
 export function MapPanel({ customers, territory }: MapPanelProps) {
   // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
   // (読み込み中)は絞り込まず全件表示しておく方が「一瞬空になる」より自然。
@@ -42,19 +47,26 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
 
   const pins = scopedCustomers.map((customer) => ({
     customer,
-    position: estimateCoordinates(customer.location, customer.customer_id),
+    position: coordinatesForCustomer(customer),
   }));
 
-  const bounds = territory ? boundsForPrefectures(territory.prefectures) : JAPAN_BOUNDS;
+  const bounds =
+    pins.length > 0
+      ? boundsForPositions(pins.map((pin) => pin.position))
+      : territory
+        ? boundsForPrefectures(territory.prefectures)
+        : JAPAN_BOUNDS;
 
   return (
     <section className="panel map-panel">
       <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
-      <p className="map-panel__note">
-        住所の番地はデモ用の架空データのため、ピンの位置は都道府県内のおおよその位置です。
-      </p>
       <div className="map-panel__leaflet">
-        <MapContainer bounds={bounds} scrollWheelZoom={false}>
+        <MapContainer
+          key={territory?.branch_name ?? "japan"}
+          bounds={bounds}
+          boundsOptions={FIT_BOUNDS_OPTIONS}
+          scrollWheelZoom={false}
+        >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

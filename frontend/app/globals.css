@@ -1645,12 +1645,6 @@ a {
   font-size: 1.1rem;
 }
 
-.map-panel__note {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-
 .map-panel__leaflet {
   border: 1px solid var(--line);
   border-radius: 12px;

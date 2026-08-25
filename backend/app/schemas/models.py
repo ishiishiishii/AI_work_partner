@@ -70,6 +70,10 @@ class CustomerOut(OrmModel):
     location: str
     primary_rep_id: int | None = None
     primary_rep_name: str | None = None
+    # 市区町村レベルの実座標(国土地理院APIでジオコーディング済みの場合のみ)。
+    # 未ジオコーディングの間はNoneで、フロント側が都道府県+ランダムズレにフォールバックする。
+    lat: float | None = None
+    lng: float | None = None
 
 
 class StaleCustomerOut(OrmModel):
