@@ -537,7 +537,10 @@ export async function createDeal(
       deal_start_date: input.deal_start_date || null,
     }),
   });
-  if (!res.ok) throw new Error(`商談の登録に失敗しました (HTTP ${res.status})`);
+  if (!res.ok) {
+    const body: { detail?: string } = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `商談の登録に失敗しました (HTTP ${res.status})`);
+  }
   return mapDeal(await res.json());
 }
 
