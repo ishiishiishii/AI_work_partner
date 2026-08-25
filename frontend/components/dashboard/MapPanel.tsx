@@ -2,7 +2,8 @@
 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { useEffect } from "react";
+import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
 import type { Customer, Territory } from "@/types";
 
@@ -30,6 +31,17 @@ const JAPAN_BOUNDS: [[number, number], [number, number]] = [
   [45.5, 145.8],
 ];
 
+const INITIAL_ZOOM_BOOST = 4;
+
+function ZoomBoost() {
+  const map = useMap();
+  useEffect(() => {
+    map.setZoom(map.getZoom() + INITIAL_ZOOM_BOOST);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
+
 export function MapPanel({ customers, territory }: MapPanelProps) {
   // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
   // (読み込み中)は絞り込まず全件表示しておく方が「一瞬空になる」より自然。
@@ -51,7 +63,8 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
     <section className="panel map-panel">
       <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
       <div className="map-panel__leaflet">
-        <MapContainer bounds={bounds} scrollWheelZoom={false}>
+        <MapContainer key={territory?.branch_name ?? "japan"} bounds={bounds} scrollWheelZoom={false}>
+          <ZoomBoost />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
