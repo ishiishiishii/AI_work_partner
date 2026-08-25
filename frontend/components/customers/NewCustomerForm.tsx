@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { COMPANY_SIZE_NAMES, INDUSTRY_NAMES } from "@/lib/mockData";
+import { useEffect, useState } from "react";
+import type { CompanySize, Industry } from "@/types";
 
 type NewCustomerFormProps = {
+  industries: Industry[];
+  companySizes: CompanySize[];
   onCreate: (input: {
     customer_name: string;
     industry_id: number;
@@ -12,22 +14,31 @@ type NewCustomerFormProps = {
   }) => Promise<void>;
 };
 
-const industryOptions = Object.entries(INDUSTRY_NAMES);
-const companySizeOptions = Object.entries(COMPANY_SIZE_NAMES);
+function makeInitialDraft(industries: Industry[], companySizes: CompanySize[]) {
+  return {
+    customer_name: "",
+    industry_id: industries[0] ? String(industries[0].industry_id) : "",
+    company_size_id: companySizes[0] ? String(companySizes[0].company_size_id) : "",
+    location: "",
+  };
+}
 
-const initialDraft = {
-  customer_name: "",
-  industry_id: industryOptions[0][0],
-  company_size_id: companySizeOptions[0][0],
-  location: "",
-};
-
-export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
-  const [draft, setDraft] = useState(initialDraft);
+export function NewCustomerForm({ industries, companySizes, onCreate }: NewCustomerFormProps) {
+  const [draft, setDraft] = useState(() => makeInitialDraft(industries, companySizes));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isValid = draft.customer_name.trim().length > 0 && draft.location.trim().length > 0;
+  useEffect(() => {
+    setDraft((prev) =>
+      prev.industry_id || prev.company_size_id ? prev : makeInitialDraft(industries, companySizes),
+    );
+  }, [industries, companySizes]);
+
+  const isValid =
+    draft.customer_name.trim().length > 0 &&
+    draft.location.trim().length > 0 &&
+    draft.industry_id !== "" &&
+    draft.company_size_id !== "";
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -42,7 +53,7 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
         company_size_id: Number(draft.company_size_id),
         location: draft.location.trim(),
       });
-      setDraft(initialDraft);
+      setDraft(makeInitialDraft(industries, companySizes));
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
     } finally {
@@ -69,9 +80,9 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
             value={draft.industry_id}
             onChange={(event) => setDraft({ ...draft, industry_id: event.target.value })}
           >
-            {industryOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
+            {industries.map((industry) => (
+              <option key={industry.industry_id} value={industry.industry_id}>
+                {industry.industry_name}
               </option>
             ))}
           </select>
@@ -82,9 +93,9 @@ export function NewCustomerForm({ onCreate }: NewCustomerFormProps) {
             value={draft.company_size_id}
             onChange={(event) => setDraft({ ...draft, company_size_id: event.target.value })}
           >
-            {companySizeOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
+            {companySizes.map((companySize) => (
+              <option key={companySize.company_size_id} value={companySize.company_size_id}>
+                {companySize.company_size_name}
               </option>
             ))}
           </select>

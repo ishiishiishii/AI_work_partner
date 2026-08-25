@@ -14,6 +14,22 @@ class SalesRepOut(OrmModel):
     rep_name: str
 
 
+class IndustryOut(OrmModel):
+    industry_id: int
+    industry_name: str
+
+
+class CompanySizeOut(OrmModel):
+    company_size_id: int
+    company_size_name: str
+
+
+class DealPhaseOut(OrmModel):
+    deal_phase_id: int
+    deal_phase_name: str
+    sort_order: int
+
+
 class TargetCreate(BaseModel):
     rep_id: int
     target_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")

@@ -3,6 +3,22 @@ export type SalesRep = {
   rep_name: string;
 };
 
+export type Industry = {
+  industry_id: number;
+  industry_name: string;
+};
+
+export type CompanySize = {
+  company_size_id: number;
+  company_size_name: string;
+};
+
+export type DealPhase = {
+  deal_phase_id: number;
+  deal_phase_name: string;
+  sort_order: number;
+};
+
 export type SalesTarget = {
   rep_id: number;
   target_month: string; // "YYYY-MM"

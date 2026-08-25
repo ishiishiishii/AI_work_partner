@@ -4,12 +4,15 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.db import get_connection
 from app.schemas.models import (
+    CompanySizeOut,
     CustomerCreate,
     CustomerOut,
     DealCreate,
     DealOut,
+    DealPhaseOut,
     DealUpdate,
     ForecastOut,
+    IndustryOut,
     PlanCreate,
     PlanGenerateRequest,
     PlanGenerateResponse,
@@ -35,6 +38,27 @@ def get_reps() -> list[SalesRepOut]:
     with get_connection() as conn:
         rows = planning.list_reps(conn)
     return [SalesRepOut.model_validate(row) for row in rows]
+
+
+@router.get("/industries", response_model=list[IndustryOut])
+def get_industries() -> list[IndustryOut]:
+    with get_connection() as conn:
+        rows = planning.list_industries(conn)
+    return [IndustryOut.model_validate(row) for row in rows]
+
+
+@router.get("/company-sizes", response_model=list[CompanySizeOut])
+def get_company_sizes() -> list[CompanySizeOut]:
+    with get_connection() as conn:
+        rows = planning.list_company_sizes(conn)
+    return [CompanySizeOut.model_validate(row) for row in rows]
+
+
+@router.get("/deal-phases", response_model=list[DealPhaseOut])
+def get_deal_phases() -> list[DealPhaseOut]:
+    with get_connection() as conn:
+        rows = planning.list_deal_phases(conn)
+    return [DealPhaseOut.model_validate(row) for row in rows]
 
 
 @router.get("/targets", response_model=list[TargetOut])

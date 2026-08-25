@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { fetchProducts } from "@/lib/api";
-import { DEAL_PHASE_NAMES } from "@/lib/mockData";
-import type { Product } from "@/types";
+import type { DealPhase, Product } from "@/types";
 
 type NewDealFormProps = {
+  dealPhases: DealPhase[];
   onCreate: (input: {
     product_id: number;
     deal_phase_id: number;
@@ -17,21 +17,21 @@ type NewDealFormProps = {
   }) => Promise<void>;
 };
 
-const dealPhaseOptions = Object.entries(DEAL_PHASE_NAMES);
+function makeInitialDraft(dealPhases: DealPhase[]) {
+  return {
+    product_id: "",
+    deal_phase_id: dealPhases[0] ? String(dealPhases[0].deal_phase_id) : "",
+    estimated_amount: "",
+    win_probability: "",
+    expected_visit_count: "",
+    expected_effort_hours: "",
+    deal_start_date: "",
+  };
+}
 
-const initialDraft = {
-  product_id: "",
-  deal_phase_id: dealPhaseOptions[0][0],
-  estimated_amount: "",
-  win_probability: "",
-  expected_visit_count: "",
-  expected_effort_hours: "",
-  deal_start_date: "",
-};
-
-export function NewDealForm({ onCreate }: NewDealFormProps) {
+export function NewDealForm({ dealPhases, onCreate }: NewDealFormProps) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [draft, setDraft] = useState(initialDraft);
+  const [draft, setDraft] = useState(() => makeInitialDraft(dealPhases));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +43,10 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
       })
       .catch((err) => setError(err instanceof Error ? err.message : "商品一覧の取得に失敗しました"));
   }, []);
+
+  useEffect(() => {
+    setDraft((prev) => (prev.deal_phase_id ? prev : makeInitialDraft(dealPhases)));
+  }, [dealPhases]);
 
   const isValid =
     draft.product_id !== "" &&
@@ -67,7 +71,7 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
         expected_effort_hours: Number(draft.expected_effort_hours),
         deal_start_date: draft.deal_start_date || undefined,
       });
-      setDraft({ ...initialDraft, product_id: draft.product_id });
+      setDraft({ ...makeInitialDraft(dealPhases), product_id: draft.product_id });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
     } finally {
@@ -98,9 +102,9 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
             value={draft.deal_phase_id}
             onChange={(event) => setDraft({ ...draft, deal_phase_id: event.target.value })}
           >
-            {dealPhaseOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
+            {dealPhases.map((phase) => (
+              <option key={phase.deal_phase_id} value={phase.deal_phase_id}>
+                {phase.deal_phase_name}
               </option>
             ))}
           </select>

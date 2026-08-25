@@ -28,6 +28,27 @@ def list_reps(conn: Connection) -> list[dict]:
     return list(rows)
 
 
+def list_industries(conn: Connection) -> list[dict]:
+    rows = conn.execute(
+        "select industry_id, industry_name from industry order by industry_id"
+    ).fetchall()
+    return list(rows)
+
+
+def list_company_sizes(conn: Connection) -> list[dict]:
+    rows = conn.execute(
+        "select company_size_id, company_size_name from company_size_master order by company_size_id"
+    ).fetchall()
+    return list(rows)
+
+
+def list_deal_phases(conn: Connection) -> list[dict]:
+    rows = conn.execute(
+        "select deal_phase_id, deal_phase_name, sort_order from deal_phase order by sort_order"
+    ).fetchall()
+    return list(rows)
+
+
 def list_targets(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(

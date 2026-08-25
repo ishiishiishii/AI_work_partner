@@ -3,10 +3,13 @@ import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
   ActivityPlanCategory,
+  CompanySize,
   Customer,
   Deal,
+  DealPhase,
   DealResultStatus,
   Forecast,
+  Industry,
   Product,
   RepAffinity,
   SalesRep,
@@ -25,6 +28,27 @@ export async function fetchReps(): Promise<SalesRep[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps`, { cache: "no-store" });
   if (!res.ok) throw new Error(`担当者一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function fetchIndustries(): Promise<Industry[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/industries`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`業種一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function fetchCompanySizes(): Promise<CompanySize[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/company-sizes`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`企業規模一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function fetchDealPhases(): Promise<DealPhase[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/deal-phases`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`商談フェーズ一覧の取得に失敗しました (HTTP ${res.status})`);
   return res.json();
 }
 
