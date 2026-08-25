@@ -323,13 +323,7 @@ export function ActivityPlanList({
       cancelled = true;
     };
   }, []);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const earliest = plans.reduce(
-      (min, plan) => (plan.plan_date < min ? plan.plan_date : min),
-      plans[0]?.plan_date,
-    );
-    return earliest ?? formatISODate(new Date());
-  });
+  const [selectedDate, setSelectedDate] = useState(() => formatISODate(new Date()));
 
   const range = getRange(viewMode, selectedDate);
   const filteredPlans = plans.filter(
@@ -702,6 +696,11 @@ export function ActivityPlanList({
     setViewMode("day");
   }
 
+  // 表示中のビュー(日/週/月)を保ったまま、選択日だけ今日に戻す
+  function jumpToToday() {
+    setSelectedDate(todayIso);
+  }
+
   function handleShift(direction: -1 | 1) {
     const date = parseISODate(selectedDate);
     if (viewMode === "day") {
@@ -737,6 +736,14 @@ export function ActivityPlanList({
       <div className="activity-plan-list__nav">
         <button type="button" onClick={() => handleShift(-1)}>
           ← 前へ
+        </button>
+        <button
+          type="button"
+          className="activity-plan-list__today-button"
+          onClick={jumpToToday}
+          disabled={selectedDate === todayIso}
+        >
+          今日
         </button>
         <button type="button" onClick={() => handleShift(1)}>
           次へ →

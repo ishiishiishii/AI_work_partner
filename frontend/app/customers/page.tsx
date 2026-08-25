@@ -15,6 +15,7 @@ export default function CustomersPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [staleCustomers, setStaleCustomers] = useState<StaleCustomer[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     if (REP_ID === null) return;
@@ -59,6 +60,16 @@ export default function CustomersPage() {
     setCustomers((prev) => [...prev, created]);
   }
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const filteredCustomers = normalizedQuery
+    ? customers.filter((customer) =>
+        [customer.customer_name, customer.industry_name, customer.location, customer.company_size_name]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery)
+      )
+    : customers;
+
   if (!selectedRep) {
     return (
       <main>
@@ -84,7 +95,24 @@ export default function CustomersPage() {
           <div className="page-layout__primary">
             <section className="panel">
               <h2>登録済みの顧客</h2>
-              <CustomerTable customers={customers} />
+              <form className="product-search" onSubmit={(event) => event.preventDefault()}>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="顧客名・業種・所在地で検索"
+                />
+                {searchQuery && (
+                  <button type="button" className="regenerate-button" onClick={() => setSearchQuery("")}>
+                    クリア
+                  </button>
+                )}
+              </form>
+              {normalizedQuery && filteredCustomers.length === 0 ? (
+                <p className="activity-plan-list__empty">「{searchQuery}」に一致する顧客がありません</p>
+              ) : (
+                <CustomerTable customers={filteredCustomers} />
+              )}
             </section>
           </div>
           <div className="page-layout__sidebar">

@@ -214,6 +214,7 @@ type ApiPlan = {
   rationale: string | null;
   product_name: string | null;
   progress_percent: number;
+  memo: string | null;
 };
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
@@ -240,7 +241,7 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     is_ai_generated: row.is_ai_generated,
     reasoning_text: row.rationale ?? "",
     result_status: "pending",
-    memo: null,
+    memo: row.memo,
     progress_percent: row.progress_percent,
   };
 }
@@ -348,6 +349,7 @@ export async function updatePlan(
     activity_type_name: string;
     customer_name: string;
     product_name: string | null;
+    memo: string | null;
   },
 ): Promise<void> {
   const base = getApiBaseUrl();
@@ -361,6 +363,7 @@ export async function updatePlan(
       activity_type: updates.activity_type_name,
       title: updates.customer_name,
       product_name_override: updates.product_name,
+      memo: updates.memo,
     }),
   });
   if (!res.ok) throw new Error(`予定の更新に失敗しました (HTTP ${res.status})`);
@@ -483,6 +486,8 @@ type ApiDeal = {
   contract_date: string | null;
   product_id: number;
   deal_phase_id: number;
+  cost: string | number;
+  profit: string | number;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -506,6 +511,8 @@ function mapDeal(row: ApiDeal): Deal {
     expected_effort_hours: Number(row.expected_effort_hours),
     deal_start_date: row.deal_start_date,
     contract_date: row.contract_date,
+    cost: Number(row.cost),
+    profit: Number(row.profit),
   };
 }
 
@@ -633,6 +640,7 @@ export async function fetchForecast(repId: number, targetMonth: string): Promise
     target_amount: Number(row.target_amount),
     forecast_amount: Number(row.expected_amount),
     achievement_rate: row.attainment_ratio * 100,
+    open_plan_count: row.open_plan_count,
   };
 }
 
