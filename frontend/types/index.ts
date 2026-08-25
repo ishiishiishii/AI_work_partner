@@ -3,6 +3,12 @@ export type SalesRep = {
   rep_name: string;
 };
 
+// 担当者の営業所(branch)が管轄する都道府県一覧。GET /api/reps/{rep_id}/territory が返す。
+export type Territory = {
+  branch_name: string;
+  prefectures: string[];
+};
+
 export type SalesTarget = {
   rep_id: number;
   target_month: string; // "YYYY-MM"

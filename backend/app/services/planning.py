@@ -250,6 +250,31 @@ def _rep_branch(conn: Connection, rep_id: int) -> str | None:
     return row["branch_name"] if row else None
 
 
+def get_rep_territory(conn: Connection, rep_id: int) -> dict | None:
+    """The rep's branch and the prefectures it covers (see `prefecture` /
+    `branch` tables, 20260826100000). Used to scope the customer map to a
+    rep's own territory instead of showing the whole country."""
+    branch_row = conn.execute(
+        """
+        select b.branch_id, b.branch_name
+        from sales_rep r
+        join branch b on b.branch_id = r.branch_id
+        where r.rep_id = %s
+        """,
+        (rep_id,),
+    ).fetchone()
+    if not branch_row:
+        return None
+    prefecture_rows = conn.execute(
+        "select prefecture_name from prefecture where branch_id = %s order by prefecture_name",
+        (branch_row["branch_id"],),
+    ).fetchall()
+    return {
+        "branch_name": branch_row["branch_name"],
+        "prefectures": [row["prefecture_name"] for row in prefecture_rows],
+    }
+
+
 def create_deal(
     conn: Connection,
     *,

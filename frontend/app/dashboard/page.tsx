@@ -17,6 +17,7 @@ import {
   fetchDeals,
   fetchForecast,
   fetchRepAffinity,
+  fetchRepTerritory,
   fetchSalesTarget,
   generateActivityPlans,
   postActivityResult,
@@ -38,6 +39,7 @@ import type {
   RepAffinity,
   ReplanInfo,
   SalesTarget,
+  Territory,
 } from "@/types";
 
 // leafletはブラウザのwindow/documentに直接依存しておりSSR不可なため、
@@ -65,6 +67,7 @@ export default function DashboardPage() {
   const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [territory, setTerritory] = useState<Territory | null>(null);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
@@ -109,10 +112,11 @@ export default function DashboardPage() {
 
         // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(repId);
-        const [fetchedAffinities, fetchedDeals, fetchedCustomers] = await Promise.all([
+        const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
           fetchRepAffinity(repId),
           fetchDeals(repId),
           fetchCustomers(repId),
+          fetchRepTerritory(repId),
         ]);
         if (cancelled) return;
 
@@ -129,6 +133,7 @@ export default function DashboardPage() {
         setAffinities(fetchedAffinities);
         setDeals(fetchedDeals);
         setCustomers(fetchedCustomers);
+        setTerritory(fetchedTerritory);
         await refreshForecast(repId);
       } catch (error) {
         if (!cancelled) {
@@ -540,7 +545,7 @@ export default function DashboardPage() {
             plans={plans}
             affinities={affinities}
           />
-          <MapPanel customers={customers} />
+          <MapPanel customers={customers} territory={territory} />
           <AiReasoningPanel plans={plans} />
         </div>
       </div>

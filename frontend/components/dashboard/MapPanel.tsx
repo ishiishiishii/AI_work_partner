@@ -3,8 +3,8 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
-import { estimateCoordinates } from "@/lib/geo";
-import type { Customer } from "@/types";
+import { boundsForPrefectures, estimateCoordinates, locationPrefecture } from "@/lib/geo";
+import type { Customer, Territory } from "@/types";
 
 // leafletのデフォルトマーカー画像はCSS相対パス経由で読み込まれる前提になっており、
 // webpack/Next.jsのバンドル環境ではパスが壊れて透明な四角になる定番の問題がある。
@@ -22,24 +22,39 @@ L.Icon.Default.mergeOptions({
 
 type MapPanelProps = {
   customers: Customer[];
+  territory: Territory | null;
 };
 
-const JAPAN_CENTER: [number, number] = [36.5, 138];
+const JAPAN_BOUNDS: [[number, number], [number, number]] = [
+  [26, 128],
+  [45.5, 145.8],
+];
 
-export function MapPanel({ customers }: MapPanelProps) {
-  const pins = customers.map((customer) => ({
+export function MapPanel({ customers, territory }: MapPanelProps) {
+  // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
+  // (読み込み中)は絞り込まず全件表示しておく方が「一瞬空になる」より自然。
+  const scopedCustomers = territory
+    ? customers.filter((customer) => {
+        const prefecture = locationPrefecture(customer.location);
+        return prefecture !== null && territory.prefectures.includes(prefecture);
+      })
+    : customers;
+
+  const pins = scopedCustomers.map((customer) => ({
     customer,
     position: estimateCoordinates(customer.location, customer.customer_id),
   }));
 
+  const bounds = territory ? boundsForPrefectures(territory.prefectures) : JAPAN_BOUNDS;
+
   return (
     <section className="panel map-panel">
-      <h2>顧客の分布</h2>
+      <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
       <p className="map-panel__note">
         住所の番地はデモ用の架空データのため、ピンの位置は都道府県内のおおよその位置です。
       </p>
       <div className="map-panel__leaflet">
-        <MapContainer center={JAPAN_CENTER} zoom={5} scrollWheelZoom={false}>
+        <MapContainer bounds={bounds} scrollWheelZoom={false}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

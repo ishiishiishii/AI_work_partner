@@ -14,6 +14,11 @@ class SalesRepOut(OrmModel):
     rep_name: str
 
 
+class TerritoryOut(BaseModel):
+    branch_name: str
+    prefectures: list[str]
+
+
 class IndustryOut(OrmModel):
     industry_id: int
     industry_name: str

@@ -71,13 +71,35 @@ export type CustomerPin = {
   lng: number;
 };
 
+// location文字列の先頭に一致する都道府県名を返す(担当エリアでの絞り込みに使う)。
+export function locationPrefecture(location: string): string | null {
+  return Object.keys(PREFECTURE_COORDS).find((name) => location.startsWith(name)) ?? null;
+}
+
 // location文字列の先頭の都道府県名を拾い、その庁所在地の座標に、customer_id由来の
 // 決定的なズレ(最大で緯度経度それぞれ約±0.3度 = 都道府県内に収まる程度)を加える。
 // 該当する都道府県が見つからない場合は東京を仮の中心地とする。
 export function estimateCoordinates(location: string, customerId: number): [number, number] {
-  const prefecture = Object.keys(PREFECTURE_COORDS).find((name) => location.startsWith(name));
+  const prefecture = locationPrefecture(location);
   const [baseLat, baseLng] = PREFECTURE_COORDS[prefecture ?? "東京都"];
   const jitterLat = (seededRandom(customerId) - 0.5) * 0.6;
   const jitterLng = (seededRandom(customerId + 100000) - 0.5) * 0.6;
   return [baseLat + jitterLat, baseLng + jitterLng];
+}
+
+// 担当エリア(都道府県名の配列)の庁所在地群を包む範囲を返す。地図の初期表示に使う。
+// estimateCoordinates のズレ(最大約±0.3度)がはみ出さないよう、余白を持たせている。
+export function boundsForPrefectures(prefectures: string[]): [[number, number], [number, number]] {
+  const coords = prefectures
+    .map((name) => PREFECTURE_COORDS[name])
+    .filter((coord): coord is [number, number] => coord !== undefined);
+  const base: [number, number][] = coords.length > 0 ? coords : [PREFECTURE_COORDS["東京都"]];
+
+  const margin = 0.5;
+  const lats = base.map(([lat]) => lat);
+  const lngs = base.map(([, lng]) => lng);
+  return [
+    [Math.min(...lats) - margin, Math.min(...lngs) - margin],
+    [Math.max(...lats) + margin, Math.max(...lngs) + margin],
+  ];
 }
