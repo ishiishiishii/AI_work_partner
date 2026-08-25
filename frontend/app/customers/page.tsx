@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { CustomerTable } from "@/components/customers/CustomerTable";
-import { NewCustomerForm } from "@/components/customers/NewCustomerForm";
 import { StaleCustomerList } from "@/components/customers/StaleCustomerList";
-import { createCustomer, fetchCustomers, fetchStaleCustomers } from "@/lib/api";
+import { fetchCustomers, fetchStaleCustomers } from "@/lib/api";
 import { useRep } from "@/lib/repContext";
 import type { Customer, StaleCustomer } from "@/types";
 
@@ -49,17 +48,6 @@ export default function CustomersPage() {
     };
   }, [REP_ID]);
 
-  async function handleCreate(input: {
-    customer_name: string;
-    industry_id: number;
-    company_size_id: number;
-    location: string;
-  }) {
-    if (REP_ID === null) return;
-    const created = await createCustomer(REP_ID, input);
-    setCustomers((prev) => [...prev, created]);
-  }
-
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredCustomers = normalizedQuery
     ? customers.filter((customer) =>
@@ -69,6 +57,10 @@ export default function CustomersPage() {
           .includes(normalizedQuery)
       )
     : customers;
+  const inTerritoryCustomers = filteredCustomers.filter((customer) => customer.in_territory);
+  const outOfTerritoryCustomers = filteredCustomers.filter((customer) => !customer.in_territory);
+  const registeredCustomers = inTerritoryCustomers.filter((customer) => customer.has_relationship);
+  const areaCandidateCustomers = inTerritoryCustomers.filter((customer) => !customer.has_relationship);
 
   if (!selectedRep) {
     return (
@@ -91,41 +83,57 @@ export default function CustomersPage() {
           データの取得に失敗しました({loadError})。バックエンド(API・Supabase)が起動しているか確認してください。
         </p>
       ) : (
-        <div className="page-layout">
-          <div className="page-layout__primary">
-            <section className="panel">
-              <h2>登録済みの顧客</h2>
-              <form className="product-search" onSubmit={(event) => event.preventDefault()}>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="顧客名・業種・所在地で検索"
-                />
-                {searchQuery && (
-                  <button type="button" className="regenerate-button" onClick={() => setSearchQuery("")}>
-                    クリア
-                  </button>
-                )}
-              </form>
-              {normalizedQuery && filteredCustomers.length === 0 ? (
-                <p className="activity-plan-list__empty">「{searchQuery}」に一致する顧客がありません</p>
-              ) : (
-                <CustomerTable customers={filteredCustomers} />
+        <div className="customer-grid">
+          <section className="panel">
+            <h2>登録済みの顧客</h2>
+            <form className="product-search" onSubmit={(event) => event.preventDefault()}>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="顧客名・業種・所在地で検索"
+              />
+              {searchQuery && (
+                <button type="button" className="regenerate-button" onClick={() => setSearchQuery("")}>
+                  クリア
+                </button>
               )}
-            </section>
-          </div>
-          <div className="page-layout__sidebar">
+            </form>
+            {normalizedQuery && filteredCustomers.length === 0 ? (
+              <p className="activity-plan-list__empty">「{searchQuery}」に一致する顧客がありません</p>
+            ) : (
+              <CustomerTable customers={registeredCustomers} />
+            )}
+          </section>
+
+          <section className="panel">
+            <h2>休眠顧客</h2>
+            <p>60日以上接点の無い顧客です。フォローの優先候補として確認してください。</p>
+            <StaleCustomerList customers={staleCustomers} />
+          </section>
+
+          {outOfTerritoryCustomers.length > 0 && (
             <section className="panel">
-              <h2>休眠顧客</h2>
-              <p>60日以上接点の無い顧客です。フォローの優先候補として確認してください。</p>
-              <StaleCustomerList customers={staleCustomers} />
+              <h2>エリア外の顧客</h2>
+              <p>
+                転勤等で担当エリア外に残っている既存の顧客です。担当の引き継ぎ状況を確認してください。
+              </p>
+              <CustomerTable customers={outOfTerritoryCustomers} />
             </section>
-          </div>
+          )}
+
+          {areaCandidateCustomers.length > 0 && (
+            <section className="panel">
+              <h2>担当していない自分のエリアの顧客</h2>
+              <p>
+                あなたの担当エリア内にありますが、まだ担当・商談履歴のない顧客です。新規開拓の候補として確認してください。
+              </p>
+              <CustomerTable customers={areaCandidateCustomers} />
+            </section>
+          )}
         </div>
       )}
 
-      <NewCustomerForm onCreate={handleCreate} />
     </main>
   );
 }

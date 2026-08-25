@@ -45,6 +45,13 @@ export type RepAffinity = {
 // 顧客そのものは業種・企業規模・所在地のみを持つ（AGENTS.mdの正規化方針に合わせた）。
 // industry_name/company_size_name はバックエンドの AI 参照用ビュー(ai.customer)が
 // 名称まで解決して返すため、ここでは id を持たずそのまま表示に使う。
+// in_territory: 所在地が担当者の管轄支店(prefecture/branchマスタ)に含まれるか。
+// 既存の関係(担当者紐付け・商談履歴)がある顧客は、エリア外でも一覧からは除外され
+// ない(転勤等でエリア外に既存顧客が残るケースがあるため)。false の場合はその
+// 「エリア外だが関係がある」ケースなので、フロント側で別枠表示に使う。
+// has_relationship: この担当者に紐付いている(primary_rep_id一致)か、この担当者
+// との商談履歴があるか。in_territory=true かつ has_relationship=false は、
+// 「自分のエリア内だが担当していない」未接触の候補顧客。
 export type Customer = {
   customer_id: number;
   customer_name: string;
@@ -53,6 +60,25 @@ export type Customer = {
   location: string;
   primary_rep_id: number | null;
   primary_rep_name: string | null;
+  in_territory: boolean;
+  has_relationship: boolean;
+  website: string | null;
+  contact_name: string | null;
+};
+
+// 新規顧客登録フォームの「顧客名で検索」候補。他の担当者が登録済みの同名顧客
+// から業種/企業規模/所在地などを丸ごと流用するため、名称だけでなくidも持つ
+// (CustomerとちがいIDが要るのはフォームのセレクトボックスへ反映するため)。
+export type CustomerSuggestion = {
+  customer_id: number;
+  customer_name: string;
+  industry_id: number;
+  industry_name: string;
+  company_size_id: number;
+  company_size_name: string;
+  location: string;
+  website: string | null;
+  contact_name: string | null;
 };
 
 // 休眠顧客(しばらく接点の無い顧客)一覧。Customer に加えて最終接点日と
@@ -146,6 +172,18 @@ export type ActivityPlan = {
   result_status: DealResultStatus;
   memo: string | null; // 企業訪問での自由メモ
   progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う
+};
+
+// 汎用のタスク期限。activity_planとは別で、顧客/商談との紐付けは任意。
+export type Deadline = {
+  deadline_id: number;
+  rep_id: number;
+  title: string;
+  due_date: string; // "YYYY-MM-DD"
+  customer_id: number | null;
+  deal_id: number | null;
+  is_done: boolean;
+  memo: string | null;
 };
 
 export type ReplanInfo = {

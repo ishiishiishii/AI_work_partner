@@ -4,6 +4,8 @@ import type {
   ActivityPlan,
   ActivityPlanCategory,
   Customer,
+  CustomerSuggestion,
+  Deadline,
   Deal,
   DealResultStatus,
   Forecast,
@@ -126,6 +128,10 @@ type ApiCustomer = {
   location: string;
   primary_rep_id: number | null;
   primary_rep_name: string | null;
+  in_territory: boolean;
+  has_relationship: boolean;
+  website: string | null;
+  contact_name: string | null;
 };
 
 function mapCustomer(row: ApiCustomer): Customer {
@@ -137,6 +143,10 @@ function mapCustomer(row: ApiCustomer): Customer {
     location: row.location,
     primary_rep_id: row.primary_rep_id,
     primary_rep_name: row.primary_rep_name,
+    in_territory: row.in_territory,
+    has_relationship: row.has_relationship,
+    website: row.website,
+    contact_name: row.contact_name,
   };
 }
 
@@ -155,6 +165,8 @@ export async function createCustomer(
     industry_id: number;
     company_size_id: number;
     location: string;
+    website?: string | null;
+    contact_name?: string | null;
   },
 ): Promise<Customer> {
   const base = getApiBaseUrl();
@@ -167,10 +179,79 @@ export async function createCustomer(
       industry_id: input.industry_id,
       company_size_id: input.company_size_id,
       location: input.location,
+      website: input.website || null,
+      contact_name: input.contact_name || null,
     }),
   });
   if (!res.ok) throw new Error(`顧客の登録に失敗しました (HTTP ${res.status})`);
   return mapCustomer(await res.json());
+}
+
+type ApiCustomerSuggestion = {
+  customer_id: number;
+  customer_name: string;
+  industry_id: number;
+  industry_name: string;
+  company_size_id: number;
+  company_size_name: string;
+  location: string;
+  website: string | null;
+  contact_name: string | null;
+};
+
+// 新規顧客登録フォームの「顧客名で検索」用。担当エリアに関わらず全社の登録済み
+// 顧客から部分一致で探す(他の担当者の重複登録に気づけるようにするため)。
+export async function searchCustomers(query: string): Promise<CustomerSuggestion[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers/search?q=${encodeURIComponent(query)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`顧客の検索に失敗しました (HTTP ${res.status})`);
+  const rows: ApiCustomerSuggestion[] = await res.json();
+  return rows;
+}
+
+type ApiDeadline = {
+  deadline_id: number;
+  rep_id: number;
+  title: string;
+  due_date: string;
+  customer_id: number | null;
+  deal_id: number | null;
+  is_done: boolean;
+  memo: string | null;
+};
+
+function mapDeadline(row: ApiDeadline): Deadline {
+  return {
+    deadline_id: row.deadline_id,
+    rep_id: row.rep_id,
+    title: row.title,
+    due_date: row.due_date,
+    customer_id: row.customer_id,
+    deal_id: row.deal_id,
+    is_done: row.is_done,
+    memo: row.memo,
+  };
+}
+
+export async function createDeadline(
+  repId: number,
+  input: { title: string; due_date: string; memo: string | null },
+): Promise<Deadline> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/deadlines`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      rep_id: repId,
+      title: input.title,
+      due_date: input.due_date,
+      memo: input.memo,
+    }),
+  });
+  if (!res.ok) throw new Error(`期限の登録に失敗しました (HTTP ${res.status})`);
+  return mapDeadline(await res.json());
 }
 
 type ApiStaleCustomer = ApiCustomer & {
