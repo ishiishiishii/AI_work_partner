@@ -1234,38 +1234,43 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     if not target:
         raise ValueError("target not found")
 
-    # 成約(won)は満額、失注(lost)は0円、それ以外(対応前 or 延期等)も見込み金額を
-    # 確率按分せずそのまま計上する(確度は候補選定の優先順位づけにのみ使う)。
-    # plan_status='done' の予定は活動結果(activity_result)を紐づけて実際の結果を反映し、
-    # 未対応(scheduled)のままの予定は expected_amount をそのまま計上する
-    # (フロントの calcForecastAmount と同じ考え方)。
-    plan_stats = conn.execute(
+    # 1つの商談(deal)には訪問+関連タスクなど複数のactivity_plan行が紐づき得るため、
+    # 行ごとにexpected_amountを合算すると同じ商談を複数回計上してしまう。商談単位で
+    # 1回だけ計上し、確度(win_probability)で重み付けした期待値にする: 成約(won)は
+    # 満額、失注(lost)は0円、それ以外(進行中)は見込み金額×確度/100。商談に紐づかない
+    # 予定(事務作業など)は行単位でそのまま計上する(deal_idが無く重複しようがないため)。
+    stats = conn.execute(
         """
-        select
-          coalesce(sum(
+        with month_plans as (
+          select plan_id, deal_id, expected_amount, plan_status
+          from activity_plan
+          where rep_id = %(rep_id)s
+            and plan_status != 'cancelled'
+            and to_char(plan_date, 'YYYY-MM') = %(target_month)s
+        ),
+        deal_amounts as (
+          select
+            d.deal_id,
             case
-              when ap.plan_status = 'done' and latest.outcome = 'lost' then 0
-              else ap.expected_amount
-            end
-          ), 0) as expected_amount,
-          count(*) filter (where ap.plan_status = 'scheduled')::int as open_plan_count
-        from activity_plan ap
-        left join lateral (
-          select ar.outcome
-          from activity_result ar
-          where ar.plan_id = ap.plan_id
-          order by ar.created_at desc
-          limit 1
-        ) latest on true
-        where ap.rep_id = %s
-          and ap.plan_status != 'cancelled'
-          and to_char(ap.plan_date, 'YYYY-MM') = %s
+              when drs.status_code = 'won' then d.estimated_amount
+              when drs.status_code = 'lost' then 0
+              else d.estimated_amount * d.win_probability / 100
+            end as amount
+          from deal d
+          join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+          where d.deal_id in (select deal_id from month_plans where deal_id is not null)
+        )
+        select
+          coalesce((select sum(amount) from deal_amounts), 0)
+            + coalesce((select sum(expected_amount) from month_plans where deal_id is null), 0)
+            as expected_amount,
+          (select count(*) from month_plans where plan_status = 'scheduled')::int as open_plan_count
         """,
-        (rep_id, target_month),
+        {"rep_id": rep_id, "target_month": target_month},
     ).fetchone()
 
     target_amount = Decimal(target["target_amount"])
-    expected_amount = Decimal(plan_stats["expected_amount"])
+    expected_amount = Decimal(stats["expected_amount"])
     ratio = float(expected_amount / target_amount) if target_amount > 0 else 0.0
     return {
         "rep_id": rep_id,
@@ -1273,5 +1278,5 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
         "target_amount": target_amount,
         "expected_amount": expected_amount,
         "attainment_ratio": ratio,
-        "open_plan_count": plan_stats["open_plan_count"],
+        "open_plan_count": stats["open_plan_count"],
     }
