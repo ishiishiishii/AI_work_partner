@@ -76,6 +76,20 @@ export default function CustomersPage() {
       <h1>顧客一覧</h1>
       <p>{selectedRep.rep_name}さんが担当する顧客候補です。</p>
 
+      <form className="product-search" onSubmit={(event) => event.preventDefault()}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="顧客名・業種・所在地で検索"
+        />
+        {searchQuery && (
+          <button type="button" className="regenerate-button" onClick={() => setSearchQuery("")}>
+            クリア
+          </button>
+        )}
+      </form>
+
       {isLoading ? (
         <p>読み込み中...</p>
       ) : loadError ? (
@@ -86,19 +100,6 @@ export default function CustomersPage() {
         <div className="customer-grid">
           <section className="panel">
             <h2>登録済みの顧客</h2>
-            <form className="product-search" onSubmit={(event) => event.preventDefault()}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="顧客名・業種・所在地で検索"
-              />
-              {searchQuery && (
-                <button type="button" className="regenerate-button" onClick={() => setSearchQuery("")}>
-                  クリア
-                </button>
-              )}
-            </form>
             {normalizedQuery && filteredCustomers.length === 0 ? (
               <p className="activity-plan-list__empty">「{searchQuery}」に一致する顧客がありません</p>
             ) : (
