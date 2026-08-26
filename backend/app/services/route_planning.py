@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -11,9 +12,20 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from app.config import settings
-from app.schemas.route_plans import RouteEndpointInput, RoutePlanPreviewRequest
-from app.services.geocoding import default_geocoder
+from app.schemas.route_plans import (
+    RouteEndpointInput,
+    RoutePlanPreviewRequest,
+    RouteSearchAreaInput,
+)
+from app.services.geocoding import (
+    GeocodeResult,
+    OpenRouteServiceGeocoder,
+    OtpStopGeocoder,
+    default_geocoder,
+    prefecture_from_address,
+)
 from app.services.route_optimization import (
+    AffinityEvidence,
     DealEconomics,
     GoogleRoutesMatrixProvider,
     OpenTripPlannerTransitMatrixProvider,
@@ -50,20 +62,55 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def policy_weights(policy: str) -> dict[str, int]:
+def policy_weights(
+    policy: str,
+    *,
+    sales_weight_percent: int | None = None,
+    gross_profit_weight_percent: int | None = None,
+) -> dict[str, int]:
     if policy == "sales":
-        return {"sales": 45, "gross_profit": 25, "urgency": 15, "phase": 10, "target_gap": 5}
-    if policy == "gross_profit":
-        return {"sales": 20, "gross_profit": 50, "urgency": 15, "phase": 10, "target_gap": 5}
-    if policy == "short_travel":
-        return {"sales": 20, "gross_profit": 25, "urgency": 25, "phase": 15, "target_gap": 15}
-    return {
-        "sales": settings.route_sales_weight,
-        "gross_profit": settings.route_gross_profit_weight,
-        "urgency": settings.route_urgency_weight,
-        "phase": settings.route_phase_weight,
-        "target_gap": settings.route_target_gap_weight,
-    }
+        weights = {
+            "sales": 40,
+            "gross_profit": 25,
+            "affinity": settings.route_affinity_weight,
+            "urgency": 10,
+            "phase": 5,
+            "target_gap": 5,
+        }
+    elif policy == "gross_profit":
+        weights = {
+            "sales": 20,
+            "gross_profit": 45,
+            "affinity": settings.route_affinity_weight,
+            "urgency": 10,
+            "phase": 5,
+            "target_gap": 5,
+        }
+    elif policy == "short_travel":
+        weights = {
+            "sales": 15,
+            "gross_profit": 20,
+            "affinity": settings.route_affinity_weight,
+            "urgency": 20,
+            "phase": 15,
+            "target_gap": 15,
+        }
+    else:
+        weights = {
+            "sales": settings.route_sales_weight,
+            "gross_profit": settings.route_gross_profit_weight,
+            "affinity": settings.route_affinity_weight,
+            "urgency": settings.route_urgency_weight,
+            "phase": settings.route_phase_weight,
+            "target_gap": settings.route_target_gap_weight,
+        }
+
+    if sales_weight_percent is not None and gross_profit_weight_percent is not None:
+        economics_total = weights["sales"] + weights["gross_profit"]
+        sales_weight = (economics_total * sales_weight_percent + 50) // 100
+        weights["sales"] = sales_weight
+        weights["gross_profit"] = economics_total - sales_weight
+    return weights
 
 
 def _rep_branch(conn: Connection, rep_id: int) -> dict:
@@ -118,6 +165,111 @@ def _resolve_endpoint(
     }
 
 
+def _resolve_search_area(
+    branch: dict,
+    area: RouteSearchAreaInput,
+    *,
+    start_location: dict[str, Any],
+    conn: Connection | None = None,
+) -> dict[str, Any]:
+    if area.kind == "auto":
+        return {
+            "kind": "auto",
+            "label": "出発地点周辺（自動探索）",
+            "query": None,
+            "latitude": float(start_location["latitude"]),
+            "longitude": float(start_location["longitude"]),
+            "radius_km": None,
+        }
+
+    raw_query = (area.query or "").strip()
+    normalized_query = re.sub(r"(?:周辺|付近)$", "", raw_query).strip()
+    branch_prefecture = prefecture_from_address(str(branch.get("location") or ""))
+    contextual_query = normalized_query
+    # 「新宿区」のような区名だけは所属都道府県で曖昧さを減らす。
+    # 「横浜市」まで東京都で補完すると別地点になるため、市町村を含む入力には追加しない。
+    is_bare_ward = normalized_query.endswith("区") and not any(
+        marker in normalized_query[:-1] for marker in ("都", "道", "府", "県", "市", "町", "村")
+    )
+    if (
+        branch_prefecture
+        and prefecture_from_address(normalized_query) is None
+        and is_bare_ward
+    ):
+        contextual_query = f"{branch_prefecture}{normalized_query}"
+
+    # 国土地理院の住所検索は区市町村に強い一方、「東京駅」を
+    # 「東京都東久留米市」と解釈することがある。駅名はローカルのOTPを優先し、
+    # 収録外の駅だけPOIを扱えるORSへフォールバックする。
+    if normalized_query.endswith("駅"):
+        try:
+            result = OtpStopGeocoder(api_url=settings.otp_api_url).geocode(
+                normalized_query
+            )
+        except RoutePlanningError:
+            result = GeocodeResult(status="failed")
+        if result.latitude is None or result.longitude is None:
+            try:
+                result = OpenRouteServiceGeocoder(
+                    api_key=settings.ors_api_key,
+                    api_url=settings.ors_geocoding_api_url,
+                    min_confidence=settings.ors_geocoding_min_confidence,
+                ).geocode(normalized_query)
+            except RoutePlanningError:
+                result = GeocodeResult(status="failed")
+        if str(result.accuracy or "").startswith("fallback"):
+            result = GeocodeResult(status="failed")
+    else:
+        result = GeocodeResult(status="failed")
+        if conn is not None:
+            local_center = conn.execute(
+                """
+                select avg(c.latitude)::float8 as latitude,
+                       avg(c.longitude)::float8 as longitude
+                from customer c
+                join prefecture_branch pb
+                  on c.location like pb.prefecture_name || '%%'
+                 and pb.branch_id = %s
+                where c.geocoding_status = 'success'
+                  and c.latitude is not null and c.longitude is not null
+                  and c.location ilike %s
+                """,
+                (branch["branch_id"], f"%{normalized_query}%"),
+            ).fetchone()
+            if local_center and local_center["latitude"] is not None:
+                result = GeocodeResult(
+                    status="success",
+                    latitude=float(local_center["latitude"]),
+                    longitude=float(local_center["longitude"]),
+                    accuracy="customer-centroid;source=database",
+                )
+        if result.latitude is None or result.longitude is None:
+            try:
+                result = default_geocoder().geocode(contextual_query)
+            except RoutePlanningError:
+                result = GeocodeResult(status="failed")
+
+    if result.latitude is None or result.longitude is None:
+        raise RoutePlanningError(
+            "search_area_geocoding_failed",
+            "訪問エリアを特定できませんでした。都道府県を含む区名、または駅名を確認してください。",
+        )
+    if not (20 <= result.latitude <= 50 and 120 <= result.longitude <= 155):
+        raise RoutePlanningError(
+            "search_area_outside_japan",
+            "訪問エリアを日本国内の地点として特定できませんでした。入力内容を確認してください。",
+        )
+    return {
+        "kind": "custom",
+        "label": f"{raw_query} 周辺（半径{area.radius_km}km）",
+        "query": raw_query,
+        "latitude": result.latitude,
+        "longitude": result.longitude,
+        "radius_km": area.radius_km,
+        "geocode_accuracy": result.accuracy,
+    }
+
+
 def _exclusion_stats(conn: Connection, *, rep_id: int, branch_id: int) -> dict[str, int]:
     row = conn.execute(
         """
@@ -151,15 +303,57 @@ def _candidate_rows(
     limit: int,
     origin_latitude: float,
     origin_longitude: float,
+    include_mandatory_anchors: bool = True,
+    enforce_branch_territory: bool = True,
 ) -> list[dict]:
     rows = conn.execute(
         """
-        with eligible_customer as (
+        with origin as (
+          select st_setsrid(
+            st_makepoint(%(origin_longitude)s, %(origin_latitude)s), 4326
+          )::geography as geo_point
+        ),
+        mandatory_anchor as (
+          select distinct c.geo_point
+          from deal d
+          join deal_result_status drs
+            on drs.deal_result_status_id = d.deal_result_status_id
+           and drs.status_code = 'ongoing'
+          join customer c on c.customer_id = d.customer_id
+          left join prefecture_branch pb
+            on c.location like pb.prefecture_name || '%%'
+          where d.rep_id = %(rep_id)s
+            and d.must_visit
+            and (
+              not %(enforce_branch_territory)s
+              or pb.branch_id = %(branch_id)s
+            )
+            and c.geocoding_status = 'success'
+            and c.geo_point is not null
+            and not exists (
+              select 1 from activity_plan ap
+              where ap.rep_id = %(rep_id)s
+                and ap.plan_date = %(target_date)s
+                and ap.deal_id = d.deal_id
+                and ap.plan_status = 'scheduled'
+            )
+        ),
+        eligible_customer as (
           select c.customer_id,
                  min(st_distance(
                    c.geo_point,
-                   st_setsrid(st_makepoint(%(origin_longitude)s, %(origin_latitude)s), 4326)::geography
+                   origin.geo_point
                  ))::int as branch_distance_m,
+                 min(least(
+                   st_distance(c.geo_point, origin.geo_point),
+                   coalesce(
+                     (
+                       select min(st_distance(c.geo_point, anchor.geo_point))
+                       from mandatory_anchor anchor
+                     ),
+                     st_distance(c.geo_point, origin.geo_point)
+                   )
+                 ))::int as area_distance_m,
                  bool_or(d.must_visit) as any_must_visit,
                  min(d.visit_deadline) as nearest_deadline
           from sales_rep sr
@@ -169,19 +363,29 @@ def _candidate_rows(
             on drs.deal_result_status_id = d.deal_result_status_id
            and drs.status_code = 'ongoing'
           join customer c on c.customer_id = d.customer_id
-          join prefecture_branch pb
+          left join prefecture_branch pb
             on c.location like pb.prefecture_name || '%%'
-           and pb.branch_id = sr.branch_id
+          cross join origin
           where sr.rep_id = %(rep_id)s
             and sr.branch_id = %(branch_id)s
             and c.geocoding_status = 'success'
             and c.geo_point is not null
             and (
+              not %(enforce_branch_territory)s
+              or pb.branch_id = sr.branch_id
+            )
+            and (
               d.must_visit
               or st_dwithin(
                 c.geo_point,
-                st_setsrid(st_makepoint(%(origin_longitude)s, %(origin_latitude)s), 4326)::geography,
+                origin.geo_point,
                 %(radius_m)s
+              )
+              or exists (
+                select 1
+                from mandatory_anchor anchor
+                where %(include_mandatory_anchors)s
+                  and st_dwithin(c.geo_point, anchor.geo_point, %(radius_m)s)
               )
             )
             and not exists (
@@ -197,15 +401,19 @@ def _candidate_rows(
           select *
           from eligible_customer
           order by any_must_visit desc, nearest_deadline asc nulls last,
-                   branch_distance_m asc
+                   area_distance_m asc
           limit %(limit)s
         )
         select c.customer_id, c.customer_name, c.latitude, c.longitude,
-               selected.branch_distance_m,
+               selected.branch_distance_m, selected.area_distance_m,
                d.deal_id, d.estimated_amount, d.cost, d.win_probability,
                d.visit_duration_min, d.visit_window_start, d.visit_window_end,
                d.must_visit, d.visit_deadline,
-               dp.deal_phase_name
+               dp.deal_phase_name,
+               i.industry_name, pc.category_name,
+               coalesce(fit.deal_count, 0) as affinity_deal_count,
+               coalesce(fit.won_count, 0) as affinity_won_count,
+               coalesce(fit.win_rate, 0) as affinity_win_rate
         from selected_customer selected
         join customer c on c.customer_id = selected.customer_id
         join deal d on d.customer_id = c.customer_id and d.rep_id = %(rep_id)s
@@ -213,6 +421,24 @@ def _candidate_rows(
           on drs.deal_result_status_id = d.deal_result_status_id
          and drs.status_code = 'ongoing'
         join deal_phase dp on dp.deal_phase_id = d.deal_phase_id
+        join industry i on i.industry_id = c.industry_id
+        join product p on p.product_id = d.product_id
+        join product_subcategory ps on ps.subcategory_id = p.subcategory_id
+        join product_category pc on pc.category_id = ps.category_id
+        left join lateral (
+          select
+            sum(ra.deal_count)::int as deal_count,
+            sum(ra.won_count)::int as won_count,
+            case
+              when sum(ra.deal_count) > 0
+              then sum(ra.won_count)::numeric / sum(ra.deal_count)
+              else 0
+            end as win_rate
+          from rep_affinity ra
+          where ra.rep_id = %(rep_id)s
+            and ra.industry_id = c.industry_id
+            and ra.category_id = ps.category_id
+        ) fit on true
         where not exists (
           select 1 from activity_plan ap
           where ap.rep_id = %(rep_id)s
@@ -220,7 +446,7 @@ def _candidate_rows(
             and ap.deal_id = d.deal_id
             and ap.plan_status = 'scheduled'
         )
-        order by selected.any_must_visit desc, selected.branch_distance_m,
+        order by selected.any_must_visit desc, selected.area_distance_m,
                  c.customer_id, d.deal_id
         """,
         {
@@ -231,6 +457,8 @@ def _candidate_rows(
             "limit": limit,
             "origin_latitude": origin_latitude,
             "origin_longitude": origin_longitude,
+            "include_mandatory_anchors": include_mandatory_anchors,
+            "enforce_branch_territory": enforce_branch_territory,
         },
     ).fetchall()
     return list(rows)
@@ -265,6 +493,28 @@ def _group_candidates(rows: list[dict]) -> list[VisitCandidate]:
                 win_probability=Decimal(row["win_probability"]),
             )
         )
+        affinity_deal_count = int(row["affinity_deal_count"] or 0)
+        affinity_key = (row["industry_name"], row["category_name"])
+        if affinity_deal_count > 0 and not any(
+            (evidence.industry_name, evidence.category_name) == affinity_key
+            for evidence in candidate.affinity_evidence
+        ):
+            affinity_win_rate = Decimal(row["affinity_win_rate"] or 0)
+            reliability = Decimal(affinity_deal_count) / Decimal(
+                affinity_deal_count + 3
+            )
+            candidate.affinity_evidence.append(
+                AffinityEvidence(
+                    industry_name=row["industry_name"],
+                    category_name=row["category_name"],
+                    deal_count=affinity_deal_count,
+                    won_count=int(row["affinity_won_count"] or 0),
+                    win_rate=affinity_win_rate,
+                    match_score=(
+                        affinity_win_rate * Decimal("100") * reliability
+                    ).quantize(Decimal("0.01")),
+                )
+            )
         candidate.visit_duration_min = max(
             candidate.visit_duration_min, row["visit_duration_min"]
         )
@@ -295,9 +545,16 @@ def load_candidates(
     branch_id: int,
     target_date: date,
     origin: dict[str, Any],
+    fixed_radius_km: int | None = None,
+    include_mandatory_anchors: bool = True,
+    enforce_branch_territory: bool = True,
 ) -> tuple[list[VisitCandidate], list[str], dict[str, int]]:
     stats = _exclusion_stats(conn, rep_id=rep_id, branch_id=branch_id)
-    radius_km = settings.route_search_radius_km
+    radius_km = fixed_radius_km or settings.route_search_radius_km
+    prefilter_limit = min(100, max(
+        settings.route_candidate_limit,
+        settings.route_candidate_limit * 3,
+    ))
     candidates: list[VisitCandidate] = []
     while True:
         candidates = _group_candidates(
@@ -307,13 +564,16 @@ def load_candidates(
                 branch_id=branch_id,
                 target_date=target_date,
                 radius_m=radius_km * 1000,
-                limit=settings.route_candidate_limit,
+                limit=prefilter_limit,
                 origin_latitude=float(origin["latitude"]),
                 origin_longitude=float(origin["longitude"]),
+                include_mandatory_anchors=include_mandatory_anchors,
+                enforce_branch_territory=enforce_branch_territory,
             )
         )
         if (
-            len(candidates) >= settings.route_candidate_limit
+            fixed_radius_km is not None
+            or len(candidates) >= settings.route_candidate_limit
             or radius_km >= settings.route_max_search_radius_km
         ):
             break
@@ -324,18 +584,53 @@ def load_candidates(
         warnings.append(
             f"座標未確定または精度不足の商談{stats['bad_geocoding']}件を除外しました。"
         )
-    if stats["outside_area"]:
+    if stats["outside_area"] and enforce_branch_territory:
         warnings.append(f"担当エリア外の商談{stats['outside_area']}件を除外しました。")
     if stats["missing_cost"]:
         warnings.append(
             f"原価未登録の商談{stats['missing_cost']}件は粗利評価不可として扱いました。"
         )
-    if len(candidates) < settings.route_candidate_limit:
+    if fixed_radius_km is not None:
+        warnings.append(
+            f"指定した中心地点から半径{fixed_radius_km}km以内の訪問候補を対象にしました。"
+        )
+    elif len(candidates) < settings.route_candidate_limit:
         warnings.append(
             f"検索半径を最大{settings.route_max_search_radius_km}kmまで広げ、"
             f"{len(candidates)}社を候補にしました。"
         )
     return candidates, warnings, stats
+
+
+def _limit_scored_candidates(
+    candidates: list[VisitCandidate],
+    *,
+    limit: int,
+) -> list[VisitCandidate]:
+    mandatory = [candidate for candidate in candidates if candidate.must_visit]
+    if len(mandatory) > limit:
+        raise RoutePlanningError(
+            "too_many_mandatory_visits",
+            f"必須訪問が{len(mandatory)}件あり、候補上限{limit}件を超えています。",
+        )
+    optional = sorted(
+        (candidate for candidate in candidates if not candidate.must_visit),
+        key=lambda candidate: (
+            candidate.value_score,
+            candidate.expected_gross_profit
+            if candidate.expected_gross_profit is not None
+            else Decimal("-Infinity"),
+            candidate.expected_sales,
+            -candidate.distance_from_branch_m,
+        ),
+        reverse=True,
+    )
+    selected = mandatory + optional[: max(0, limit - len(mandatory))]
+    return sorted(
+        selected,
+        key=lambda candidate: (candidate.must_visit, candidate.value_score),
+        reverse=True,
+    )
 
 
 def _blocked_windows(conn: Connection, *, rep_id: int, target_date: date) -> list[tuple[time, time]]:
@@ -719,6 +1014,7 @@ def _persist_preview(
     branch: dict,
     start_location: dict[str, Any],
     end_location: dict[str, Any],
+    search_area: dict[str, Any],
     request: RoutePlanPreviewRequest,
     weights: dict[str, int],
     options: list[RoutedOption],
@@ -754,6 +1050,7 @@ def _persist_preview(
                 "travel_mode": request.travel_mode,
                 "start_location": _jsonable(start_location),
                 "end_location": _jsonable(end_location),
+                "search_area": _jsonable(search_area),
                 "break": (
                     {
                         "start": request.break_start.isoformat(),
@@ -865,19 +1162,42 @@ def create_preview(
     end_location = _resolve_endpoint(
         branch, request.end_location, label="帰着地点"
     )
+    search_area = _resolve_search_area(
+        branch,
+        request.search_area,
+        start_location=start_location,
+        conn=conn,
+    )
     candidates, warnings, stats = load_candidates(
         conn,
         rep_id=rep_id,
         branch_id=branch["branch_id"],
         target_date=request.target_date,
-        origin=start_location,
+        origin=search_area,
+        fixed_radius_km=(
+            request.search_area.radius_km
+            if request.search_area.kind == "custom"
+            else None
+        ),
+        include_mandatory_anchors=request.search_area.kind == "auto",
+        enforce_branch_territory=request.search_area.kind == "auto",
     )
     if not candidates:
+        if request.search_area.kind == "custom":
+            raise RoutePlanningError(
+                "no_candidates",
+                f"{search_area['label']}内に、座標確定済みの進行中商談がありません。"
+                "半径を広げるか、商談と顧客住所の登録状態を確認してください。",
+            )
         raise RoutePlanningError(
             "no_candidates",
             "座標・担当エリア・進行中商談の条件を満たす訪問候補がありません。",
         )
-    weights = policy_weights(request.policy)
+    weights = policy_weights(
+        request.policy,
+        sales_weight_percent=request.sales_weight_percent,
+        gross_profit_weight_percent=request.gross_profit_weight_percent,
+    )
     score_candidates(
         candidates,
         target_date=request.target_date,
@@ -886,15 +1206,40 @@ def create_preview(
             conn, rep_id=rep_id, target_date=request.target_date
         ),
     )
+    if len(candidates) > settings.route_candidate_limit:
+        area_candidate_count = len(candidates)
+        candidates = _limit_scored_candidates(
+            candidates,
+            limit=settings.route_candidate_limit,
+        )
+        score_candidates(
+            candidates,
+            target_date=request.target_date,
+            weights=weights,
+            target_gap_ratio=_target_gap_ratio(
+                conn, rep_id=rep_id, target_date=request.target_date
+            ),
+        )
+        warnings.append(
+            f"候補エリア内の{area_candidate_count}社から、売上・粗利・担当者適合度などの"
+            f"評価上位{len(candidates)}社を経路計算対象にしました。"
+        )
     if (
         request.travel_mode == "transit"
         and len(candidates) > settings.route_transit_candidate_limit
     ):
-        candidates = sorted(
+        candidates = _limit_scored_candidates(
             candidates,
-            key=lambda candidate: candidate.value_score,
-            reverse=True,
-        )[:settings.route_transit_candidate_limit]
+            limit=settings.route_transit_candidate_limit,
+        )
+        score_candidates(
+            candidates,
+            target_date=request.target_date,
+            weights=weights,
+            target_gap_ratio=_target_gap_ratio(
+                conn, rep_id=rep_id, target_date=request.target_date
+            ),
+        )
         warnings.append(
             "公共交通はAPI利用量を抑えるため、評価上位"
             f"{settings.route_transit_candidate_limit}件から計画しています。"
@@ -913,6 +1258,9 @@ def create_preview(
             travel_mode=request.travel_mode,
         )
     end_node_index = 0
+    route_kind_label = (
+        "公共交通経路" if request.travel_mode == "transit" else "道路経路"
+    )
     while True:
         try:
             raw_matrix, end_node_index = get_route_matrix(
@@ -934,7 +1282,7 @@ def create_preview(
             if 0 in error.point_indexes or expected_end_index in error.point_indexes:
                 raise RoutePlanningError(
                     "routes_api_unavailable",
-                    "指定した出発地点または帰着地点への経路を取得できませんでした。",
+                    f"指定した出発地点または帰着地点への{route_kind_label}を取得できませんでした。",
                 ) from error
             excluded = [
                 candidate
@@ -944,7 +1292,7 @@ def create_preview(
             if not excluded:
                 raise RoutePlanningError(
                     "routes_api_unavailable",
-                    "営業所を含む道路経路を取得できませんでした。",
+                    f"営業所を含む{route_kind_label}を取得できませんでした。",
                 ) from error
             excluded_ids = {candidate.customer_id for candidate in excluded}
             candidates = [
@@ -953,12 +1301,18 @@ def create_preview(
                 if candidate.customer_id not in excluded_ids
             ]
             warnings.append(
-                f"道路経路を取得できない候補{len(excluded)}社を除外して再計算しました。"
+                f"{route_kind_label}を取得できない候補{len(excluded)}社を除外して再計算しました。"
             )
             if not candidates:
+                message = f"すべての候補で{route_kind_label}を取得できませんでした。"
+                if request.travel_mode == "transit":
+                    message += (
+                        "OpenTripPlannerに対象地域へ接続する鉄道・バスGTFSが"
+                        "登録されているか確認してください。"
+                    )
                 raise RoutePlanningError(
                     "routes_api_unavailable",
-                    "すべての候補で道路経路を取得できませんでした。",
+                    message,
                 ) from error
             score_candidates(
                 candidates,
@@ -1104,6 +1458,7 @@ def create_preview(
         branch=branch,
         start_location=start_location,
         end_location=end_location,
+        search_area=search_area,
         request=request,
         weights=weights,
         options=options,
@@ -1141,6 +1496,7 @@ def create_preview(
         "end_location": {
             key: value for key, value in end_location.items() if key != "cache_key"
         },
+        "search_area": search_area,
         "travel_mode": request.travel_mode,
         "break_time": (
             {"start": request.break_start, "end": request.break_end}
@@ -1154,6 +1510,7 @@ def create_preview(
             "return_buffer_min": request.return_buffer_min,
         },
         "policy": request.policy,
+        "weights": weights,
         "work_start": request.work_start,
         "work_end": request.work_end,
         "target_met": selected.target_met,
@@ -1164,7 +1521,8 @@ def create_preview(
         "options": response_options,
         "selection_reason": (
             "勤務時間・固定予定・最低条件を先に判定し、実行可能案の中から"
-            "期待粗利、期待売上、移動時間の順で選定しました。"
+            "指定した売上・粗利比率、担当者適合度、期限、商談フェーズを総合評価し、"
+            "最後に移動時間も比較して選定しました。"
         ),
         "excluded_reasons": excluded,
         "warnings": warnings,

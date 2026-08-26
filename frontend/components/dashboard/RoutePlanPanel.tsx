@@ -112,12 +112,16 @@ function TransitItineraryDetails({ title, itinerary }: { title: string; itinerar
 export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
   const [targetDate, setTargetDate] = useState(tomorrowInTokyo);
   const [policy, setPolicy] = useState<RoutePlanPreview["policy"]>("balanced");
+  const [salesWeightPercent, setSalesWeightPercent] = useState(50);
   const [maxVisits, setMaxVisits] = useState(4);
   const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>("driving");
   const [startKind, setStartKind] = useState<"branch" | "custom">("branch");
   const [startAddress, setStartAddress] = useState("");
   const [endKind, setEndKind] = useState<"branch" | "custom">("branch");
   const [endAddress, setEndAddress] = useState("");
+  const [areaKind, setAreaKind] = useState<"auto" | "custom">("auto");
+  const [areaQuery, setAreaQuery] = useState("");
+  const [areaRadiusKm, setAreaRadiusKm] = useState(5);
   const [breakEnabled, setBreakEnabled] = useState(true);
   const [breakStart, setBreakStart] = useState("12:00");
   const [breakEnd, setBreakEnd] = useState("13:00");
@@ -130,6 +134,17 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
   const [busy, setBusy] = useState(false);
   const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const grossProfitWeightPercent = 100 - salesWeightPercent;
+  const resultEconomicWeight = plan
+    ? plan.weights.sales + plan.weights.gross_profit
+    : 0;
+
+  function changePolicy(nextPolicy: RoutePlanPreview["policy"]) {
+    setPolicy(nextPolicy);
+    if (nextPolicy === "sales") setSalesWeightPercent(70);
+    else if (nextPolicy === "gross_profit") setSalesWeightPercent(30);
+    else setSalesWeightPercent(50);
+  }
 
   async function createPreview() {
     if (startKind === "custom" && !startAddress.trim()) {
@@ -138,6 +153,10 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
     }
     if (endKind === "custom" && !endAddress.trim()) {
       setError("ゴール住所を入力してください");
+      return;
+    }
+    if (areaKind === "custom" && !areaQuery.trim()) {
+      setError("訪問エリアの区名または駅名を入力してください");
       return;
     }
     if (breakEnabled && breakStart >= breakEnd) {
@@ -152,6 +171,8 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
         await previewSalesRoutePlan({
           target_date: targetDate,
           policy,
+          sales_weight_percent: salesWeightPercent,
+          gross_profit_weight_percent: grossProfitWeightPercent,
           max_visits: maxVisits,
           travel_mode: travelMode,
           start_location: {
@@ -161,6 +182,12 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
           end_location: {
             kind: endKind,
             ...(endKind === "custom" ? { address: endAddress } : {}),
+          },
+          search_area: {
+            kind: areaKind,
+            ...(areaKind === "custom"
+              ? { query: areaQuery, radius_km: areaRadiusKm }
+              : {}),
           },
           break_enabled: breakEnabled,
           break_start: breakStart,
@@ -219,7 +246,7 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
         </label>
         <label>
           方針
-          <select value={policy} onChange={(event) => setPolicy(event.target.value as RoutePlanPreview["policy"])}>
+          <select value={policy} onChange={(event) => changePolicy(event.target.value as RoutePlanPreview["policy"])}>
             <option value="balanced">売上・粗利のバランス</option>
             <option value="sales">売上重視</option>
             <option value="gross_profit">粗利重視</option>
@@ -248,6 +275,31 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
           <input type="number" value={minProfit} onChange={(event) => setMinProfit(event.target.value)} placeholder="任意" />
         </label>
       </div>
+
+      <fieldset className="route-plan__group route-plan__balance">
+        <legend>売上・粗利の重み</legend>
+        <div className="route-plan__balance-values">
+          <strong>売上 {salesWeightPercent}%</strong>
+          <strong>粗利 {grossProfitWeightPercent}%</strong>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={salesWeightPercent}
+          aria-label="売上を重視する割合"
+          onChange={(event) => setSalesWeightPercent(Number(event.target.value))}
+        />
+        <div className="route-plan__balance-scale" aria-hidden="true">
+          <span>粗利重視</span>
+          <span>バランス</span>
+          <span>売上重視</span>
+        </div>
+        <small>
+          この比率に加えて、担当者の業種×商品カテゴリ別の成約実績、期限、商談フェーズ、移動時間も評価します。
+        </small>
+      </fieldset>
 
       <fieldset className="route-plan__group">
         <legend>出発・帰着地点</legend>
@@ -279,6 +331,43 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
             </label>
           )}
         </div>
+      </fieldset>
+
+      <fieldset className="route-plan__group">
+        <legend>訪問エリアの絞り込み</legend>
+        <div className="route-plan__controls">
+          <label>
+            エリア指定
+            <select value={areaKind} onChange={(event) => setAreaKind(event.target.value as "auto" | "custom")}>
+              <option value="auto">出発地点周辺から自動探索</option>
+              <option value="custom">区名・駅名を入力</option>
+            </select>
+          </label>
+          {areaKind === "custom" && (
+            <>
+              <label>
+                区名・駅名
+                <input
+                  value={areaQuery}
+                  onChange={(event) => setAreaQuery(event.target.value)}
+                  placeholder="例：新宿区、東京駅"
+                  required
+                />
+              </label>
+              <label>
+                中心からの半径（km）
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={areaRadiusKm}
+                  onChange={(event) => setAreaRadiusKm(Number(event.target.value))}
+                />
+              </label>
+            </>
+          )}
+        </div>
+        <small>任意の訪問候補をこの範囲に絞ります。その日の必須商談は範囲外でも残します。</small>
       </fieldset>
 
       <fieldset className="route-plan__group">
@@ -327,11 +416,15 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
       </button>
 
       {travelMode === "transit" && (
-        <p>
+        <div className="route-plan__warning">
+          <p>
+            現在のローカルGTFS収録範囲は東京都交通局（都営地下鉄・都営バス）です。
+            横浜方面の電車経路にはJR東日本などのGTFS追加が必要です。
+          </p>
           <a href={googleTransitDirectionsUrl()} target="_blank" rel="noopener noreferrer">
             Googleマップで公共交通経路を確認する（外部サイト）
           </a>
-        </p>
+        </div>
       )}
 
       {error && <p className="new-customer-form__error">{error}</p>}
@@ -344,6 +437,9 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
             <strong>出発：</strong>{plan.start_location.label}
             <span aria-hidden="true">→</span>
             <strong>帰着：</strong>{plan.end_location.label}
+          </p>
+          <p className="route-plan__locations">
+            <strong>訪問エリア：</strong>{plan.search_area.label}
           </p>
           <p>
             {plan.break_time
@@ -358,6 +454,13 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
             <span>期待粗利 {yen(plan.totals.expected_gross_profit)}</span>
             <span>移動 {plan.totals.total_travel_min}分 / {(plan.totals.total_distance_m / 1000).toFixed(1)}km</span>
           </div>
+          {resultEconomicWeight > 0 && (
+            <p className="route-plan__evaluation-summary">
+              収益評価の配分：売上 {Math.round(plan.weights.sales / resultEconomicWeight * 100)}%・
+              粗利 {Math.round(plan.weights.gross_profit / resultEconomicWeight * 100)}%／
+              担当者適合度も評価済み
+            </p>
+          )}
           {!plan.target_met && (
             <p className="route-plan__warning">
               最低条件未達: 期待売上 {yen(plan.shortfalls.expected_sales)}、
@@ -371,7 +474,8 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
                 <span>
                   前区間 {stop.leg_travel_min}分 / {(stop.leg_distance_m / 1000).toFixed(1)}km・
                   期待売上 {yen(stop.economics.expected_sales)}・
-                  期待粗利 {yen(stop.economics.expected_gross_profit)}
+                  期待粗利 {yen(stop.economics.expected_gross_profit)}・
+                  担当者適合度 {Math.round(stop.economics.salesperson_fit_score)}/100
                 </span>
                 <small>商談後の準備・記録時間 {stop.turnaround_buffer_min}分</small>
                 <small>{stop.selection_reason}</small>

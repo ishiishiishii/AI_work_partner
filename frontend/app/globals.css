@@ -2753,6 +2753,33 @@ a {
   font-weight: 700;
 }
 
+.route-plan__balance input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.route-plan__balance-values,
+.route-plan__balance-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.route-plan__balance-values strong:first-child {
+  color: var(--primary);
+}
+
+.route-plan__balance-values strong:last-child {
+  color: var(--ok);
+}
+
+.route-plan__balance-scale,
+.route-plan__balance small,
+.route-plan__evaluation-summary {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .route-plan__check {
   display: flex;
   align-items: center;
