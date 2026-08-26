@@ -1550,8 +1550,29 @@ a {
   margin-bottom: 0.75rem;
 }
 
+.customer-detail__layout {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+  margin-bottom: 1.25rem;
+}
+
+.customer-detail__layout > .panel {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
 .customer-detail__summary {
   grid-template-columns: repeat(3, 1fr);
+}
+
+.customer-detail__website {
+  grid-column: 1 / -1;
+}
+
+.customer-detail__website dd {
+  font-size: 1rem;
+  word-break: break-all;
 }
 
 
@@ -1844,6 +1865,28 @@ a {
   .customer-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1.5rem;
+  }
+
+  .customer-detail__layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto;
+    gap: 1.5rem;
+  }
+
+  .customer-detail__info {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .customer-detail__deals {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .customer-detail__layout > .new-customer-form {
+    grid-column: 1;
+    grid-row: 2;
+    margin-bottom: 0;
   }
 
   .customer-grid > .panel {

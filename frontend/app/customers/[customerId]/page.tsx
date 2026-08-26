@@ -124,7 +124,7 @@ export default function CustomerDetailPage() {
   }
 
   return (
-    <main>
+    <main className="wide-main">
       <Link href="/customers" className="customer-detail__back">
         ← 顧客一覧に戻る
       </Link>
@@ -133,35 +133,49 @@ export default function CustomerDetailPage() {
         {customer.industry_name}・{customer.location}
       </p>
 
-      <section className="panel">
-        <dl className="goal-card__numbers customer-detail__summary">
-          <div>
-            <dt>企業規模</dt>
-            <dd>{customer.company_size_name}</dd>
-          </div>
-          <div>
-            <dt>業種</dt>
-            <dd>{customer.industry_name}</dd>
-          </div>
-          <div>
-            <dt>所在地</dt>
-            <dd>{customer.location}</dd>
-          </div>
-        </dl>
-      </section>
+      <div className="customer-detail__layout">
+        <section className="panel customer-detail__info">
+          <dl className="goal-card__numbers customer-detail__summary">
+            <div>
+              <dt>企業規模</dt>
+              <dd>{customer.company_size_name}</dd>
+            </div>
+            <div>
+              <dt>業種</dt>
+              <dd>{customer.industry_name}</dd>
+            </div>
+            <div>
+              <dt>所在地</dt>
+              <dd>{customer.location}</dd>
+            </div>
+            <div className="customer-detail__website">
+              <dt>ウェブサイト</dt>
+              <dd>
+                {customer.website ? (
+                  <a href={customer.website} target="_blank" rel="noopener noreferrer">
+                    {customer.website}
+                  </a>
+                ) : (
+                  "未登録"
+                )}
+              </dd>
+            </div>
+          </dl>
+        </section>
 
-      <section className="panel">
-        <h2>商談履歴</h2>
-        <DealHistoryList
-          deals={deals}
-          products={products}
-          dealPhases={dealPhases}
-          onUpdateDeal={handleUpdateDeal}
-          onDeleteDeal={handleDeleteDeal}
-        />
-      </section>
+        <section className="panel customer-detail__deals">
+          <h2>商談履歴</h2>
+          <DealHistoryList
+            deals={deals}
+            products={products}
+            dealPhases={dealPhases}
+            onUpdateDeal={handleUpdateDeal}
+            onDeleteDeal={handleDeleteDeal}
+          />
+        </section>
 
-      <NewDealForm onCreate={handleCreateDeal} />
+        <NewDealForm onCreate={handleCreateDeal} />
+      </div>
     </main>
   );
 }
