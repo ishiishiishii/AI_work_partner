@@ -1,3 +1,4 @@
+import threading
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
@@ -89,9 +90,22 @@ def get_customers(background_tasks: BackgroundTasks, rep_id: int | None = None) 
     return [CustomerOut.model_validate(row) for row in rows]
 
 
+# 複数の担当者がほぼ同時にダッシュボードを開くと、リクエストごとに積み上がった
+# バックフィルが接続プール(max_size=5)を食いつぶし、他の担当者の通常リクエストが
+# プールのタイムアウト(30秒)まで固まる不具合があった。同時に1つしか走らせない
+# ようにするだけで直る問題であり、「レスポンスは待たせず少しずつ埋める」という
+# 元の設計自体は変えない(取れなければ今回はスキップし、次のアクセスでまた試みる)。
+_backfill_lock = threading.Lock()
+
+
 def _backfill_customer_coordinates() -> None:
-    with get_connection() as conn:
-        geocoding.backfill_customer_coordinates(conn)
+    if not _backfill_lock.acquire(blocking=False):
+        return
+    try:
+        with get_connection() as conn:
+            geocoding.backfill_customer_coordinates(conn)
+    finally:
+        _backfill_lock.release()
 
 
 @router.post("/customers", response_model=CustomerOut)
