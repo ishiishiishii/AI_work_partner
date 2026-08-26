@@ -715,6 +715,20 @@ export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
   }));
 }
 
+export type CustomerWinRate = {
+  customer_id: number;
+  closed_count: number;
+  won_count: number;
+  win_rate: number | null;
+};
+
+export async function fetchCustomerWinRate(customerId: number): Promise<CustomerWinRate> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers/${customerId}/win-rate`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`成約率の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
 type ApiForecast = {
   rep_id: number;
   target_month: string;

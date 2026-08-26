@@ -9,6 +9,7 @@ import {
   createDeal,
   deleteDeal,
   fetchCustomers,
+  fetchCustomerWinRate,
   fetchDeals,
   fetchMasters,
   fetchProducts,
@@ -26,6 +27,9 @@ export default function CustomerDetailPage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [dealPhases, setDealPhases] = useState<DealPhase[]>([]);
+  const [winRate, setWinRate] = useState<{ closedCount: number; wonCount: number; rate: number | null } | null>(
+    null,
+  );
 
   const REP_ID = selectedRep?.rep_id ?? null;
 
@@ -50,6 +54,20 @@ export default function CustomerDetailPage() {
         setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
         setProducts(allProducts);
         setDealPhases(masters.deal_phases);
+
+        // 過去の成約率は付加情報のため、取得に失敗してもページ全体は失敗させない
+        fetchCustomerWinRate(targetId)
+          .then((customerWinRate) => {
+            if (cancelled) return;
+            setWinRate({
+              closedCount: customerWinRate.closed_count,
+              wonCount: customerWinRate.won_count,
+              rate: customerWinRate.win_rate,
+            });
+          })
+          .catch(() => {
+            /* 表示を諦めるだけで、ページ自体は通常通り表示する */
+          });
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
@@ -146,6 +164,14 @@ export default function CustomerDetailPage() {
             <div>
               <dt>所在地</dt>
               <dd>{customer.location}</dd>
+            </div>
+            <div>
+              <dt>過去の成約率</dt>
+              <dd>
+                {winRate && winRate.rate !== null
+                  ? `${winRate.rate}%(${winRate.closedCount}件中${winRate.wonCount}件)`
+                  : "実績なし"}
+              </dd>
             </div>
             <div className="customer-detail__website">
               <dt>ウェブサイト</dt>

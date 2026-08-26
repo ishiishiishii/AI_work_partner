@@ -83,6 +83,28 @@ group by classified.rep_id, classified.industry_id, classified.category_id, dp.p
 """
 
 
+# 顧客詳細ページの「この顧客との過去の成約率」表示用。estimate_win_probability の
+# Tier0(担当者を問わず、この顧客との成約/失注実績)と同じ集計を、表示専用に切り出した
+# もの。個々の商談に確率を出すより、確定済みの実績をこの1つの数字にまとめて見せる方が
+# 妥当という判断で追加した(進行中の商談にはestimate_win_probabilityの結果をそのまま使う)。
+def customer_win_rate_summary(conn: Connection, customer_id: int) -> dict:
+    row = conn.execute(
+        """
+        select
+          count(*) filter (where drs.status_code in ('won', 'lost'))::int as closed_count,
+          sum((drs.status_code = 'won')::int)::int as won_count
+        from deal d
+        join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+        where d.customer_id = %s
+        """,
+        (customer_id,),
+    ).fetchone()
+    closed_count = row["closed_count"]
+    won_count = row["won_count"] or 0
+    win_rate = round(won_count / closed_count * 100) if closed_count > 0 else None
+    return {"customer_id": customer_id, "closed_count": closed_count, "won_count": won_count, "win_rate": win_rate}
+
+
 def list_rep_affinity(conn: Connection, rep_id: int) -> list[dict]:
     rows = conn.execute(
         """
@@ -110,8 +132,10 @@ _RECALCULATE_LOCK_KEY = 872346123
 # 成約確率(win_probability)の自動算出。まずこの顧客自身の過去の成約/失注実績
 # (担当者を問わず、会社としてこの顧客とやり取りしてきた勝率)を最優先で使う(Tier0)。
 # 新規顧客などこの顧客との取引実績が無ければ、商談の(業界×商品カテゴリ×パターン)が
-# rep_affinity に一致する行の勝率にフォールバックし(Tier1)、それも無ければ担当者の
-# 全商談を通した勝率(Tier2)、それも無ければ固定値(Tier3)。
+# rep_affinity に一致する行の勝率にフォールバックし(Tier1)。担当者本人がそのパターンで
+# 実績を持たない場合は、同業界×同規模の企業への商談(担当者問わず全社)の勝率を使い
+# (Tier1.5、"似た会社"の実績)、それも無ければ担当者の全商談を通した勝率(Tier2)、
+# それも無ければ固定値(Tier3)。
 #
 # Tier0を担当者ではなく顧客(会社)単位にしているのは、担当者×顧客の組み合わせだと
 # 実績が3件以上ある組が全体の1.4%しかなく、実用に耐えないため。顧客単位なら大半の
@@ -141,6 +165,7 @@ category_median as (
 target as (
   select
     c.industry_id as industry_id,
+    c.company_size_id as company_size_id,
     ps.category_id as category_id,
     (case when not exists (
         select 1 from deal d2
@@ -164,6 +189,16 @@ tier1 as (
   join deal_pattern dp on dp.pattern_id = ra.pattern_id and dp.pattern_name = t.pattern_name
   where ra.rep_id = %(rep_id)s
 ),
+tier1_5 as (
+  select
+    sum((drs.status_code = 'won')::int)::numeric
+      / nullif(count(*) filter (where drs.status_code in ('won', 'lost')), 0) as win_rate
+  from deal d
+  join customer c2 on c2.customer_id = d.customer_id
+  join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+  join target t on t.industry_id = c2.industry_id and t.company_size_id = c2.company_size_id
+  where (%(deal_id)s::int is null or d.deal_id != %(deal_id)s)
+),
 tier2 as (
   select
     sum((drs.status_code = 'won')::int)::numeric
@@ -176,6 +211,7 @@ tier2 as (
 select round(coalesce(
   (select win_rate from tier0),
   (select win_rate from tier1),
+  (select win_rate from tier1_5),
   (select win_rate from tier2),
   %(default_win_rate)s
 ) * 100)::int as win_probability

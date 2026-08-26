@@ -154,6 +154,13 @@ class DealUpdate(BaseModel):
     expected_effort_hours: Decimal = Field(ge=0)
 
 
+class CustomerWinRateOut(OrmModel):
+    customer_id: int
+    closed_count: int
+    won_count: int
+    win_rate: int | None = None
+
+
 class RepAffinityOut(OrmModel):
     rep_id: int
     rep_name: str

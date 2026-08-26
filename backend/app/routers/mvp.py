@@ -8,6 +8,7 @@ from app.schemas.models import (
     CustomerCreate,
     CustomerOut,
     CustomerSuggestionOut,
+    CustomerWinRateOut,
     DeadlineCreate,
     DeadlineOut,
     DealCreate,
@@ -146,6 +147,13 @@ def get_stale_customers(
             conn, threshold_days=threshold_days, rep_id=rep_id
         )
     return [StaleCustomerOut.model_validate(row) for row in rows]
+
+
+@router.get("/customers/{customer_id}/win-rate", response_model=CustomerWinRateOut)
+def get_customer_win_rate(customer_id: int) -> CustomerWinRateOut:
+    with get_connection() as conn:
+        row = affinity.customer_win_rate_summary(conn, customer_id)
+    return CustomerWinRateOut.model_validate(row)
 
 
 @router.get("/deadlines", response_model=list[DeadlineOut])
