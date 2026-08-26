@@ -34,16 +34,32 @@ insert into deal_result_status (status_code) values
   ('lost');
 
 -- Sales branches (7 offices); sales_rep.branch_id is assigned round-robin
--- below so all 50 reps are spread as evenly as possible across them.
-insert into branch (branch_name) values
-  ('札幌'),
-  ('仙台'),
-  ('東京'),
-  ('中部'),
-  ('神戸'),
-  ('広島'),
-  ('九州')
-on conflict (branch_name) do nothing;
+-- below so all 50 reps are spread as evenly as possible across them. Route
+-- migrations make every location/coordinate column NOT NULL, so conflict
+-- candidates must also provide complete values when the seed is rerun.
+insert into branch (
+  branch_name, location, latitude, longitude, geo_point
+)
+select
+  branch_name,
+  location,
+  latitude,
+  longitude,
+  st_setsrid(st_makepoint(longitude, latitude), 4326)::geography
+from (values
+  ('札幌', '北海道札幌市北区北8条西2丁目',       43.068661, 141.350755),
+  ('仙台', '宮城県仙台市青葉区中央1丁目1-1',     38.260132, 140.882437),
+  ('東京', '東京都千代田区丸の内1丁目9-1',       35.681236, 139.767125),
+  ('中部', '愛知県名古屋市中村区名駅1丁目1-4',  35.170915, 136.881537),
+  ('神戸', '兵庫県神戸市中央区相生町3丁目1-1',  34.679667, 135.178221),
+  ('広島', '広島県広島市南区松原町2-37',          34.397385, 132.475592),
+  ('九州', '福岡県福岡市博多区博多駅中央街1-1', 33.589728, 130.420727)
+) as offices(branch_name, location, latitude, longitude)
+on conflict (branch_name) do update
+set location = excluded.location,
+    latitude = excluded.latitude,
+    longitude = excluded.longitude,
+    geo_point = excluded.geo_point;
 
 -- Prefecture -> branch territory map (standard Japan sales-region blocks,
 -- matching the 7 branches above). Used by planning.py::create_deal to check
@@ -166,9 +182,9 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (8, '株式会社湘南産業', (select industry_id from industry where industry_name = '教育'), (select company_size_id from company_size_master where company_size_name = '大企業'), '神奈川県横浜市西区みなとみらい8-24-5'),
   (9, '千歳精密株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '茨城県水戸市南町8-14-6'),
   (10, '有限会社千歳産業', (select industry_id from industry where industry_name = '建設業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '千葉県千葉市中央区新町1-30-14'),
-  (11, '星野商事株式会社', (select industry_id from industry where industry_name = '情報通信業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区九段1-18-15'),
+  (11, '星野商事株式会社', (select industry_id from industry where industry_name = '情報通信業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区九段北1丁目'),
   (12, '若葉食品株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '宮城県仙台市青葉区中央5-10-14'),
-  (13, '太陽工業株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区神田2-12-5'),
+  (13, '太陽工業株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区内神田2丁目'),
   (14, '桜庭テクノ株式会社', (select industry_id from industry where industry_name = '情報通信業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '福岡県福岡市博多区住吉6-10-6'),
   (15, '株式会社ひまわり商店', (select industry_id from industry where industry_name = '小売業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '福岡県福岡市博多区中洲6-7-1'),
   (16, '桜庭化成株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '静岡県静岡市葵区本通8-19-14'),
@@ -182,7 +198,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (24, '株式会社緑風商会', (select industry_id from industry where industry_name = '不動産業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '愛知県名古屋市中区丸の内8-22-2'),
   (25, '大東電機株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '埼玉県さいたま市大宮区桜木町7-14-9'),
   (26, '株式会社桜庭産業', (select industry_id from industry where industry_name = 'サービス業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '静岡県静岡市葵区紺屋町4-4-4'),
-  (27, '株式会社大東興業', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区九段6-12-9'),
+  (27, '株式会社大東興業', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区九段南4丁目'),
   (28, '中央産業株式会社', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県水戸市宮町5-23-7'),
   (29, '山川薬品株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '大阪府大阪市北区曽根崎6-8-7'),
   (30, '楓フーズ株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '広島県広島市中区本通4-27-12'),
@@ -192,7 +208,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (34, '常盤工業株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '愛知県名古屋市中区栄5-30-2'),
   (35, '桔梗精密株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '愛知県名古屋市中区丸の内6-14-15'),
   (36, '株式会社大東紙業', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '千葉県千葉市中央区新町7-9-8'),
-  (37, '株式会社中央産業', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区神田2-28-10'),
+  (37, '株式会社中央産業', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区神田神保町2丁目'),
   (38, '有限会社高千穂商事', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '京都府京都市中京区烏丸通2-1-12'),
   (39, '千歳電機株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '広島県広島市中区本通4-2-13'),
   (40, '株式会社希望フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '大阪府大阪市北区梅田1-28-7'),
@@ -208,7 +224,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (50, '稲穂商店有限会社', (select industry_id from industry where industry_name = '小売業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '福岡県福岡市博多区住吉8-16-15'),
   (51, '株式会社山川フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '大阪府大阪市北区堂島3-18-5'),
   (52, '竹林紙業株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '愛知県名古屋市中区栄1-18-1'),
-  (53, '株式会社稲穂物流', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内6-30-7'),
+  (53, '株式会社稲穂物流', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内1丁目'),
   (54, '桜庭物流株式会社', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県水戸市宮町4-29-11'),
   (55, '緑風産業株式会社', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '大阪府大阪市北区曽根崎4-19-13'),
   (56, '株式会社緑風商事', (select industry_id from industry where industry_name = '情報通信業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '神奈川県横浜市西区みなとみらい8-22-2'),
@@ -220,7 +236,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (62, '株式会社若葉電機', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '大阪府大阪市北区梅田5-12-12'),
   (63, '株式会社芙蓉電機', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '北海道札幌市中央区北一条8-27-15'),
   (64, '株式会社朝日建設', (select industry_id from industry where industry_name = '建設業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県水戸市南町1-18-15'),
-  (65, '桜庭商事株式会社', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内7-20-5'),
+  (65, '桜庭商事株式会社', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内2丁目'),
   (66, '北斗製作所株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '宮城県仙台市青葉区本町6-16-7'),
   (67, '株式会社楓貿易', (select industry_id from industry where industry_name = '卸売業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '静岡県静岡市葵区紺屋町8-28-11'),
   (68, '希望商店株式会社', (select industry_id from industry where industry_name = '小売業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '埼玉県さいたま市大宮区桜木町3-14-3'),
@@ -229,7 +245,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (71, '陽だまり紙業株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '北海道札幌市中央区大通8-6-5'),
   (72, '大東商店株式会社', (select industry_id from industry where industry_name = '小売業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '大阪府大阪市北区梅田6-9-15'),
   (73, '中央紙業株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '千葉県千葉市中央区中央8-21-15'),
-  (74, '有限会社北斗フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区神田4-27-13'),
+  (74, '有限会社北斗フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区神田佐久間町4丁目'),
   (75, '桜庭商店株式会社', (select industry_id from industry where industry_name = '小売業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '宮城県仙台市青葉区花京院3-5-2'),
   (76, '株式会社白鳥フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県水戸市南町7-23-4'),
   (77, '北斗物産株式会社', (select industry_id from industry where industry_name = '卸売業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '愛知県名古屋市中区錦2-19-9'),
@@ -238,7 +254,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (80, '旭フーズ株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '兵庫県神戸市中央区元町通8-26-8'),
   (81, '竹林製作所株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '茨城県水戸市泉町4-23-3'),
   (82, '株式会社星野システムズ', (select industry_id from industry where industry_name = '情報通信業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '茨城県水戸市南町1-29-3'),
-  (83, '株式会社若葉フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内3-28-9'),
+  (83, '株式会社若葉フーズ', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内3丁目'),
   (84, '常盤精密株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県水戸市泉町2-16-9'),
   (85, '星野貿易有限会社', (select industry_id from industry where industry_name = '卸売業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '京都府京都市中京区烏丸通5-11-12'),
   (86, '星野製作所株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '愛知県名古屋市中区丸の内1-2-4'),
@@ -276,14 +292,14 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (118, '桔梗興業有限会社', (select industry_id from industry where industry_name = '教育'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '茨城県水戸市泉町7-12-3'),
   (119, '稲穂製作所株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '福岡県福岡市博多区博多駅前5-22-6'),
   (120, '若葉製作所株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '兵庫県神戸市中央区元町通8-27-12'),
-  (121, '磯辺運送有限会社', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内1-12-10'),
+  (121, '磯辺運送有限会社', (select industry_id from industry where industry_name = '運輸業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '東京都千代田区丸の内1丁目'),
   (122, '朝霧建設有限会社', (select industry_id from industry where industry_name = '建設業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '栃木県宇都宮市泉町4-28-14'),
-  (123, '若草食品株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区九段2-30-12'),
+  (123, '若草食品株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区九段南2丁目'),
   (124, '株式会社青葉興業', (select industry_id from industry where industry_name = '金融・保険業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '埼玉県さいたま市大宮区宮町1-30-5'),
   (125, '株式会社雪柳物産', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '香川県高松市丸の内7-8-3'),
   (126, '朝顔介護株式会社', (select industry_id from industry where industry_name = '医療・福祉'), (select company_size_id from company_size_master where company_size_name = '大企業'), '広島県広島市中区八丁堀2-27-6'),
   (127, '有限会社青葉不動産', (select industry_id from industry where industry_name = '不動産業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '神奈川県横浜市西区北幸3-1-5'),
-  (128, '株式会社早苗食品', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区丸の内7-19-8'),
+  (128, '株式会社早苗食品', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '東京都千代田区丸の内2丁目'),
   (129, '夕凪商事株式会社', (select industry_id from industry where industry_name = 'サービス業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '青森県青森市新町7-16-10'),
   (130, '陽だまり薬品株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '山口県山口市亀山町6-20-14'),
   (131, '銀杏保険株式会社', (select industry_id from industry where industry_name = '金融・保険業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '滋賀県大津市中央8-4-11'),
@@ -398,7 +414,7 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (240, '有限会社桜川精密', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '栃木県宇都宮市中央6-8-13'),
   (241, '有限会社希望製作所', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '愛知県名古屋市中区丸の内1-25-2'),
   (242, '白雲精密株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '千葉県千葉市中央区富士見2-2-10'),
-  (243, '白鷺フードサービス株式会社', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区神田3-26-1'),
+  (243, '白鷺フードサービス株式会社', (select industry_id from industry where industry_name = '飲食業'), (select company_size_id from company_size_master where company_size_name = '大企業'), '東京都千代田区神田神保町3丁目'),
   (244, '彗星不動産株式会社', (select industry_id from industry where industry_name = '不動産業'), (select company_size_id from company_size_master where company_size_name = '中堅企業'), '滋賀県大津市打出浜8-15-2'),
   (245, '紫雲産業有限会社', (select industry_id from industry where industry_name = '医療・福祉'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '島根県松江市灘町3-29-5'),
   (246, '白鷺電機株式会社', (select industry_id from industry where industry_name = '製造業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '愛知県名古屋市中区錦1-23-4'),
@@ -457,6 +473,35 @@ select setval('sales_rep_rep_id_seq', (select max(rep_id) from sales_rep));
   (299, '清流実業株式会社', (select industry_id from industry where industry_name = '医療・福祉'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '愛媛県松山市湊町8-18-4'),
   (300, '早苗物産株式会社', (select industry_id from industry where industry_name = '不動産業'), (select company_size_id from company_size_master where company_size_name = '中小企業'), '静岡県静岡市葵区本通5-12-3');
 select setval('customer_customer_id_seq', (select max(customer_id) from customer));
+
+-- Tokyo demo customers are placed at official Chiyoda City chome representative
+-- points from GSI. These are area-level locations, not company/building addresses.
+with tokyo_geocodes(customer_id, latitude, longitude, place_id) as (
+  values
+    (11,  35.696655, 139.750656, 'gsi:東京都千代田区九段北一丁目'),
+    (13,  35.690601, 139.768021, 'gsi:東京都千代田区内神田二丁目'),
+    (27,  35.691250, 139.738678, 'gsi:東京都千代田区九段南四丁目'),
+    (37,  35.696636, 139.756454, 'gsi:東京都千代田区神田神保町二丁目'),
+    (53,  35.681561, 139.767197, 'gsi:東京都千代田区丸の内一丁目'),
+    (65,  35.680023, 139.763443, 'gsi:東京都千代田区丸の内二丁目'),
+    (74,  35.697659, 139.779831, 'gsi:東京都千代田区神田佐久間町四丁目'),
+    (83,  35.676952, 139.763474, 'gsi:東京都千代田区丸の内三丁目'),
+    (121, 35.681561, 139.767197, 'gsi:東京都千代田区丸の内一丁目'),
+    (123, 35.693142, 139.745697, 'gsi:東京都千代田区九段南二丁目'),
+    (128, 35.680023, 139.763443, 'gsi:東京都千代田区丸の内二丁目'),
+    (243, 35.695366, 139.754272, 'gsi:東京都千代田区神田神保町三丁目')
+)
+update customer c
+set latitude = g.latitude,
+    longitude = g.longitude,
+    place_id = g.place_id,
+    geocoding_status = 'success',
+    geocode_accuracy = 'chome;source=gsi',
+    geocoded_at = current_timestamp,
+    lat = g.latitude,
+    lng = g.longitude
+from tokyo_geocodes g
+where c.customer_id = g.customer_id;
 
 
 insert into product_category (category_name) values
@@ -5818,4 +5863,3 @@ begin
     );
   end loop;
 end $$;
-
