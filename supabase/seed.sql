@@ -35,14 +35,16 @@ insert into deal_result_status (status_code) values
 
 -- Sales branches (7 offices); sales_rep.branch_id is assigned round-robin
 -- below so all 50 reps are spread as evenly as possible across them.
-insert into branch (branch_name) values
-  ('札幌'),
-  ('仙台'),
-  ('東京'),
-  ('中部'),
-  ('神戸'),
-  ('広島'),
-  ('九州')
+-- location/latitude/longitude/geo_point are NOT NULL; supplied directly here
+-- since 20260825160000's own backfill runs before these rows exist.
+insert into branch (branch_name, location, latitude, longitude, geo_point) values
+  ('札幌', '北海道札幌市北区北8条西2丁目', 43.068661, 141.350755, st_setsrid(st_makepoint(141.350755, 43.068661), 4326)::geography),
+  ('仙台', '宮城県仙台市青葉区中央1丁目1-1', 38.260132, 140.882437, st_setsrid(st_makepoint(140.882437, 38.260132), 4326)::geography),
+  ('東京', '東京都千代田区丸の内1丁目9-1', 35.681236, 139.767125, st_setsrid(st_makepoint(139.767125, 35.681236), 4326)::geography),
+  ('中部', '愛知県名古屋市中村区名駅1丁目1-4', 35.170915, 136.881537, st_setsrid(st_makepoint(136.881537, 35.170915), 4326)::geography),
+  ('神戸', '兵庫県神戸市中央区相生町3丁目1-1', 34.679667, 135.178221, st_setsrid(st_makepoint(135.178221, 34.679667), 4326)::geography),
+  ('広島', '広島県広島市南区松原町2-37', 34.397385, 132.475592, st_setsrid(st_makepoint(132.475592, 34.397385), 4326)::geography),
+  ('九州', '福岡県福岡市博多区博多駅中央街1-1', 33.589728, 130.420727, st_setsrid(st_makepoint(130.420727, 33.589728), 4326)::geography)
 on conflict (branch_name) do nothing;
 
 -- Prefecture -> branch territory map (standard Japan sales-region blocks,
