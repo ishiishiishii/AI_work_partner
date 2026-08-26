@@ -8,8 +8,9 @@ alter table customer
   add column lat numeric,
   add column lng numeric;
 
--- ai.customer (20260824100000) に緯度経度を追加。CREATE OR REPLACE VIEW は
--- 既存列の並び順を変更できないため、今回も末尾に追加する。
+-- ai.customer には直前の20260826120000でwebsite/contact_nameが追加済み。
+-- CREATE OR REPLACE VIEWは既存列の順序・名前を変えられないため、それらを保持した
+-- うえでlat/lngを末尾へ追加する。
 create or replace view ai.customer as
 select
   c.customer_id,
@@ -19,6 +20,8 @@ select
   c.location,
   c.primary_rep_id,
   r.rep_name as primary_rep_name,
+  c.website,
+  c.contact_name,
   c.lat,
   c.lng
 from customer c
