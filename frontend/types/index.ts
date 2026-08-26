@@ -240,6 +240,15 @@ export type RoutePlanStop = {
     expected_gross_profit: number | null;
     value_score: number;
     gross_profit_available: boolean;
+    salesperson_fit_score: number;
+    affinity_matches: Array<{
+      industry_name: string;
+      category_name: string;
+      deal_count: number;
+      won_count: number;
+      win_rate: number;
+      match_score: number;
+    }>;
   };
   selection_reason: string;
   latitude: number;
@@ -252,6 +261,16 @@ export type RoutePlanEndpoint = {
   address: string;
   latitude: number;
   longitude: number;
+  geocode_accuracy?: string;
+};
+
+export type RoutePlanSearchArea = {
+  kind: "auto" | "custom";
+  label: string;
+  query: string | null;
+  latitude: number;
+  longitude: number;
+  radius_km: number | null;
   geocode_accuracy?: string;
 };
 
@@ -270,6 +289,7 @@ export type RoutePlanPreview = {
   };
   start_location: RoutePlanEndpoint;
   end_location: RoutePlanEndpoint;
+  search_area: RoutePlanSearchArea;
   travel_mode: "driving" | "transit" | "walking" | "cycling";
   break_time: { start: string; end: string } | null;
   realism: {
@@ -279,6 +299,14 @@ export type RoutePlanPreview = {
     return_buffer_min: number;
   };
   policy: "balanced" | "sales" | "gross_profit" | "short_travel";
+  weights: {
+    sales: number;
+    gross_profit: number;
+    affinity: number;
+    urgency: number;
+    phase: number;
+    target_gap: number;
+  };
   work_start: string;
   work_end: string;
   target_met: boolean;

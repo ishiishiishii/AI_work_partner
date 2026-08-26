@@ -199,6 +199,76 @@ class GsiGeocoder:
         )
 
 
+class OtpStopGeocoder:
+    """Resolve station names from the locally loaded OpenTripPlanner graph."""
+
+    def __init__(self, *, api_url: str, timeout: float = 10):
+        self.api_url = api_url
+        self.timeout = timeout
+
+    def geocode(self, address: str) -> GeocodeResult:
+        target = address.strip()
+        base_name = target[:-1] if target.endswith("駅") else target
+        try:
+            response = httpx.post(
+                self.api_url,
+                json={
+                    "query": (
+                        "query Stops($name: String!) { "
+                        "stops(name: $name) { gtfsId name lat lon } }"
+                    ),
+                    "variables": {"name": base_name},
+                },
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPError, ValueError) as error:
+            raise RoutePlanningError(
+                "otp_api_unavailable",
+                "OpenTripPlannerの駅検索APIに接続できませんでした。",
+            ) from error
+
+        stops = body.get("data", {}).get("stops", []) if isinstance(body, dict) else []
+        if not isinstance(stops, list) or not stops:
+            return GeocodeResult(status="failed")
+
+        def rank(stop: dict) -> tuple[int, int, int, str]:
+            name = str(stop.get("name") or "").replace(" ", "")
+            if name in {target, base_name}:
+                match_rank = 0
+            elif name.startswith(target):
+                match_rank = 1
+            elif target in name:
+                match_rank = 2
+            elif name.startswith(base_name):
+                match_rank = 3
+            elif base_name in name:
+                match_rank = 4
+            else:
+                match_rank = 5
+            # 同順位なら鉄道フィードをバス停より優先し、短い名称を選ぶ。
+            feed_rank = 0 if str(stop.get("gtfsId") or "").startswith("1:") else 1
+            return match_rank, feed_rank, len(name), name
+
+        valid_stops = [stop for stop in stops if isinstance(stop, dict)]
+        if not valid_stops:
+            return GeocodeResult(status="failed")
+        best = min(valid_stops, key=rank)
+        try:
+            latitude = float(best["lat"])
+            longitude = float(best["lon"])
+        except (KeyError, TypeError, ValueError):
+            return GeocodeResult(status="failed")
+        return GeocodeResult(
+            status="success",
+            latitude=latitude,
+            longitude=longitude,
+            place_id=str(best.get("gtfsId") or "") or None,
+            accuracy="stop;source=otp",
+        )
+
+
 class FallbackGeocoder:
     def __init__(self, *, primary: Geocoder, fallback: Geocoder):
         self.primary = primary

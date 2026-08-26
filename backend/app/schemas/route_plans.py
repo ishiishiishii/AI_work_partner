@@ -16,15 +16,30 @@ class RouteEndpointInput(BaseModel):
         return self
 
 
+class RouteSearchAreaInput(BaseModel):
+    kind: Literal["auto", "custom"] = "auto"
+    query: str | None = Field(default=None, max_length=200)
+    radius_km: int = Field(default=5, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def validate_custom_query(self) -> "RouteSearchAreaInput":
+        if self.kind == "custom" and not (self.query or "").strip():
+            raise ValueError("custom search area requires a query")
+        return self
+
+
 class RoutePlanPreviewRequest(BaseModel):
     target_date: date
     policy: Literal["balanced", "sales", "gross_profit", "short_travel"] = "balanced"
+    sales_weight_percent: int | None = Field(default=None, ge=0, le=100)
+    gross_profit_weight_percent: int | None = Field(default=None, ge=0, le=100)
     max_visits: int = Field(default=4, ge=1, le=10)
     work_start: time = time(9, 0)
     work_end: time = time(18, 0)
     travel_mode: Literal["driving", "transit", "walking", "cycling"] = "driving"
     start_location: RouteEndpointInput = Field(default_factory=RouteEndpointInput)
     end_location: RouteEndpointInput = Field(default_factory=RouteEndpointInput)
+    search_area: RouteSearchAreaInput = Field(default_factory=RouteSearchAreaInput)
     break_enabled: bool = True
     break_start: time = time(12, 0)
     break_end: time = time(13, 0)
@@ -37,6 +52,17 @@ class RoutePlanPreviewRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "RoutePlanPreviewRequest":
+        custom_weights = (
+            self.sales_weight_percent,
+            self.gross_profit_weight_percent,
+        )
+        if any(value is not None for value in custom_weights):
+            if any(value is None for value in custom_weights):
+                raise ValueError(
+                    "sales_weight_percent and gross_profit_weight_percent must be set together"
+                )
+            if sum(value for value in custom_weights if value is not None) != 100:
+                raise ValueError("sales and gross-profit weights must add up to 100")
         if self.work_start >= self.work_end:
             raise ValueError("work_start must be earlier than work_end")
         if self.break_enabled:
@@ -91,10 +117,12 @@ class RoutePlanPreviewOut(BaseModel):
     branch: dict[str, Any]
     start_location: dict[str, Any]
     end_location: dict[str, Any]
+    search_area: dict[str, Any]
     travel_mode: str
     break_time: dict[str, time] | None
     realism: dict[str, int]
     policy: str
+    weights: dict[str, int]
     work_start: time
     work_end: time
     target_met: bool

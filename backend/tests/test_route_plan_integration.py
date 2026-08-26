@@ -8,14 +8,14 @@ from psycopg.types.json import Jsonb
 
 from app.db import get_connection
 from app.config import settings
-from app.schemas.route_plans import RoutePlanPreviewRequest
+from app.schemas.route_plans import RoutePlanPreviewOut, RoutePlanPreviewRequest
 from app.main import app
 from app.services.route_optimization import (
     MatrixCell,
     RouteMatrixPartialError,
     RoutePlanningError,
 )
-from app.services.route_planning import approve_plan, create_preview
+from app.services.route_planning import _candidate_rows, approve_plan, create_preview
 
 TOKYO = ZoneInfo("Asia/Tokyo")
 TEST_DATE = date(2099, 1, 15)
@@ -28,6 +28,136 @@ def test_route_preview_requires_bearer_authentication() -> None:
             json={"target_date": TEST_DATE.isoformat()},
         )
     assert response.status_code == 401
+
+
+def test_candidate_area_also_expands_around_mandatory_appointments() -> None:
+    originals: list[dict] = []
+    deal_originals: list[dict] = []
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                select d.rep_id, sr.branch_id, d.deal_id, d.must_visit,
+                       c.customer_id, c.latitude, c.longitude,
+                       c.geocoding_status
+                from deal d
+                join sales_rep sr on sr.rep_id = d.rep_id
+                join deal_result_status s
+                  on s.deal_result_status_id = d.deal_result_status_id
+                 and s.status_code = 'ongoing'
+                join customer c on c.customer_id = d.customer_id
+                join prefecture_branch pb
+                  on c.location like pb.prefecture_name || '%%'
+                 and pb.branch_id = sr.branch_id
+                where not exists (
+                  select 1 from activity_plan ap
+                  where ap.rep_id = d.rep_id
+                    and ap.plan_date = %s
+                    and ap.deal_id = d.deal_id
+                    and ap.plan_status = 'scheduled'
+                )
+                order by d.rep_id, c.customer_id, d.deal_id
+                """,
+                (TEST_DATE,),
+            ).fetchall()
+            pair: tuple[dict, dict] | None = None
+            for first in rows:
+                second = next(
+                    (
+                        row
+                        for row in rows
+                        if row["rep_id"] == first["rep_id"]
+                        and row["customer_id"] != first["customer_id"]
+                    ),
+                    None,
+                )
+                if second is not None:
+                    pair = (dict(first), dict(second))
+                    break
+            assert pair is not None
+            mandatory, nearby = pair
+            originals = [mandatory, nearby]
+            deal_originals = [
+                {"deal_id": row["deal_id"], "must_visit": row["must_visit"]}
+                for row in originals
+            ]
+
+            conn.execute(
+                """
+                update customer
+                set latitude = 35.000000, longitude = 139.000000,
+                    geocoding_status = 'success'
+                where customer_id = %s
+                """,
+                (mandatory["customer_id"],),
+            )
+            conn.execute(
+                """
+                update customer
+                set latitude = 35.001000, longitude = 139.001000,
+                    geocoding_status = 'success'
+                where customer_id = %s
+                """,
+                (nearby["customer_id"],),
+            )
+            conn.execute(
+                "update deal set must_visit = (deal_id = %s) where deal_id = any(%s)",
+                (mandatory["deal_id"], [row["deal_id"] for row in originals]),
+            )
+
+            candidates = _candidate_rows(
+                conn,
+                rep_id=mandatory["rep_id"],
+                branch_id=mandatory["branch_id"],
+                target_date=TEST_DATE,
+                radius_m=5_000,
+                limit=20,
+                origin_latitude=34.0,
+                origin_longitude=138.0,
+            )
+            customer_ids = {row["customer_id"] for row in candidates}
+            assert mandatory["customer_id"] in customer_ids
+            assert nearby["customer_id"] in customer_ids
+
+            fixed_area_candidates = _candidate_rows(
+                conn,
+                rep_id=mandatory["rep_id"],
+                branch_id=mandatory["branch_id"],
+                target_date=TEST_DATE,
+                radius_m=5_000,
+                limit=20,
+                origin_latitude=34.0,
+                origin_longitude=138.0,
+                include_mandatory_anchors=False,
+            )
+            fixed_area_customer_ids = {
+                row["customer_id"] for row in fixed_area_candidates
+            }
+            assert mandatory["customer_id"] in fixed_area_customer_ids
+            assert nearby["customer_id"] not in fixed_area_customer_ids
+    finally:
+        if originals:
+            with get_connection() as conn:
+                for row in originals:
+                    conn.execute(
+                        """
+                        update customer
+                        set latitude = %s, longitude = %s, geocoding_status = %s
+                        where customer_id = %s
+                        """,
+                        (
+                            row["latitude"],
+                            row["longitude"],
+                            row["geocoding_status"],
+                            row["customer_id"],
+                        ),
+                    )
+                for row in deal_originals:
+                    conn.execute(
+                        "update deal set must_visit = %s where deal_id = %s",
+                        (row["must_visit"], row["deal_id"]),
+                    )
+                conn.commit()
 
 
 def _create_proposal(conn, *, rep_id: int, customer_id: int, deal_id: int) -> int:
@@ -281,6 +411,8 @@ def test_full_preview_to_approval_flow_does_not_save_before_approval(monkeypatch
                 request=RoutePlanPreviewRequest(
                     target_date=TEST_DATE,
                     policy="balanced",
+                    sales_weight_percent=70,
+                    gross_profit_weight_percent=30,
                     max_visits=3,
                     work_start=time(9, 0),
                     work_end=time(18, 0),
@@ -289,6 +421,16 @@ def test_full_preview_to_approval_flow_does_not_save_before_approval(monkeypatch
             )
             route_plan_id = preview["plan_id"]
             assert preview["status"] == "proposed"
+            assert preview["search_area"]["kind"] == "auto"
+            economic_weight = (
+                preview["weights"]["sales"] + preview["weights"]["gross_profit"]
+            )
+            assert preview["weights"]["sales"] == round(economic_weight * 0.7)
+            assert all(
+                "salesperson_fit_score" in stop["economics"]
+                for stop in preview["stops"]
+            )
+            RoutePlanPreviewOut.model_validate(preview)
             assert 1 <= len(preview["stops"]) <= 3
             assert 1 <= preview["solver"]["portfolio_count"] <= 10
             assert any(

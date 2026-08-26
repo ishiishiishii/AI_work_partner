@@ -827,10 +827,13 @@ async function routePlanError(res: Response, fallback: string): Promise<Error> {
 export async function previewSalesRoutePlan(input: {
   target_date: string;
   policy: RoutePlanPreview["policy"];
+  sales_weight_percent?: number;
+  gross_profit_weight_percent?: number;
   max_visits: number;
   travel_mode: RoutePlanPreview["travel_mode"];
   start_location: { kind: "branch" | "custom"; address?: string };
   end_location: { kind: "branch" | "custom"; address?: string };
+  search_area: { kind: "auto" | "custom"; query?: string; radius_km?: number };
   break_enabled: boolean;
   break_start: string;
   break_end: string;

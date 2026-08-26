@@ -10,6 +10,7 @@ from app.services.geocoding import (
     GeocodeResult,
     GsiGeocoder,
     OpenRouteServiceGeocoder,
+    OtpStopGeocoder,
 )
 from app.services.route_optimization import (
     GoogleRoutesMatrixProvider,
@@ -137,6 +138,46 @@ def test_gsi_geocoder_accepts_same_prefecture_town_result(
     assert result.accuracy == "town;source=gsi"
     assert result.latitude == pytest.approx(38.259258)
     assert captured["params"] == {"q": "宮城県仙台市青葉区中央6-27-7"}
+
+
+def test_otp_stop_geocoder_prefers_station_match_without_external_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def fake_post(url, **kwargs):
+        captured.update({"url": url, **kwargs})
+        return json_response(
+            {
+                "data": {
+                    "stops": [
+                        {
+                            "gtfsId": "2:0302-01",
+                            "name": "東京国際クルーズターミナル駅前",
+                            "lat": 35.622328,
+                            "lon": 139.772184,
+                        },
+                        {
+                            "gtfsId": "2:0965-01",
+                            "name": "東京駅丸の内北口",
+                            "lat": 35.682228,
+                            "lon": 139.765036,
+                        },
+                    ]
+                }
+            }
+        )
+
+    monkeypatch.setattr(geocoding.httpx, "post", fake_post)
+    result = OtpStopGeocoder(api_url="http://otp.test/otp/gtfs/v1").geocode(
+        "東京駅"
+    )
+
+    assert result.status == "success"
+    assert result.latitude == pytest.approx(35.682228)
+    assert result.longitude == pytest.approx(139.765036)
+    assert result.accuracy == "stop;source=otp"
+    assert captured["json"]["variables"] == {"name": "東京"}
 
 
 def test_fallback_geocoder_replaces_imprecise_primary_result() -> None:
@@ -446,3 +487,43 @@ def test_google_matrix_requires_key() -> None:
         )
 
     assert error.value.code == "google_routes_api_unavailable"
+
+
+def test_google_partial_matrix_only_excludes_disconnected_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(url, **kwargs):
+        del url
+        return json_response(
+            [
+                {
+                    "originIndex": origin,
+                    "destinationIndex": destination,
+                    "duration": "0s" if origin == destination else "120s",
+                    "distanceMeters": 0 if origin == destination else 1000,
+                    "condition": (
+                        "ROUTE_NOT_FOUND"
+                        if origin != destination and 2 in (origin, destination)
+                        else "ROUTE_EXISTS"
+                    ),
+                    "status": {},
+                }
+                for origin in range(3)
+                for destination in range(3)
+            ]
+        )
+
+    monkeypatch.setattr(route_optimization.httpx, "post", fake_post)
+    provider = GoogleRoutesMatrixProvider(
+        api_key="google-token",
+        api_url="https://example.test/computeRouteMatrix",
+        travel_mode="driving",
+    )
+
+    with pytest.raises(RouteMatrixPartialError) as error:
+        provider.get_matrix(
+            [(35.68, 139.76), (35.69, 139.77), (35.70, 139.78)],
+            datetime(2026, 8, 26, 9, 0, tzinfo=TOKYO),
+        )
+
+    assert error.value.point_indexes == {2}

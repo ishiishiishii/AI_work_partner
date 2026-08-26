@@ -70,6 +70,16 @@ class DealEconomics:
         ).quantize(YEN, rounding=ROUND_HALF_UP)
 
 
+@dataclass(frozen=True)
+class AffinityEvidence:
+    industry_name: str
+    category_name: str
+    deal_count: int
+    won_count: int
+    win_rate: Decimal
+    match_score: Decimal
+
+
 @dataclass
 class VisitCandidate:
     customer_id: int
@@ -87,6 +97,7 @@ class VisitCandidate:
     distance_from_branch_m: int = 0
     value_score: Decimal = Decimal("0")
     score_components: dict[str, Decimal] = field(default_factory=dict)
+    affinity_evidence: list[AffinityEvidence] = field(default_factory=list)
 
     @property
     def planned_sales(self) -> Decimal:
@@ -116,6 +127,17 @@ class VisitCandidate:
         if profit is None or self.planned_sales <= 0:
             return None
         return (profit / self.planned_sales * Decimal("100")).quantize(Decimal("0.01"))
+
+    @property
+    def best_affinity(self) -> AffinityEvidence | None:
+        if not self.affinity_evidence:
+            return None
+        return max(self.affinity_evidence, key=lambda evidence: evidence.match_score)
+
+    @property
+    def salesperson_fit_score(self) -> Decimal:
+        best = self.best_affinity
+        return best.match_score if best is not None else Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -193,17 +215,26 @@ def score_candidates(
         components = {
             "sales": sales_scores[index],
             "gross_profit": profit_scores[index],
+            "affinity": candidate.salesperson_fit_score,
             "urgency": urgencies[index],
             "phase": phase_scores[index],
             "target_gap": gap,
         }
         candidate.score_components = components
+        positive_weights = {
+            name: Decimal(str(weight))
+            for name, weight in weights.items()
+            if Decimal(str(weight)) > 0
+        }
+        total_weight = sum(positive_weights.values(), Decimal("0"))
         candidate.value_score = (
             sum(
-                components[name] * Decimal(str(weights[name]))
-                for name in components
+                components.get(name, Decimal("0")) * weight
+                for name, weight in positive_weights.items()
             )
-            / Decimal("100")
+            / total_weight
+            if total_weight > 0
+            else Decimal("0")
         ).quantize(Decimal("0.01"))
 
 
@@ -655,15 +686,40 @@ def candidate_economics_dict(candidate: VisitCandidate) -> dict:
         "expected_gross_profit": candidate.expected_gross_profit,
         "value_score": candidate.value_score,
         "gross_profit_available": candidate.planned_gross_profit is not None,
+        "salesperson_fit_score": candidate.salesperson_fit_score,
+        "affinity_matches": [
+            {
+                "industry_name": evidence.industry_name,
+                "category_name": evidence.category_name,
+                "deal_count": evidence.deal_count,
+                "won_count": evidence.won_count,
+                "win_rate": evidence.win_rate,
+                "match_score": evidence.match_score,
+            }
+            for evidence in sorted(
+                candidate.affinity_evidence,
+                key=lambda item: item.match_score,
+                reverse=True,
+            )
+        ],
     }
 
 
 def selection_reason(candidate: VisitCandidate) -> str:
     profit = candidate.expected_gross_profit
     profit_text = "粗利評価不可" if profit is None else f"期待粗利{profit:,.0f}円"
+    best_affinity = candidate.best_affinity
+    if best_affinity is None:
+        affinity_text = "一致する業種・商品カテゴリの成約実績はまだありません"
+    else:
+        affinity_text = (
+            f"{best_affinity.industry_name}×{best_affinity.category_name}で"
+            f"過去{best_affinity.deal_count}件中{best_affinity.won_count}件成約"
+            f"（成約率{best_affinity.win_rate * Decimal('100'):.0f}%）"
+        )
     return (
         f"期待売上{candidate.expected_sales:,.0f}円、{profit_text}、"
-        f"出発地点から約{candidate.distance_from_branch_m / 1000:.1f}kmを総合評価しました。"
+        f"{affinity_text}、候補エリア内の移動効率を総合評価しました。"
     )
 
 
@@ -679,6 +735,7 @@ def evaluate_options(options: list[RoutedOption]) -> RoutedOption:
         expected_profit = option.totals["expected_gross_profit"]
         return (
             1 if option.target_met else 0,
+            option.portfolio.business_value,
             expected_profit if expected_profit is not None else Decimal("-Infinity"),
             option.totals["expected_sales"],
             -option.total_travel_min,
@@ -1156,12 +1213,11 @@ class GoogleRoutesMatrixProvider:
                     "google_routes_api_unavailable",
                     "Google Routes APIから選択した移動手段の経路を取得できませんでした。",
                 )
-            affected = {
-                point_index
-                for pair in missing_pairs
-                for point_index in pair
-                if point_index != 0
-            }
+            # 欠損ペアに含まれた全地点を落とすと、1つの孤立候補と接続していた
+            # 正常な候補まで全滅する。始点から到達不能な地点だけを優先して除外する。
+            affected = OpenTripPlannerTransitMatrixProvider._missing_point_indexes(
+                matrix, missing_pairs
+            )
             if not affected:
                 raise RoutePlanningError(
                     "google_routes_api_unavailable",
