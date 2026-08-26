@@ -168,12 +168,19 @@ def _create_proposal(conn, *, rep_id: int, customer_id: int, deal_id: int) -> in
         """
         insert into route_plan (
           rep_id, target_date, branch_id, status, policy, work_start, work_end,
-          max_visits, weights, totals
+          max_visits, weights, constraints, totals
         )
-        values (%s, %s, %s, 'proposed', 'balanced', '09:00', '18:00', 5, %s, %s)
+        values (%s, %s, %s, 'proposed', 'balanced', '09:00', '18:00', 5, %s, %s, %s)
         returning route_plan_id
         """,
-        (rep_id, TEST_DATE, branch_id, Jsonb({}), Jsonb({})),
+        (
+            rep_id,
+            TEST_DATE,
+            branch_id,
+            Jsonb({}),
+            Jsonb({"turnaround_buffer_min": 20}),
+            Jsonb({}),
+        ),
     ).fetchone()["route_plan_id"]
     option_id = conn.execute(
         """
@@ -240,12 +247,13 @@ def test_approval_is_transactional_and_idempotent(owned_deal: tuple[int, int, in
             activity_ids = first["activity_plan_ids"]
             second = approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
             assert second["activity_plan_ids"] == activity_ids
-            assert len(activity_ids) == 1
+            # 1 stop -> 移動 + 訪問 + 準備・記録 の3件
+            assert len(activity_ids) == 3
             count = conn.execute(
                 "select count(*)::int as count from activity_plan where plan_id = any(%s)",
                 (activity_ids,),
             ).fetchone()["count"]
-            assert count == 1
+            assert count == 3
     finally:
         if plan_id is not None:
             with get_connection() as conn:
@@ -447,7 +455,8 @@ def test_full_preview_to_approval_flow_does_not_save_before_approval(monkeypatch
 
             approved = approve_plan(conn, plan_id=route_plan_id, rep_id=rep_id)
             activity_ids = approved["activity_plan_ids"]
-            assert len(activity_ids) == len(preview["stops"])
+            # 各stopにつき 移動 + 訪問 + 準備・記録 の3件が作成される
+            assert len(activity_ids) == len(preview["stops"]) * 3
             after_approval_count = conn.execute(
                 """
                 select count(*)::int as count from activity_plan

@@ -1540,7 +1540,7 @@ def approve_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
     try:
         plan = conn.execute(
             """
-            select route_plan_id, rep_id, target_date, status
+            select route_plan_id, rep_id, target_date, status, constraints
             from route_plan
             where route_plan_id = %s
             for update
@@ -1566,10 +1566,12 @@ def approve_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
         if plan["status"] != "proposed":
             raise RoutePlanningError("invalid_plan_status", "提案中の計画だけ承認できます。")
 
+        turnaround_buffer_min = plan["constraints"]["turnaround_buffer_min"]
+
         stops = conn.execute(
             """
             select rps.stop_id, rps.customer_id, rps.deal_ids,
-                   rps.arrival_at, rps.departure_at, rps.economics,
+                   rps.arrival_at, rps.departure_at, rps.leg_travel_min, rps.economics,
                    rps.selection_reason, rps.visit_order, c.customer_name
             from route_plan_stop rps
             join route_plan_option rpo on rpo.option_id = rps.option_id
@@ -1610,6 +1612,35 @@ def approve_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
                 int((expected_sales / planned_sales * Decimal("100")).quantize(Decimal("1")))
                 if planned_sales > 0 else 0
             )
+            priority = min(stop["visit_order"], 5)
+            travel_start_at = stop["arrival_at"] - timedelta(minutes=stop["leg_travel_min"])
+            turnaround_end_at = stop["departure_at"] + timedelta(minutes=turnaround_buffer_min)
+            travel_activity = conn.execute(
+                """
+                insert into activity_plan (
+                  rep_id, plan_date, start_time, end_time, category, title,
+                  customer_id, activity_type, priority, expected_amount,
+                  expected_probability, plan_status, is_ai_generated, rationale
+                )
+                values (
+                  %s, %s,
+                  to_char(%s::timestamptz at time zone 'Asia/Tokyo', 'HH24:MI'),
+                  to_char(%s::timestamptz at time zone 'Asia/Tokyo', 'HH24:MI'),
+                  'task', %s, %s, '移動', %s, 0, 0, 'scheduled', true, %s
+                )
+                returning plan_id
+                """,
+                (
+                    rep_id,
+                    plan["target_date"],
+                    travel_start_at,
+                    stop["arrival_at"],
+                    f"{stop['customer_name']}へ移動",
+                    stop["customer_id"],
+                    priority,
+                    f"移動時間 {stop['leg_travel_min']}分(AI生成の営業ルートに基づく)。",
+                ),
+            ).fetchone()
             activity = conn.execute(
                 """
                 insert into activity_plan (
@@ -1634,20 +1665,49 @@ def approve_plan(conn: Connection, *, plan_id: int, rep_id: int) -> dict:
                     stop["customer_name"],
                     stop["customer_id"],
                     stop["deal_ids"][0] if stop["deal_ids"] else None,
-                    min(stop["visit_order"], 5),
+                    priority,
                     planned_sales,
                     max(0, min(100, probability)),
                     stop["selection_reason"],
                 ),
             ).fetchone()
-            activity_ids.append(activity["plan_id"])
-            conn.execute(
+            prep_activity = conn.execute(
                 """
-                insert into route_plan_activity(route_plan_id, stop_id, activity_plan_id)
-                values (%s, %s, %s)
+                insert into activity_plan (
+                  rep_id, plan_date, start_time, end_time, category, title,
+                  customer_id, activity_type, priority, expected_amount,
+                  expected_probability, plan_status, is_ai_generated, rationale
+                )
+                values (
+                  %s, %s,
+                  to_char(%s::timestamptz at time zone 'Asia/Tokyo', 'HH24:MI'),
+                  to_char(%s::timestamptz at time zone 'Asia/Tokyo', 'HH24:MI'),
+                  'task', %s, %s, '準備・記録', %s, 0, 0, 'scheduled', true, %s
+                )
+                returning plan_id
                 """,
-                (plan_id, stop["stop_id"], activity["plan_id"]),
-            )
+                (
+                    rep_id,
+                    plan["target_date"],
+                    stop["departure_at"],
+                    turnaround_end_at,
+                    f"{stop['customer_name']} 準備・記録",
+                    stop["customer_id"],
+                    priority,
+                    f"商談後の準備・記録時間 {turnaround_buffer_min}分(AI生成の営業ルートに基づく)。",
+                ),
+            ).fetchone()
+            activity_ids.append(travel_activity["plan_id"])
+            activity_ids.append(activity["plan_id"])
+            activity_ids.append(prep_activity["plan_id"])
+            for related_id in (travel_activity["plan_id"], activity["plan_id"], prep_activity["plan_id"]):
+                conn.execute(
+                    """
+                    insert into route_plan_activity(route_plan_id, stop_id, activity_plan_id)
+                    values (%s, %s, %s)
+                    """,
+                    (plan_id, stop["stop_id"], related_id),
+                )
         conn.execute(
             """
             update route_plan

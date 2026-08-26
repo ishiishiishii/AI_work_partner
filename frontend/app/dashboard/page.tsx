@@ -45,7 +45,6 @@ import type {
   Forecast,
   RepAffinity,
   ReplanInfo,
-  RoutePlanPreview,
   SalesTarget,
   Territory,
 } from "@/types";
@@ -86,7 +85,6 @@ export default function DashboardPage() {
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
-  const [routePlan, setRoutePlan] = useState<RoutePlanPreview | null>(null);
 
   // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
   // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
@@ -126,7 +124,7 @@ export default function DashboardPage() {
         const initialVisitPlans = fetchedPlans.filter((plan) => plan.category === "visit");
         setNeedsInitialPlan(initialVisitPlans.length === 0);
 
-        // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
+        // 自己分析スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(repId);
         const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
           fetchRepAffinity(repId),
@@ -234,7 +232,7 @@ export default function DashboardPage() {
       try {
         await deleteActivityResult(REP_ID, resultId);
         if (status === "won" || status === "lost") {
-          // 成約/失注の取り消しは得意分野スコアにも影響するため、最新値を取り直す
+          // 成約/失注の取り消しは自己分析スコアにも影響するため、最新値を取り直す
           await recalculateRepAffinity(REP_ID);
           setAffinities(await fetchRepAffinity(REP_ID));
         }
@@ -573,11 +571,7 @@ export default function DashboardPage() {
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
-          <RoutePlanPanel
-            plan={routePlan}
-            onPlanChange={setRoutePlan}
-            onApproved={handleRouteApproved}
-          />
+          <RoutePlanPanel onSaved={handleRouteApproved} />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
           {needsInitialPlan ? (
