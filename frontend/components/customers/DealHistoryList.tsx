@@ -7,7 +7,6 @@ export type DealEditFields = {
   product_id: number;
   deal_phase_id: number;
   estimated_amount: number;
-  win_probability: number;
   expected_visit_count: number;
   expected_effort_hours: number;
 };
@@ -57,7 +56,6 @@ export function DealHistoryList({
       product_id: deal.product_id,
       deal_phase_id: deal.deal_phase_id,
       estimated_amount: deal.estimated_amount,
-      win_probability: deal.win_probability,
       expected_visit_count: deal.expected_visit_count,
       expected_effort_hours: deal.expected_effort_hours,
     });
@@ -139,18 +137,6 @@ export function DealHistoryList({
                       value={editDraft.estimated_amount}
                       onChange={(event) =>
                         setEditDraft({ ...editDraft, estimated_amount: Number(event.target.value) })
-                      }
-                    />
-                  </label>
-                  <label>
-                    成約確率(%)
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={editDraft.win_probability}
-                      onChange={(event) =>
-                        setEditDraft({ ...editDraft, win_probability: Number(event.target.value) })
                       }
                     />
                   </label>

@@ -5,6 +5,8 @@ closed (won/lost) deals, so "recalculate" is delete-then-reinsert per rep
 rather than an incremental update.
 """
 
+from decimal import Decimal
+
 from psycopg import Connection
 
 # category_median is computed across ALL reps' closed deals so "大型/小口" is a
@@ -103,6 +105,89 @@ def list_rep_affinity(conn: Connection, rep_id: int) -> list[dict]:
 # the loser gets a UniqueViolation once the winner commits. Serializing the whole
 # delete+insert body behind this lock makes concurrent calls queue instead of racing.
 _RECALCULATE_LOCK_KEY = 872346123
+
+
+# 成約確率(win_probability)の自動算出。商談の(業界×商品カテゴリ×パターン)が
+# rep_affinity に一致する行を持てばその勝率を使う(Tier1)。担当者がまだその
+# パターンで1件も成約/失注させていなければ、担当者の全商談を通した勝率に
+# フォールバックし(Tier2)、担当者自身に成約/失注の実績が無ければ固定値(Tier3)。
+_DEFAULT_WIN_PROBABILITY = 30
+
+_WIN_PROBABILITY_QUERY = """
+with category_median as (
+  select ps.category_id,
+         percentile_cont(0.5) within group (order by d.estimated_amount) as median_amount
+  from deal d
+  join product p on p.product_id = d.product_id
+  join product_subcategory ps on ps.subcategory_id = p.subcategory_id
+  join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+  where drs.status_code in ('won', 'lost')
+  group by ps.category_id
+),
+target as (
+  select
+    c.industry_id as industry_id,
+    ps.category_id as category_id,
+    (case when not exists (
+        select 1 from deal d2
+        where d2.customer_id = %(customer_id)s
+          and (%(deal_id)s::int is null or d2.deal_id != %(deal_id)s)
+      ) then '新規開拓' else '既存深耕' end
+     || '・' ||
+     case when %(estimated_amount)s >= coalesce(cm.median_amount, %(estimated_amount)s)
+          then '大型' else '小口' end
+    ) as pattern_name
+  from product p
+  join product_subcategory ps on ps.subcategory_id = p.subcategory_id
+  cross join customer c
+  left join category_median cm on cm.category_id = ps.category_id
+  where p.product_id = %(product_id)s and c.customer_id = %(customer_id)s
+),
+tier1 as (
+  select ra.win_rate
+  from rep_affinity ra
+  join target t on t.industry_id = ra.industry_id and t.category_id = ra.category_id
+  join deal_pattern dp on dp.pattern_id = ra.pattern_id and dp.pattern_name = t.pattern_name
+  where ra.rep_id = %(rep_id)s
+),
+tier2 as (
+  select
+    sum((drs.status_code = 'won')::int)::numeric
+      / nullif(count(*) filter (where drs.status_code in ('won', 'lost')), 0) as win_rate
+  from deal d
+  join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+  where d.rep_id = %(rep_id)s
+    and (%(deal_id)s::int is null or d.deal_id != %(deal_id)s)
+)
+select round(coalesce(
+  (select win_rate from tier1),
+  (select win_rate from tier2),
+  %(default_win_rate)s
+) * 100)::int as win_probability
+"""
+
+
+def estimate_win_probability(
+    conn: Connection,
+    *,
+    rep_id: int,
+    customer_id: int,
+    product_id: int,
+    estimated_amount: Decimal,
+    deal_id: int | None = None,
+) -> int:
+    row = conn.execute(
+        _WIN_PROBABILITY_QUERY,
+        {
+            "rep_id": rep_id,
+            "customer_id": customer_id,
+            "product_id": product_id,
+            "estimated_amount": estimated_amount,
+            "deal_id": deal_id,
+            "default_win_rate": _DEFAULT_WIN_PROBABILITY / 100,
+        },
+    ).fetchone()
+    return row["win_probability"]
 
 
 def recalculate_rep_affinity(conn: Connection, rep_id: int | None = None) -> list[dict]:

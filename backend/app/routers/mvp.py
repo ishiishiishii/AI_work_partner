@@ -191,7 +191,6 @@ def post_deal(body: DealCreate) -> DealOut:
                 product_id=body.product_id,
                 deal_phase_id=body.deal_phase_id,
                 estimated_amount=body.estimated_amount,
-                win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 deal_start_date=body.deal_start_date or date.today(),
@@ -212,7 +211,6 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 product_id=body.product_id,
                 deal_phase_id=body.deal_phase_id,
                 estimated_amount=body.estimated_amount,
-                win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
             )

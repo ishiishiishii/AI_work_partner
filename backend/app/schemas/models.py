@@ -118,7 +118,6 @@ class DealCreate(BaseModel):
     product_id: int
     deal_phase_id: int
     estimated_amount: Decimal = Field(ge=0)
-    win_probability: int = Field(ge=0, le=100)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
     deal_start_date: date | None = None
@@ -151,7 +150,6 @@ class DealUpdate(BaseModel):
     product_id: int
     deal_phase_id: int
     estimated_amount: Decimal = Field(ge=0)
-    win_probability: int = Field(ge=0, le=100)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
 

@@ -69,7 +69,6 @@ export default function CustomerDetailPage() {
     product_id: number;
     deal_phase_id: number;
     estimated_amount: number;
-    win_probability: number;
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;

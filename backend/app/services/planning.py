@@ -429,7 +429,6 @@ def create_deal(
     product_id: int,
     deal_phase_id: int,
     estimated_amount: Decimal,
-    win_probability: int,
     expected_visit_count: int,
     expected_effort_hours: Decimal,
     deal_start_date: date,
@@ -452,6 +451,16 @@ def create_deal(
     cost_low = math.ceil(amount * 0.5)
     cost_high = max(cost_low, math.floor(amount * 0.95))
     cost = random.randint(cost_low, cost_high)
+
+    # win_probability も cost と同様にユーザー入力ではなく、担当者の実績
+    # (rep_affinity、無ければ担当者全体の勝率、それも無ければ既定値)から自動算出する。
+    win_probability = affinity.estimate_win_probability(
+        conn,
+        rep_id=rep_id,
+        customer_id=customer_id,
+        product_id=product_id,
+        estimated_amount=estimated_amount,
+    )
 
     # deal_id has no owning sequence (AGENTS.md: it preserves the imported CSV's
     # ids), so newly registered deals continue the max+1 by hand. New deals always
@@ -503,10 +512,27 @@ def update_deal(
     product_id: int,
     deal_phase_id: int,
     estimated_amount: Decimal,
-    win_probability: int,
     expected_visit_count: int,
     expected_effort_hours: Decimal,
 ) -> dict:
+    existing = conn.execute(
+        "select customer_id from deal where deal_id = %s and rep_id = %s",
+        (deal_id, rep_id),
+    ).fetchone()
+    if not existing:
+        raise ValueError("deal not found")
+
+    # 商品(カテゴリ)や見込み金額が変わるとパターン分類(大型/小口等)も変わるため、
+    # win_probability は編集のたびに最新の実績で再算出する(cf. create_deal)。
+    win_probability = affinity.estimate_win_probability(
+        conn,
+        rep_id=rep_id,
+        customer_id=existing["customer_id"],
+        product_id=product_id,
+        estimated_amount=estimated_amount,
+        deal_id=deal_id,
+    )
+
     updated = conn.execute(
         """
         update deal
