@@ -1,17 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import {
-  approveSalesRoutePlan,
-  previewSalesRoutePlan,
-  rejectSalesRoutePlan,
-} from "@/lib/api";
-import type { RoutePlanPreview, TransitItinerary } from "@/types";
+import { approveSalesRoutePlan, previewSalesRoutePlan } from "@/lib/api";
+import type { RoutePlanPreview } from "@/types";
 
 type Props = {
-  plan: RoutePlanPreview | null;
-  onPlanChange: (plan: RoutePlanPreview | null) => void;
-  onApproved: () => Promise<void>;
+  onSaved: () => Promise<void>;
+};
+
+type SavedSummary = {
+  targetDate: string;
+  visitCount: number;
+  targetMet: boolean;
+  shortfallSales: number;
+  shortfallGrossProfit: number;
+  warnings: string[];
 };
 
 function tomorrowInTokyo(): string {
@@ -24,92 +27,11 @@ function tomorrowInTokyo(): string {
   return formatter.format(new Date(Date.now() + 24 * 60 * 60 * 1000));
 }
 
-function yen(value: number | null): string {
-  return value === null ? "粗利評価不可" : `${value.toLocaleString("ja-JP")}円`;
+function yen(value: number): string {
+  return `${value.toLocaleString("ja-JP")}円`;
 }
 
-function clock(value: string): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
-function shortClock(value: string): string {
-  return value.slice(0, 5);
-}
-
-function googleTransitDirectionsUrl(
-  origin?: { latitude: number; longitude: number },
-  destination?: { latitude: number; longitude: number },
-): string {
-  const params = new URLSearchParams({ api: "1", travelmode: "transit" });
-  if (origin) params.set("origin", `${origin.latitude},${origin.longitude}`);
-  if (destination) params.set("destination", `${destination.latitude},${destination.longitude}`);
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
-}
-
-const TRAVEL_MODE_LABELS: Record<RoutePlanPreview["travel_mode"], string> = {
-  driving: "車",
-  transit: "公共交通（徒歩＋電車・バス）",
-  walking: "徒歩",
-  cycling: "自転車",
-};
-
-const TRANSIT_LEG_LABELS: Record<string, string> = {
-  WALK: "徒歩",
-  SUBWAY: "地下鉄",
-  RAIL: "電車",
-  BUS: "バス",
-  TRAM: "路面電車",
-  FERRY: "船",
-};
-
-const TOEI_ROUTE_LABELS: Record<string, string> = {
-  "Asakusa Line": "浅草線",
-  "Mita Line": "三田線",
-  "Shinjuku Line": "新宿線",
-  "Oedo Line": "大江戸線",
-  "Nippori-Toneri Liner": "日暮里・舎人ライナー",
-  "Tokyo Sakura Tram (Arakawa Line)": "東京さくらトラム（都電荒川線）",
-};
-
-function TransitItineraryDetails({ title, itinerary }: { title: string; itinerary: TransitItinerary }) {
-  return (
-    <div className="route-plan__transit-itinerary">
-      <strong>
-        {title}：{clock(itinerary.departure_at)}発–{clock(itinerary.arrival_at)}着
-      </strong>
-      <small>
-        {itinerary.data_status}・予定到着には余裕時間{itinerary.contingency_buffer_min}分を加算
-      </small>
-      <ol>
-        {itinerary.legs.map((leg, index) => {
-          const routeName = leg.route_name ? TOEI_ROUTE_LABELS[leg.route_name] ?? leg.route_name : null;
-          return (
-            <li key={`${leg.departure_at}-${index}`}>
-              <span>
-                {clock(leg.departure_at)}–{clock(leg.arrival_at)} {TRANSIT_LEG_LABELS[leg.mode] ?? leg.mode}：
-                {leg.from_name} → {leg.to_name}
-              </span>
-              {(routeName || leg.headsign) && (
-                <small>
-                  {routeName ?? "公共交通"}
-                  {leg.headsign ? `・${leg.headsign}行き` : ""}
-                  {leg.from_platform ? `・${leg.from_platform}番線` : ""}
-                </small>
-              )}
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
-
-export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
+export function RoutePlanPanel({ onSaved }: Props) {
   const [targetDate, setTargetDate] = useState(tomorrowInTokyo);
   const [policy, setPolicy] = useState<RoutePlanPreview["policy"]>("balanced");
   const [salesWeightPercent, setSalesWeightPercent] = useState(50);
@@ -132,12 +54,9 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
   const [minSales, setMinSales] = useState("");
   const [minProfit, setMinProfit] = useState("");
   const [busy, setBusy] = useState(false);
-  const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<SavedSummary | null>(null);
   const grossProfitWeightPercent = 100 - salesWeightPercent;
-  const resultEconomicWeight = plan
-    ? plan.weights.sales + plan.weights.gross_profit
-    : 0;
 
   function changePolicy(nextPolicy: RoutePlanPreview["policy"]) {
     setPolicy(nextPolicy);
@@ -146,7 +65,7 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
     else setSalesWeightPercent(50);
   }
 
-  async function createPreview() {
+  async function createAndSavePlan() {
     if (startKind === "custom" && !startAddress.trim()) {
       setError("スタート住所を入力してください");
       return;
@@ -165,72 +84,51 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
     }
     setBusy(true);
     setError(null);
-    setDecision(null);
+    setSaved(null);
     try {
-      onPlanChange(
-        await previewSalesRoutePlan({
-          target_date: targetDate,
-          policy,
-          sales_weight_percent: salesWeightPercent,
-          gross_profit_weight_percent: grossProfitWeightPercent,
-          max_visits: maxVisits,
-          travel_mode: travelMode,
-          start_location: {
-            kind: startKind,
-            ...(startKind === "custom" ? { address: startAddress } : {}),
-          },
-          end_location: {
-            kind: endKind,
-            ...(endKind === "custom" ? { address: endAddress } : {}),
-          },
-          search_area: {
-            kind: areaKind,
-            ...(areaKind === "custom"
-              ? { query: areaQuery, radius_km: areaRadiusKm }
-              : {}),
-          },
-          break_enabled: breakEnabled,
-          break_start: breakStart,
-          break_end: breakEnd,
-          turnaround_buffer_min: turnaroundBuffer,
-          travel_time_buffer_percent: travelBufferPercent,
-          access_buffer_min: accessBuffer,
-          return_buffer_min: returnBuffer,
-          ...(minSales ? { min_expected_sales: Number(minSales) } : {}),
-          ...(minProfit ? { min_expected_gross_profit: Number(minProfit) } : {}),
-        }),
-      );
+      const preview = await previewSalesRoutePlan({
+        target_date: targetDate,
+        policy,
+        sales_weight_percent: salesWeightPercent,
+        gross_profit_weight_percent: grossProfitWeightPercent,
+        max_visits: maxVisits,
+        travel_mode: travelMode,
+        start_location: {
+          kind: startKind,
+          ...(startKind === "custom" ? { address: startAddress } : {}),
+        },
+        end_location: {
+          kind: endKind,
+          ...(endKind === "custom" ? { address: endAddress } : {}),
+        },
+        search_area: {
+          kind: areaKind,
+          ...(areaKind === "custom"
+            ? { query: areaQuery, radius_km: areaRadiusKm }
+            : {}),
+        },
+        break_enabled: breakEnabled,
+        break_start: breakStart,
+        break_end: breakEnd,
+        turnaround_buffer_min: turnaroundBuffer,
+        travel_time_buffer_percent: travelBufferPercent,
+        access_buffer_min: accessBuffer,
+        return_buffer_min: returnBuffer,
+        ...(minSales ? { min_expected_sales: Number(minSales) } : {}),
+        ...(minProfit ? { min_expected_gross_profit: Number(minProfit) } : {}),
+      });
+      await approveSalesRoutePlan(preview.plan_id);
+      await onSaved();
+      setSaved({
+        targetDate: preview.target_date,
+        visitCount: preview.totals.visit_count,
+        targetMet: preview.target_met,
+        shortfallSales: preview.shortfalls.expected_sales,
+        shortfallGrossProfit: preview.shortfalls.expected_gross_profit,
+        warnings: preview.warnings,
+      });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "ルート作成に失敗しました");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function approve() {
-    if (!plan) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await approveSalesRoutePlan(plan.plan_id);
-      setDecision("approved");
-      await onApproved();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "承認に失敗しました");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function reject() {
-    if (!plan) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await rejectSalesRoutePlan(plan.plan_id);
-      setDecision("rejected");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "却下に失敗しました");
     } finally {
       setBusy(false);
     }
@@ -411,8 +309,8 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
         </details>
       </fieldset>
 
-      <button type="button" className="regenerate-button" onClick={createPreview} disabled={busy}>
-        {busy ? "計算中…" : plan ? "作り直す" : "ルート案を作る"}
+      <button type="button" className="regenerate-button" onClick={createAndSavePlan} disabled={busy}>
+        {busy ? "計算中…" : "ルート案を作る"}
       </button>
 
       {travelMode === "transit" && (
@@ -421,135 +319,23 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
             現在のローカルGTFS収録範囲は東京都交通局（都営地下鉄・都営バス）です。
             横浜方面の電車経路にはJR東日本などのGTFS追加が必要です。
           </p>
-          <a href={googleTransitDirectionsUrl()} target="_blank" rel="noopener noreferrer">
-            Googleマップで公共交通経路を確認する（外部サイト）
-          </a>
         </div>
       )}
 
       {error && <p className="new-customer-form__error">{error}</p>}
-      {plan && (
-        <div className="route-plan__result">
-          <p>
-            {plan.target_date}・{plan.rep_name}・{TRAVEL_MODE_LABELS[plan.travel_mode]}
-          </p>
-          <p className="route-plan__locations">
-            <strong>出発：</strong>{plan.start_location.label}
-            <span aria-hidden="true">→</span>
-            <strong>帰着：</strong>{plan.end_location.label}
-          </p>
-          <p className="route-plan__locations">
-            <strong>訪問エリア：</strong>{plan.search_area.label}
-          </p>
-          <p>
-            {plan.break_time
-              ? `休憩 ${shortClock(plan.break_time.start)}–${shortClock(plan.break_time.end)}・`
-              : "休憩指定なし・"}
-            帰着予定 {clock(plan.totals.route_end_at)}
-          </p>
-          <div className="route-plan__totals">
-            <span>売上予定額 {yen(plan.totals.planned_sales)}</span>
-            <span>予定粗利 {yen(plan.totals.planned_gross_profit)}</span>
-            <span>期待売上 {yen(plan.totals.expected_sales)}</span>
-            <span>期待粗利 {yen(plan.totals.expected_gross_profit)}</span>
-            <span>移動 {plan.totals.total_travel_min}分 / {(plan.totals.total_distance_m / 1000).toFixed(1)}km</span>
-          </div>
-          {resultEconomicWeight > 0 && (
-            <p className="route-plan__evaluation-summary">
-              収益評価の配分：売上 {Math.round(plan.weights.sales / resultEconomicWeight * 100)}%・
-              粗利 {Math.round(plan.weights.gross_profit / resultEconomicWeight * 100)}%／
-              担当者適合度も評価済み
-            </p>
-          )}
-          {!plan.target_met && (
-            <p className="route-plan__warning">
-              最低条件未達: 期待売上 {yen(plan.shortfalls.expected_sales)}、
-              期待粗利 {yen(plan.shortfalls.expected_gross_profit)}不足
-            </p>
-          )}
-          <ol className="route-plan__stops">
-            {plan.stops.map((stop, index) => (
-              <li key={stop.customer_id}>
-                <strong>{clock(stop.arrival_at)}–{clock(stop.departure_at)} {stop.customer_name}</strong>
-                <span>
-                  前区間 {stop.leg_travel_min}分 / {(stop.leg_distance_m / 1000).toFixed(1)}km・
-                  期待売上 {yen(stop.economics.expected_sales)}・
-                  期待粗利 {yen(stop.economics.expected_gross_profit)}・
-                  担当者適合度 {Math.round(stop.economics.salesperson_fit_score)}/100
-                </span>
-                <small>商談後の準備・記録時間 {stop.turnaround_buffer_min}分</small>
-                <small>{stop.selection_reason}</small>
-                {plan.travel_mode === "transit" && stop.leg_details && (
-                  <TransitItineraryDetails title="この訪問先まで" itinerary={stop.leg_details} />
-                )}
-                {plan.travel_mode === "transit" && (
-                  <small>
-                    <a
-                      href={googleTransitDirectionsUrl(index === 0 ? plan.start_location : plan.stops[index - 1], stop)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      この区間をGoogleマップで見る
-                    </a>
-                  </small>
-                )}
-              </li>
-            ))}
-          </ol>
-          {plan.travel_mode === "transit" && (
-            <div>
-              {plan.return_leg && (
-                <TransitItineraryDetails title="帰着地点まで" itinerary={plan.return_leg} />
-              )}
-              <p>
-                <a
-                  href={googleTransitDirectionsUrl(plan.stops.at(-1) ?? plan.start_location, plan.end_location)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  最終訪問先から帰着地点までGoogleマップで見る
-                </a>
-              </p>
-            </div>
-          )}
-          <p>{plan.selection_reason}</p>
-          <details>
-            <summary>比較した{plan.options.length}案の求解状態と不採用理由</summary>
-            <ul>
-              {plan.options.map((option) => (
-                <li key={option.rank}>
-                  案{option.rank}: CP-SAT {option.cp_sat_status} / Routing {option.routing_status}
-                  {option.selected ? "（採用）" : ` — ${option.rejection_reason || "経路化不可"}`}
-                </li>
-              ))}
-            </ul>
-          </details>
-          {plan.warnings.map((warning) => (
-            <p className="route-plan__warning" key={warning}>{warning}</p>
-          ))}
-          {(plan.travel_mode === "walking" || plan.travel_mode === "cycling") && (
-            <p className="route-plan__warning">
-              Googleの徒歩・自転車経路はベータ版で、歩道や自転車経路が一部反映されない場合があります。
-            </p>
-          )}
-          <small>
-            Routing: {plan.travel_mode === "transit" ? "ODPT + OpenTripPlanner（徒歩＋公共交通） / Transit data: 東京都交通局・公共交通オープンデータ協議会" : "Google Routes API"}
-            {" / "}Map data: © OpenStreetMap contributors
-          </small>
-          {decision === null ? (
-            <div className="route-plan__actions">
-              <button type="button" className="goal-card__save" onClick={approve} disabled={busy}>
-                この計画を採用
-              </button>
-              <button type="button" className="goal-card__cancel" onClick={reject} disabled={busy}>
-                却下
-              </button>
-            </div>
-          ) : (
-            <p>{decision === "approved" ? "活動予定へ保存しました。" : "計画案を却下しました。"}</p>
-          )}
-        </div>
+      {saved && (
+        <p className="route-plan__success">
+          {saved.targetDate}の訪問予定を{saved.visitCount}件、活動計画に追加しました。下の活動計画でご確認ください。
+        </p>
       )}
+      {saved && !saved.targetMet && (
+        <p className="route-plan__warning">
+          最低条件未達: 期待売上 {yen(saved.shortfallSales)}、期待粗利 {yen(saved.shortfallGrossProfit)}不足
+        </p>
+      )}
+      {saved?.warnings.map((warning) => (
+        <p className="route-plan__warning" key={warning}>{warning}</p>
+      ))}
     </section>
   );
 }

@@ -282,7 +282,10 @@ class FallbackGeocoder:
         if primary_result.status == "success":
             return primary_result
 
-        fallback_result = self.fallback.geocode(address)
+        try:
+            fallback_result = self.fallback.geocode(address)
+        except RoutePlanningError:
+            fallback_result = GeocodeResult(status="failed")
         return (
             fallback_result
             if fallback_result.status != "failed"

@@ -13,7 +13,7 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
   const totalWonCount = ranked.reduce((sum, affinity) => sum + affinity.won_count, 0);
   const overallWinRate = totalDealCount > 0 ? totalWonCount / totalDealCount : 0;
 
-  // 「得意分野」は成約実績があってこその強みなので、勝率0%の組み合わせはTOP3から除く
+  // 「自己分析」は成約実績があってこその強みなので、勝率0%の組み合わせはTOP3から除く
   const topAffinities = ranked.filter((affinity) => affinity.won_count > 0).slice(0, TOP_COUNT);
 
   // pattern_name は "新規開拓・大型" のように「新規開拓/既存深耕」+「大型/小口」を
@@ -70,7 +70,7 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
         )}
       </div>
 
-      <h3 className="affinity-summary__subheading">得意分野TOP{TOP_COUNT}</h3>
+      <h3 className="affinity-summary__subheading">自己分析TOP{TOP_COUNT}</h3>
       {topAffinities.length === 0 ? (
         <p className="activity-plan-list__empty">まだ成約実績がありません</p>
       ) : (

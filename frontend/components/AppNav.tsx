@@ -54,7 +54,7 @@ const LINKS = [
   },
   {
     href: "/affinity",
-    label: "得意分野",
+    label: "自己分析",
     icon: (
       <svg {...ICON_PROPS}>
         <path d="M12 3.2 14.6 9l6.4.6-4.9 4.2 1.5 6.2L12 16.9l-5.6 3.1 1.5-6.2-4.9-4.2L9.4 9 12 3.2Z" />

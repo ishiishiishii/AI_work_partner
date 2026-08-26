@@ -230,7 +230,7 @@ MVPのコア体験を優先するため後回しにしてきた機能群。Must 
 | `product` / `deal_line` | 商材と商談明細 |
 | `deal` | 商談。`(deal_id, customer_id)` UNIQUE。複合 FK で contact / plan / result の整合を担保 |
 | `sales_target` | 月次目標 `(rep_id, target_month)` |
-| `rep_affinity` | 得意分野スコア `(rep_id, category_id, pattern_id)` |
+| `rep_affinity` | 自己分析スコア `(rep_id, category_id, pattern_id)` |
 | `activity_plan` | AI 生成を含む活動計画（`is_ai_generated`） |
 | `activity_result` | 活動実績（`plan_id` は NULL 可＝計画外） |
 

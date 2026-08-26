@@ -698,7 +698,7 @@ type ApiRepAffinity = {
 export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps/${repId}/affinity`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`得意分野スコアの取得に失敗しました (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`自己分析スコアの取得に失敗しました (HTTP ${res.status})`);
   const rows: ApiRepAffinity[] = await res.json();
 
   return rows.map((row) => ({
@@ -757,14 +757,14 @@ export async function fetchForecast(repId: number, targetMonth: string): Promise
   };
 }
 
-// 得意分野スコアはバックエンドの計算結果をキャッシュしたテーブルのため、
+// 自己分析スコアはバックエンドの計算結果をキャッシュしたテーブルのため、
 // 表示前に最新の商談結果を反映させておく
 export async function recalculateRepAffinity(repId: number): Promise<void> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps/affinity/recalculate?rep_id=${repId}`, {
     method: "POST",
   });
-  if (!res.ok) throw new Error(`得意分野スコアの再計算に失敗しました (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`自己分析スコアの再計算に失敗しました (HTTP ${res.status})`);
 }
 
 export type AiChatHistoryMessage = {

@@ -2779,8 +2779,7 @@ a {
 }
 
 .route-plan__balance-scale,
-.route-plan__balance small,
-.route-plan__evaluation-summary {
+.route-plan__balance small {
   color: var(--muted);
   font-size: 0.8rem;
 }
@@ -2806,65 +2805,6 @@ a {
   margin-bottom: 0.75rem;
 }
 
-.route-plan__locations {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  align-items: center;
-}
-
-.route-plan__result,
-.route-plan__stops {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.route-plan__totals {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.route-plan__totals span {
-  padding: 0.45rem 0.65rem;
-  border-radius: 999px;
-  background: var(--background);
-  font-size: 0.85rem;
-}
-
-.route-plan__stops {
-  padding-left: 1.5rem;
-}
-
-.route-plan__stops li {
-  padding-left: 0.35rem;
-}
-
-.route-plan__stops span,
-.route-plan__stops small {
-  display: block;
-  margin-top: 0.2rem;
-}
-
-.route-plan__transit-itinerary {
-  margin-top: 0.65rem;
-  padding: 0.65rem 0.75rem;
-  border-left: 3px solid var(--primary);
-  border-radius: 0.35rem;
-  background: var(--background);
-}
-
-.route-plan__transit-itinerary ol {
-  display: grid;
-  gap: 0.45rem;
-  margin: 0.55rem 0 0;
-  padding-left: 1.25rem;
-}
-
-.route-plan__transit-itinerary li {
-  padding-left: 0.2rem;
-}
-
 .route-plan__warning {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 12%, var(--surface));
@@ -2873,9 +2813,12 @@ a {
   padding: 0.6rem 0.75rem;
 }
 
-.route-plan__actions {
-  display: flex;
-  gap: 0.75rem;
+.route-plan__success {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
 }
 
 ::selection {
