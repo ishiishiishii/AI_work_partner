@@ -107,14 +107,28 @@ def list_rep_affinity(conn: Connection, rep_id: int) -> list[dict]:
 _RECALCULATE_LOCK_KEY = 872346123
 
 
-# 成約確率(win_probability)の自動算出。商談の(業界×商品カテゴリ×パターン)が
-# rep_affinity に一致する行を持てばその勝率を使う(Tier1)。担当者がまだその
-# パターンで1件も成約/失注させていなければ、担当者の全商談を通した勝率に
-# フォールバックし(Tier2)、担当者自身に成約/失注の実績が無ければ固定値(Tier3)。
+# 成約確率(win_probability)の自動算出。まずこの顧客自身の過去の成約/失注実績
+# (担当者を問わず、会社としてこの顧客とやり取りしてきた勝率)を最優先で使う(Tier0)。
+# 新規顧客などこの顧客との取引実績が無ければ、商談の(業界×商品カテゴリ×パターン)が
+# rep_affinity に一致する行の勝率にフォールバックし(Tier1)、それも無ければ担当者の
+# 全商談を通した勝率(Tier2)、それも無ければ固定値(Tier3)。
+#
+# Tier0を担当者ではなく顧客(会社)単位にしているのは、担当者×顧客の組み合わせだと
+# 実績が3件以上ある組が全体の1.4%しかなく、実用に耐えないため。顧客単位なら大半の
+# 顧客が十分な実績を持つ。ただし件数が少ない顧客(1〜2件)は数値がぶれやすい点に注意。
 _DEFAULT_WIN_PROBABILITY = 30
 
 _WIN_PROBABILITY_QUERY = """
-with category_median as (
+with tier0 as (
+  select
+    sum((drs.status_code = 'won')::int)::numeric
+      / nullif(count(*) filter (where drs.status_code in ('won', 'lost')), 0) as win_rate
+  from deal d
+  join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+  where d.customer_id = %(customer_id)s
+    and (%(deal_id)s::int is null or d.deal_id != %(deal_id)s)
+),
+category_median as (
   select ps.category_id,
          percentile_cont(0.5) within group (order by d.estimated_amount) as median_amount
   from deal d
@@ -160,6 +174,7 @@ tier2 as (
     and (%(deal_id)s::int is null or d.deal_id != %(deal_id)s)
 )
 select round(coalesce(
+  (select win_rate from tier0),
   (select win_rate from tier1),
   (select win_rate from tier2),
   %(default_win_rate)s
