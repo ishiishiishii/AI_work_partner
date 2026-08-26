@@ -42,7 +42,8 @@ insert into branch (branch_name) values
   ('中部'),
   ('神戸'),
   ('広島'),
-  ('九州');
+  ('九州')
+on conflict (branch_name) do nothing;
 
 -- Explicit rep_id values from sales_rep.csv (authoritative; sales_target.csv references these ids)
 -- for reps 1-18. Reps 19-48 are additional demo headcount; 新人太郎/大重鎮重信 were moved from

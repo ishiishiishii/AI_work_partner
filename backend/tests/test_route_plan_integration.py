@@ -1,0 +1,350 @@
+from datetime import date, datetime, time
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+import pytest
+from fastapi.testclient import TestClient
+from psycopg.types.json import Jsonb
+
+from app.db import get_connection
+from app.config import settings
+from app.schemas.route_plans import RoutePlanPreviewRequest
+from app.main import app
+from app.services.route_optimization import (
+    MatrixCell,
+    RouteMatrixPartialError,
+    RoutePlanningError,
+)
+from app.services.route_planning import approve_plan, create_preview
+
+TOKYO = ZoneInfo("Asia/Tokyo")
+TEST_DATE = date(2099, 1, 15)
+
+
+def test_route_preview_requires_bearer_authentication() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/route-plans/preview",
+            json={"target_date": TEST_DATE.isoformat()},
+        )
+    assert response.status_code == 401
+
+
+def _create_proposal(conn, *, rep_id: int, customer_id: int, deal_id: int) -> int:
+    branch_id = conn.execute(
+        "select branch_id from sales_rep where rep_id = %s", (rep_id,)
+    ).fetchone()["branch_id"]
+    plan_id = conn.execute(
+        """
+        insert into route_plan (
+          rep_id, target_date, branch_id, status, policy, work_start, work_end,
+          max_visits, weights, totals
+        )
+        values (%s, %s, %s, 'proposed', 'balanced', '09:00', '18:00', 5, %s, %s)
+        returning route_plan_id
+        """,
+        (rep_id, TEST_DATE, branch_id, Jsonb({}), Jsonb({})),
+    ).fetchone()["route_plan_id"]
+    option_id = conn.execute(
+        """
+        insert into route_plan_option (
+          route_plan_id, rank, selected, cp_sat_status, routing_status,
+          business_value, totals
+        )
+        values (%s, 1, true, 'optimal', 'feasible', 100, %s)
+        returning option_id
+        """,
+        (plan_id, Jsonb({})),
+    ).fetchone()["option_id"]
+    conn.execute(
+        """
+        insert into route_plan_stop (
+          route_plan_id, option_id, visit_order, customer_id, deal_ids,
+          arrival_at, departure_at, visit_duration_min, leg_travel_min,
+          leg_distance_m, economics
+        )
+        values (%s, %s, 1, %s, %s, %s, %s, 60, 10, 5000, %s)
+        """,
+        (
+            plan_id,
+            option_id,
+            customer_id,
+            [deal_id],
+            datetime(2099, 1, 15, 9, 0, tzinfo=TOKYO),
+            datetime(2099, 1, 15, 10, 0, tzinfo=TOKYO),
+            Jsonb({"planned_sales": 100000, "expected_sales": 50000}),
+        ),
+    )
+    conn.commit()
+    return plan_id
+
+
+@pytest.fixture
+def owned_deal() -> tuple[int, int, int]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            select d.rep_id, d.customer_id, d.deal_id
+            from deal d
+            join deal_result_status s
+              on s.deal_result_status_id = d.deal_result_status_id
+            where s.status_code = 'ongoing'
+            order by d.deal_id
+            limit 1
+            """
+        ).fetchone()
+    assert row
+    return row["rep_id"], row["customer_id"], row["deal_id"]
+
+
+def test_approval_is_transactional_and_idempotent(owned_deal: tuple[int, int, int]) -> None:
+    rep_id, customer_id, deal_id = owned_deal
+    plan_id: int | None = None
+    activity_ids: list[int] = []
+    try:
+        with get_connection() as conn:
+            plan_id = _create_proposal(
+                conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
+            )
+            first = approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
+            activity_ids = first["activity_plan_ids"]
+            second = approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
+            assert second["activity_plan_ids"] == activity_ids
+            assert len(activity_ids) == 1
+            count = conn.execute(
+                "select count(*)::int as count from activity_plan where plan_id = any(%s)",
+                (activity_ids,),
+            ).fetchone()["count"]
+            assert count == 1
+    finally:
+        if plan_id is not None:
+            with get_connection() as conn:
+                if activity_ids:
+                    conn.execute(
+                        "delete from activity_plan where plan_id = any(%s)", (activity_ids,)
+                    )
+                conn.execute("delete from route_plan where route_plan_id = %s", (plan_id,))
+                conn.commit()
+
+
+def test_approval_conflict_rolls_back_without_partial_activity(
+    owned_deal: tuple[int, int, int],
+) -> None:
+    rep_id, customer_id, deal_id = owned_deal
+    plan_id: int | None = None
+    blocker_id: int | None = None
+    try:
+        with get_connection() as conn:
+            blocker_id = conn.execute(
+                """
+                insert into activity_plan (
+                  rep_id, plan_date, start_time, end_time, category, title,
+                  activity_type, plan_status, is_ai_generated
+                )
+                values (%s, %s, '09:30', '10:30', 'task', '競合テスト',
+                        'task', 'scheduled', false)
+                returning plan_id
+                """,
+                (rep_id, TEST_DATE),
+            ).fetchone()["plan_id"]
+            conn.commit()
+            plan_id = _create_proposal(
+                conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
+            )
+            with pytest.raises(RoutePlanningError) as error:
+                approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
+            assert error.value.code == "schedule_conflict"
+            linked = conn.execute(
+                "select count(*)::int as count from route_plan_activity where route_plan_id = %s",
+                (plan_id,),
+            ).fetchone()["count"]
+            assert linked == 0
+            status = conn.execute(
+                "select status from route_plan where route_plan_id = %s", (plan_id,)
+            ).fetchone()["status"]
+            assert status == "proposed"
+    finally:
+        with get_connection() as conn:
+            if blocker_id is not None:
+                conn.execute("delete from activity_plan where plan_id = %s", (blocker_id,))
+            if plan_id is not None:
+                conn.execute("delete from route_plan where route_plan_id = %s", (plan_id,))
+            conn.commit()
+
+
+
+class DeterministicMatrixProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_matrix(self, points, departure_at):
+        del departure_at
+        self.calls += 1
+        if self.calls == 1:
+            raise RouteMatrixPartialError({len(points) - 1})
+        return [
+            [
+                MatrixCell(0, 0)
+                if origin == destination
+                else MatrixCell(
+                    600 + abs(origin - destination) * 60,
+                    4000 + abs(origin - destination) * 500,
+                )
+                for destination in range(len(points))
+            ]
+            for origin in range(len(points))
+        ]
+
+
+def test_full_preview_to_approval_flow_does_not_save_before_approval(monkeypatch) -> None:
+    route_plan_id: int | None = None
+    monkeypatch.setattr(settings, "route_portfolio_limit", 3)
+    monkeypatch.setattr(settings, "route_solver_time_limit_sec", 1)
+    activity_ids: list[int] = []
+    originals: list[dict] = []
+    rep_id: int | None = None
+    try:
+        with get_connection() as conn:
+            rep = conn.execute(
+                """
+                select sr.rep_id, sr.branch_id, b.latitude, b.longitude
+                from sales_rep sr
+                join branch b on b.branch_id = sr.branch_id
+                join deal d on d.rep_id = sr.rep_id
+                join deal_result_status s
+                  on s.deal_result_status_id = d.deal_result_status_id
+                 and s.status_code = 'ongoing'
+                join customer c on c.customer_id = d.customer_id
+                join prefecture_branch pb
+                  on c.location like pb.prefecture_name || '%%'
+                 and pb.branch_id = sr.branch_id
+                group by sr.rep_id, sr.branch_id, b.latitude, b.longitude
+                having count(distinct c.customer_id) >= 3
+                order by count(distinct c.customer_id) desc
+                limit 1
+                """
+            ).fetchone()
+            assert rep
+            rep_id = rep["rep_id"]
+            customer_rows = conn.execute(
+                """
+                select distinct on (c.customer_id)
+                       c.customer_id, c.latitude, c.longitude, c.place_id,
+                       c.geocoding_status, c.geocode_accuracy, c.geocoded_at
+                from deal d
+                join deal_result_status s
+                  on s.deal_result_status_id = d.deal_result_status_id
+                 and s.status_code = 'ongoing'
+                join customer c on c.customer_id = d.customer_id
+                join prefecture_branch pb
+                  on c.location like pb.prefecture_name || '%%'
+                 and pb.branch_id = %s
+                where d.rep_id = %s
+                order by c.customer_id
+                limit 5
+                """,
+                (rep["branch_id"], rep_id),
+            ).fetchall()
+            originals = [dict(row) for row in customer_rows]
+            assert len(originals) >= 3
+            conn.execute(
+                "delete from route_matrix_cache where departure_bucket = %s",
+                (datetime(2099, 1, 15, 9, 0, tzinfo=TOKYO),),
+            )
+            for index, row in enumerate(originals):
+                conn.execute(
+                    """
+                    update customer
+                    set latitude = %s, longitude = %s,
+                        geocoding_status = 'success',
+                        geocode_accuracy = 'ROOFTOP',
+                        geocoded_at = now()
+                    where customer_id = %s
+                    """,
+                    (
+                        Decimal(rep["latitude"]) + Decimal(index + 1) / Decimal("100"),
+                        Decimal(rep["longitude"]) + Decimal(index + 1) / Decimal("100"),
+                        row["customer_id"],
+                    ),
+                )
+            conn.commit()
+            before_count = conn.execute(
+                """
+                select count(*)::int as count from activity_plan
+                where rep_id = %s and plan_date = %s and plan_status = 'scheduled'
+                """,
+                (rep_id, TEST_DATE),
+            ).fetchone()["count"]
+            preview = create_preview(
+                conn,
+                rep_id=rep_id,
+                request=RoutePlanPreviewRequest(
+                    target_date=TEST_DATE,
+                    policy="balanced",
+                    max_visits=3,
+                    work_start=time(9, 0),
+                    work_end=time(18, 0),
+                ),
+                matrix_provider=DeterministicMatrixProvider(),
+            )
+            route_plan_id = preview["plan_id"]
+            assert preview["status"] == "proposed"
+            assert 1 <= len(preview["stops"]) <= 3
+            assert 1 <= preview["solver"]["portfolio_count"] <= 10
+            assert any(
+                "道路経路を取得できない候補" in warning for warning in preview["warnings"]
+            )
+            after_preview_count = conn.execute(
+                """
+                select count(*)::int as count from activity_plan
+                where rep_id = %s and plan_date = %s and plan_status = 'scheduled'
+                """,
+                (rep_id, TEST_DATE),
+            ).fetchone()["count"]
+            assert after_preview_count == before_count
+
+            approved = approve_plan(conn, plan_id=route_plan_id, rep_id=rep_id)
+            activity_ids = approved["activity_plan_ids"]
+            assert len(activity_ids) == len(preview["stops"])
+            after_approval_count = conn.execute(
+                """
+                select count(*)::int as count from activity_plan
+                where rep_id = %s and plan_date = %s and plan_status = 'scheduled'
+                """,
+                (rep_id, TEST_DATE),
+            ).fetchone()["count"]
+            assert after_approval_count == before_count + len(activity_ids)
+    finally:
+        with get_connection() as conn:
+            if activity_ids:
+                conn.execute(
+                    "delete from activity_plan where plan_id = any(%s)", (activity_ids,)
+                )
+            if route_plan_id is not None:
+                conn.execute(
+                    "delete from route_plan where route_plan_id = %s", (route_plan_id,)
+                )
+            conn.execute(
+                "delete from route_matrix_cache where departure_bucket = %s",
+                (datetime(2099, 1, 15, 9, 0, tzinfo=TOKYO),),
+            )
+            for row in originals:
+                conn.execute(
+                    """
+                    update customer
+                    set latitude = %s, longitude = %s, place_id = %s,
+                        geocoding_status = %s, geocode_accuracy = %s,
+                        geocoded_at = %s
+                    where customer_id = %s
+                    """,
+                    (
+                        row["latitude"],
+                        row["longitude"],
+                        row["place_id"],
+                        row["geocoding_status"],
+                        row["geocode_accuracy"],
+                        row["geocoded_at"],
+                        row["customer_id"],
+                    ),
+                )
+            conn.commit()

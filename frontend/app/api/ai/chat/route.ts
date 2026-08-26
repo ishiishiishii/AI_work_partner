@@ -10,7 +10,10 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const upstream = await fetch(API_INTERNAL_URL + "/api/ai/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: request.headers.get("authorization") || "",
+      },
       body: await request.text(),
       cache: "no-store",
     });

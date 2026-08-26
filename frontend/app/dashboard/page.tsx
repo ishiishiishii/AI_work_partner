@@ -7,6 +7,7 @@ import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { MapPanel } from "@/components/dashboard/MapPanel";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
+import { RoutePlanPanel } from "@/components/dashboard/RoutePlanPanel";
 import {
   cancelPlan,
   createManualPlan,
@@ -35,6 +36,7 @@ import type {
   Forecast,
   RepAffinity,
   ReplanInfo,
+  RoutePlanPreview,
   SalesTarget,
 } from "@/types";
 
@@ -56,6 +58,7 @@ export default function DashboardPage() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
+  const [routePlan, setRoutePlan] = useState<RoutePlanPreview | null>(null);
 
   // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
   // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
@@ -65,6 +68,15 @@ export default function DashboardPage() {
     } catch {
       setForecast(null);
     }
+  }
+
+
+  async function handleRouteApproved(): Promise<void> {
+    if (REP_ID === null) return;
+    const fresh = await fetchActivityPlans(REP_ID);
+    setPlans(fresh.filter((plan) => plan.category === "visit"));
+    setDailyTasks(fresh.filter((plan) => plan.category === "task"));
+    await refreshForecast(REP_ID);
   }
 
   useEffect(() => {
@@ -489,6 +501,11 @@ export default function DashboardPage() {
             forecastAmount={forecastAmount}
             achievementRate={achievementRate}
             onSave={handleTargetSave}
+          />
+          <RoutePlanPanel
+            plan={routePlan}
+            onPlanChange={setRoutePlan}
+            onApproved={handleRouteApproved}
           />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}

@@ -1772,3 +1772,141 @@ a {
     max-width: 1180px;
   }
 }
+
+
+.route-plan {
+  display: grid;
+  gap: 1rem;
+}
+
+.route-plan__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.route-plan__controls label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.route-plan__controls input,
+.route-plan__controls select {
+  width: 100%;
+  min-height: 2.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  background: var(--surface);
+  color: inherit;
+}
+
+.route-plan__group {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.route-plan__group legend {
+  padding: 0 0.4rem;
+  font-weight: 700;
+}
+
+.route-plan__check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.route-plan__check input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.route-plan__details summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.route-plan__details[open] summary {
+  margin-bottom: 0.75rem;
+}
+
+.route-plan__locations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.route-plan__result,
+.route-plan__stops {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.route-plan__totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.route-plan__totals span {
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  background: var(--background);
+  font-size: 0.85rem;
+}
+
+.route-plan__stops {
+  padding-left: 1.5rem;
+}
+
+.route-plan__stops li {
+  padding-left: 0.35rem;
+}
+
+.route-plan__stops span,
+.route-plan__stops small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.route-plan__transit-itinerary {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid var(--primary);
+  border-radius: 0.35rem;
+  background: var(--background);
+}
+
+.route-plan__transit-itinerary ol {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.55rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.route-plan__transit-itinerary li {
+  padding-left: 0.2rem;
+}
+
+.route-plan__warning {
+  color: #9a3412;
+  background: #fff7ed;
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.route-plan__actions {
+  display: flex;
+  gap: 0.75rem;
+}

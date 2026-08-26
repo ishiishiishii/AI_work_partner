@@ -1,0 +1,4 @@
+*.osm.pbf
+*.zip
+graph.obj
+build-report/

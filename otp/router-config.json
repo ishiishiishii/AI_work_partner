@@ -1,0 +1,8 @@
+{
+  "routingDefaults": {
+    "numItineraries": 1,
+    "boardSlack": "60s",
+    "alightSlack": "0s",
+    "transferSlack": "120s"
+  }
+}

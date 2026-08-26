@@ -12,7 +12,7 @@ FastAPI + Next.js + ローカル Supabase のモノレポ開発環境です。�
 | Postgres | Supabase 同梱 | `127.0.0.1:55322` |
 | Studio | Supabase Studio | http://127.0.0.1:55323 |
 
-AI（オープンモデル）は後から差し替えできるよう、API の `/api/ai/ping` にプレースホルダのみ置いています。
+QwenはOpenAI互換API経由で接続し、営業ルート依頼ではFastAPIの専用最適化ツールだけを呼び出します。
 
 ```text
 Browser → web (:3000) → api (:8000)
@@ -83,13 +83,53 @@ docker compose up --build
 
 ### 3. ログイン用デモアカウント
 
-フロントの `/login` は Supabase Auth を使っています。`sales_rep` テーブルとは別物のデータですが、
-`supabase/seed.sql` が担当者ごとのデモアカウント（EMP001〜EMP018、パスワードは共通で `demo1234`）を
-`auth.users` に直接作成するため、`supabase start` / `supabase db reset` するだけで用意されます。
-（`docker compose up` すら不要です。DBがリセットされるたびに再作成されるので、`api` コンテナの
-再起動有無に関わらず、常にログインできる状態になります。）
+`/login` はSupabase Authで認証します。社員IDは `EMP001`〜`EMP050`、
+パスワードは共通で `demo1234` です。デモユーザーは `supabase/seed.sql` が作成し、
+Bearer JWTの改ざんできない `app_metadata.rep_id` から本人を特定します。
 
-既にアカウントがある場合はスキップされるだけなので、何度実行しても安全です。
+### 4. 営業ルート計画の初期化
+
+1. Google CloudでRoutes APIを有効化し、請求先を設定して、`.env` の
+   `GOOGLE_MAPS_API_KEY` へAPIキーを設定します。
+2. 公共交通用のODPTデータとOpenTripPlannerを初期化します（初回は約500 MBの
+   OpenStreetMapデータを取得し、経路グラフを作るため数分かかります）。
+
+```powershell
+./scripts/setup_odpt_otp.sh
+```
+
+   トークンなしでも都営地下鉄・都営バスを利用できます。東京メトロも含める場合は、
+   公共交通オープンデータセンターの無料開発者登録後、`.env` の`ODPT_ACCESS_TOKEN`へ
+   トークンを設定して再実行します。JR東日本を含める場合は公共交通オープンデータ
+   チャレンジ2026のトークンを`ODPT_CHALLENGE_ACCESS_TOKEN`へ設定します。
+3. APIキーやトークンは`NEXT_PUBLIC_*`にせず、サーバー側だけに保存してください。
+4. 既存DBには `supabase migration up` でPostGIS・ルート計画テーブルを適用します。
+5. 顧客住所を一度だけ座標化します。
+
+```powershell
+docker compose exec api python scripts/geocode_customers.py --limit 300
+```
+
+`success` の顧客だけが自動候補になります。`review` は都道府県不一致・候補の曖昧さ・
+信頼度不足を確認してから修正してください。通常の計画作成ではGeocodingを再実行しません。
+
+車・徒歩・自転車の移動時間行列はGoogle Routes APIを利用します。公共交通は、日本の
+Google Routes APIでは乗換経路を取得できないため、ODPTのGTFSデータとローカルで動く
+OpenTripPlannerで「出発地から駅までの徒歩＋鉄道・地下鉄・バス＋駅から訪問先までの徒歩」を一括計算します。
+Google Compute Route Matrixはリクエスト数ではなく、出発地数×目的地数の要素数で利用量が決まります。
+移動行列は24時間キャッシュし、同じ条件での再作成ではAPI消費を抑えます。
+公共交通は計算時間を抑えるため、評価上位8候補から計画します。
+住所検索は国土地理院を優先し、必要なら任意設定の`ORS_API_KEY`をフォールバックに使います。
+
+ダッシュボードの「1日の営業ルート計画」で案を作成できます。プレビュー時点では
+`activity_plan` を変更せず、「この計画を採用」を押したときだけ競合を再確認して保存します。
+
+### テスト
+
+```powershell
+docker compose exec api pytest -q
+docker compose exec web npm run build
+```
 
 ## GitHub Codespaces でスマホ等の別端末から確認する
 
@@ -102,7 +142,7 @@ LAN外からは繋がらないため、Codespaces のポート転送URLを使う
    ```bash
    supabase start
    supabase status   # anon key / service_role key を .env に反映
-   docker compose exec api python3 -m scripts.seed_demo_auth_users
+   supabase db reset   # fresh Codespaceでmigration・seed・デモAuthユーザーを反映
    docker compose up --build -d
    ```
 3. VS Code の **Ports** パネルで `3000` / `8000` / `55321` の **Visibility** を `Public` に変更
@@ -149,10 +189,13 @@ supabase stop
 - API のホットリロード: `backend/` を volume マウントしています。
 - Web のホットリロード: `frontend/` を volume マウントしています（`node_modules` は名前付き volume）。
 - DB スキーマ変更は `supabase/migrations/` に SQL を追加し、`supabase db reset` などで適用します。
-- AI 実装を足すときは `backend/app/services/ai.py` を差し替えてください。
+- Qwen連携は `backend/app/services/qwen_chat.py`、数値計算と最適化はFastAPIサービス側に分離しています。
 
 ## トラブルシュート
 
 - **API が Supabase に繋がらない**: Docker Desktop が起動していること、`supabase start` 済みであること、`.env` のキーが `supabase status` と一致していることを確認。
 - **フロントで API が失敗する**: ブラウザからは `NEXT_PUBLIC_API_URL=http://localhost:8000` を使います（コンテナ名 `api` はブラウザから解決できません）。
 - **Windows でファイル変更が検知されない**: `WATCHPACK_POLLING=true` を compose に設定済みです。
+- **訪問候補が0件になる**: Geocoding CLI実行後、顧客の `geocoding_status` が `success` か確認します。
+- **ルートAPIが503になる**: 車・徒歩・自転車は`GOOGLE_MAPS_API_KEY`とRoutes APIの設定を、
+  公共交通は`docker compose ps otp`と`docker compose logs otp`でOpenTripPlannerの起動状態を確認します。
