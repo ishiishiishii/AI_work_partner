@@ -1585,6 +1585,10 @@ a {
   padding: 0.3rem 0.6rem;
   background: var(--card);
   color: var(--ink);
+  min-width: 0;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rep-switcher__signout {
@@ -1596,6 +1600,8 @@ a {
   background: var(--card);
   color: var(--ink);
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .rep-switcher__signout:hover {
