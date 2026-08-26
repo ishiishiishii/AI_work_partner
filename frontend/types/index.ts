@@ -3,6 +3,12 @@ export type SalesRep = {
   rep_name: string;
 };
 
+// 担当者の営業所(branch)が管轄する都道府県一覧。GET /api/reps/{rep_id}/territory が返す。
+export type Territory = {
+  branch_name: string;
+  prefectures: string[];
+};
+
 export type SalesTarget = {
   rep_id: number;
   target_month: string; // "YYYY-MM"
@@ -16,6 +22,7 @@ export type Forecast = {
   target_amount: number;
   forecast_amount: number;
   achievement_rate: number;
+  open_plan_count: number; // まだ結果未入力の予定件数
 };
 
 // AI 参照用の第一正規形ビュー(ai.rep_affinity)の形にそのまま対応させている。
@@ -38,6 +45,13 @@ export type RepAffinity = {
 // 顧客そのものは業種・企業規模・所在地のみを持つ（AGENTS.mdの正規化方針に合わせた）。
 // industry_name/company_size_name はバックエンドの AI 参照用ビュー(ai.customer)が
 // 名称まで解決して返すため、ここでは id を持たずそのまま表示に使う。
+// in_territory: 所在地が担当者の管轄支店(prefecture/branchマスタ)に含まれるか。
+// 既存の関係(担当者紐付け・商談履歴)がある顧客は、エリア外でも一覧からは除外され
+// ない(転勤等でエリア外に既存顧客が残るケースがあるため)。false の場合はその
+// 「エリア外だが関係がある」ケースなので、フロント側で別枠表示に使う。
+// has_relationship: この担当者に紐付いている(primary_rep_id一致)か、この担当者
+// との商談履歴があるか。in_territory=true かつ has_relationship=false は、
+// 「自分のエリア内だが担当していない」未接触の候補顧客。
 export type Customer = {
   customer_id: number;
   customer_name: string;
@@ -46,6 +60,30 @@ export type Customer = {
   location: string;
   primary_rep_id: number | null;
   primary_rep_name: string | null;
+  in_territory: boolean;
+  has_relationship: boolean;
+  website: string | null;
+  contact_name: string | null;
+  // 市区町村レベルの実座標(国土地理院APIでジオコーディング済みの場合のみ)。
+  // 未ジオコーディングの間はnull。地図表示では lib/geo.ts の coordinatesForCustomer が
+  // nullの場合に都道府県+ランダムズレへフォールバックする。
+  lat: number | null;
+  lng: number | null;
+};
+
+// 新規顧客登録フォームの「顧客名で検索」候補。他の担当者が登録済みの同名顧客
+// から業種/企業規模/所在地などを丸ごと流用するため、名称だけでなくidも持つ
+// (CustomerとちがいIDが要るのはフォームのセレクトボックスへ反映するため)。
+export type CustomerSuggestion = {
+  customer_id: number;
+  customer_name: string;
+  industry_id: number;
+  industry_name: string;
+  company_size_id: number;
+  company_size_name: string;
+  location: string;
+  website: string | null;
+  contact_name: string | null;
 };
 
 // 休眠顧客(しばらく接点の無い顧客)一覧。Customer に加えて最終接点日と
@@ -109,6 +147,8 @@ export type Deal = {
   expected_effort_hours: number;
   deal_start_date: string; // "YYYY-MM-DD"
   contract_date: string | null;
+  cost: number; // 原価。ユーザー入力ではなくバックエンドが自動算出(見込み金額の50〜95%)
+  profit: number; // 見込み利益 = estimated_amount - cost(DB側のgenerated column)
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
@@ -135,11 +175,9 @@ export type ActivityPlan = {
   is_ai_generated: boolean;
   reasoning_text: string;
   result_status: DealResultStatus;
-  memo: string | null; // 企業訪問での自由メモ(バックエンドにはまだ無い)
+  memo: string | null; // 企業訪問での自由メモ
   progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う
 };
-
-
 
 export type TransitLeg = {
   mode: string;
@@ -274,6 +312,19 @@ export type RoutePlanPreview = {
   excluded_reasons: string[];
   warnings: string[];
 };
+
+// 汎用のタスク期限。activity_planとは別で、顧客/商談との紐付けは任意。
+export type Deadline = {
+  deadline_id: number;
+  rep_id: number;
+  title: string;
+  due_date: string; // "YYYY-MM-DD"
+  customer_id: number | null;
+  deal_id: number | null;
+  is_done: boolean;
+  memo: string | null;
+};
+
 export type ReplanInfo = {
   before_achievement_rate: number;
   after_achievement_rate: number;

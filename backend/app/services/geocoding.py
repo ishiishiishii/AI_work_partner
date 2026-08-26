@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -277,3 +279,62 @@ def geocode_pending_customers(
         counts[result.status] += 1
     conn.commit()
     return counts
+
+
+# The demo addresses use real prefecture/city/town names with synthetic block
+# numbers. The lightweight map view stores a town-level coordinate separately
+# from the stricter route-planning geocode above.
+_BLOCK_NUMBER_PATTERN = re.compile(r"\d+-\d+-\d+$")
+_GSI_ENDPOINT = "https://msearch.gsi.go.jp/address-search/AddressSearch"
+_RATE_LIMIT_SECONDS = 0.3
+DEFAULT_BACKFILL_LIMIT = 20
+
+
+def strip_block_number(location: str) -> str:
+    """Return the real prefecture/city/town portion of a demo address."""
+    return _BLOCK_NUMBER_PATTERN.sub("", location).strip()
+
+
+def geocode_address(address: str) -> tuple[float, float] | None:
+    """Return (latitude, longitude), or None when GSI cannot resolve it."""
+    try:
+        response = httpx.get(_GSI_ENDPOINT, params={"q": address}, timeout=5)
+        response.raise_for_status()
+        results = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not results:
+        return None
+    longitude, latitude = results[0]["geometry"]["coordinates"]
+    return (latitude, longitude)
+
+
+def geocode_customer_location(location: str) -> tuple[float, float] | None:
+    return geocode_address(strip_block_number(location))
+
+
+def backfill_customer_coordinates(
+    conn: Connection,
+    *,
+    limit: int = DEFAULT_BACKFILL_LIMIT,
+) -> int:
+    """Backfill town-level lat/lng used by the customer map."""
+    rows = conn.execute(
+        "select customer_id, location from customer where lat is null "
+        "order by customer_id limit %s",
+        (limit,),
+    ).fetchall()
+    updated = 0
+    for index, row in enumerate(rows):
+        coords = geocode_customer_location(row["location"])
+        if coords is not None:
+            latitude, longitude = coords
+            conn.execute(
+                "update customer set lat = %s, lng = %s where customer_id = %s",
+                (latitude, longitude, row["customer_id"]),
+            )
+            updated += 1
+        if index < len(rows) - 1:
+            time.sleep(_RATE_LIMIT_SECONDS)
+    conn.commit()
+    return updated

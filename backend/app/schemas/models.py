@@ -14,6 +14,11 @@ class SalesRepOut(OrmModel):
     rep_name: str
 
 
+class TerritoryOut(BaseModel):
+    branch_name: str
+    prefectures: list[str]
+
+
 class IndustryOut(OrmModel):
     industry_id: int
     industry_name: str
@@ -55,6 +60,8 @@ class CustomerCreate(BaseModel):
     company_size_id: int
     location: str
     primary_rep_id: int | None = None
+    website: str | None = None
+    contact_name: str | None = None
 
 
 class CustomerOut(OrmModel):
@@ -65,6 +72,30 @@ class CustomerOut(OrmModel):
     location: str
     primary_rep_id: int | None = None
     primary_rep_name: str | None = None
+    in_territory: bool = True
+    has_relationship: bool = True
+    website: str | None = None
+    contact_name: str | None = None
+    # 市区町村レベルの実座標(国土地理院APIでジオコーディング済みの場合のみ)。
+    # 未ジオコーディングの間はNoneで、フロント側が都道府県+ランダムズレにフォールバックする。
+    lat: float | None = None
+    lng: float | None = None
+
+
+# 新規顧客登録フォームの「顧客名で検索」用。他の担当者が登録済みの同名顧客が
+# あれば候補として出し、選択時に業種/企業規模/所在地などを丸ごと流用できるよう
+# id・name両方を持たせている(CustomerOutはid.を持たないため、選択後にフォームの
+# セレクトボックスへ反映するにはidが要る)。
+class CustomerSuggestionOut(OrmModel):
+    customer_id: int
+    customer_name: str
+    industry_id: int
+    industry_name: str
+    company_size_id: int
+    company_size_name: str
+    location: str
+    website: str | None = None
+    contact_name: str | None = None
 
 
 class StaleCustomerOut(OrmModel):
@@ -75,6 +106,8 @@ class StaleCustomerOut(OrmModel):
     location: str
     primary_rep_id: int | None = None
     primary_rep_name: str | None = None
+    in_territory: bool = True
+    has_relationship: bool = True
     last_contact_date: date | None = None
     days_since_contact: int | None = None
 
@@ -110,6 +143,8 @@ class DealOut(OrmModel):
     contract_date: date | None = None
     product_id: int
     deal_phase_id: int
+    cost: Decimal
+    profit: Decimal
 
 
 class DealUpdate(BaseModel):
@@ -154,6 +189,7 @@ class PlanOut(OrmModel):
     rationale: str | None = None
     product_name: str | None = None
     progress_percent: int = 0
+    memo: str | None = None
 
 
 class PlanCreate(BaseModel):
@@ -179,6 +215,7 @@ class PlanUpdate(BaseModel):
     activity_type: str
     title: str | None = None
     product_name_override: str | None = None
+    memo: str | None = None
 
 
 class PlanProgressUpdate(BaseModel):
@@ -241,6 +278,27 @@ class ForecastOut(BaseModel):
     expected_amount: Decimal
     attainment_ratio: float
     open_plan_count: int
+
+class DeadlineCreate(BaseModel):
+    rep_id: int
+    title: str = Field(min_length=1)
+    due_date: date
+    customer_id: int | None = None
+    deal_id: int | None = None
+    memo: str | None = None
+
+
+class DeadlineOut(OrmModel):
+    deadline_id: int
+    rep_id: int
+    title: str
+    due_date: date
+    customer_id: int | None = None
+    deal_id: int | None = None
+    is_done: bool = False
+    memo: str | None = None
+    created_at: datetime | None = None
+
 
 class AiChatMessage(BaseModel):
     role: Literal["user", "assistant"]

@@ -8,7 +8,9 @@ type GoalCardProps = {
   target: SalesTarget;
   forecastAmount: number;
   achievementRate: number;
+  openPlanCount: number;
   onSave: (input: { target_amount: number; target_deal_count: number }) => Promise<void> | void;
+  willGeneratePlan?: boolean;
 };
 
 function formatYen(amount: number): string {
@@ -20,7 +22,15 @@ function formatMonth(targetMonth: string): string {
   return `${year}年${Number(month)}月`;
 }
 
-export function GoalCard({ rep, target, forecastAmount, achievementRate, onSave }: GoalCardProps) {
+export function GoalCard({
+  rep,
+  target,
+  forecastAmount,
+  achievementRate,
+  openPlanCount,
+  onSave,
+  willGeneratePlan = false,
+}: GoalCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftAmount, setDraftAmount] = useState(String(target.target_amount));
@@ -102,6 +112,9 @@ export function GoalCard({ rep, target, forecastAmount, achievementRate, onSave 
                   onChange={(event) => setDraftCount(event.target.value)}
                 />
               </label>
+              {willGeneratePlan && (
+                <p className="goal-card__hint">保存すると、AIが今月の活動計画を作成します</p>
+              )}
               <div className="goal-card__actions">
                 <button
                   type="button"
@@ -135,6 +148,10 @@ export function GoalCard({ rep, target, forecastAmount, achievementRate, onSave 
                 <div>
                   <dt>見込み売上</dt>
                   <dd className="goal-card__forecast">{formatYen(forecastAmount)}</dd>
+                </div>
+                <div>
+                  <dt>未実施の予定</dt>
+                  <dd>{openPlanCount}件</dd>
                 </div>
               </dl>
               <button type="button" className="goal-card__edit-button" onClick={startEditing}>

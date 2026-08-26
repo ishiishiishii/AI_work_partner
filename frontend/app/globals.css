@@ -197,6 +197,12 @@ a {
   outline-offset: 1px;
 }
 
+.goal-card__hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
 .goal-card__actions {
   display: flex;
   gap: 0.5rem;
@@ -286,6 +292,20 @@ a {
 .activity-plan-list__nav button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.activity-plan-list__today-button {
+  font-weight: 600;
+}
+
+.activity-plan-list__today-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.activity-plan-list__today-button:disabled:hover {
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 .mini-calendar {
@@ -1013,6 +1033,23 @@ a {
   font-size: 1rem;
 }
 
+.quick-add-fab__title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.quick-add-fab__type-select {
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.15rem 0.4rem;
+}
+
 .plan-modal__close {
   border: none;
   background: transparent;
@@ -1436,15 +1473,6 @@ a {
   background: color-mix(in srgb, var(--warn) 15%, transparent);
 }
 
-.new-customer-form {
-  margin-top: 1rem;
-}
-
-.new-customer-form h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
 .new-customer-form__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1456,6 +1484,64 @@ a {
   color: var(--warn);
   font-size: 0.85rem;
   margin: 0 0 0.75rem;
+}
+
+.new-customer-form__name-field {
+  position: relative;
+}
+
+.new-customer-form__hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.new-customer-form__suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px color-mix(in srgb, black 20%, transparent);
+  max-height: 12rem;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+.new-customer-form__suggestions li + li {
+  border-top: 1px solid var(--line);
+}
+
+.new-customer-form__suggestions button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0.45rem 0.6rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.new-customer-form__suggestions button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.new-customer-form__suggestion-name {
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.new-customer-form__suggestion-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 .customer-detail__back {
@@ -1549,6 +1635,16 @@ a {
 .deal-history__amount {
   flex-shrink: 0;
   font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
+.deal-history__profit {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .product-search {
@@ -1621,30 +1717,16 @@ a {
   font-size: 1.1rem;
 }
 
-.map-panel__placeholder {
-  position: relative;
+.map-panel__leaflet {
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 16 / 9;
 }
 
-.map-panel__placeholder-image {
+.map-panel__leaflet .leaflet-container {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.map-panel__placeholder-label {
-  position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 0.75rem;
 }
 
 .ai-chat__messages {
@@ -1723,7 +1805,7 @@ a {
 }
 
 .dashboard-layout,
-.page-layout {
+.customer-grid {
   display: grid;
   gap: 1.25rem;
   align-items: start;
@@ -1731,8 +1813,7 @@ a {
 
 .dashboard-layout__primary,
 .dashboard-layout__sidebar,
-.page-layout__primary,
-.page-layout__sidebar {
+.customer-grid > .panel {
   min-width: 0;
 }
 
@@ -1742,14 +1823,12 @@ a {
     max-width: 1180px;
   }
 
-  .dashboard-layout,
-  .page-layout {
+  .dashboard-layout {
     grid-template-columns: minmax(0, 1fr) 380px;
     gap: 2rem;
   }
 
-  .dashboard-layout__sidebar,
-  .page-layout__sidebar {
+  .dashboard-layout__sidebar {
     position: sticky;
     top: 1.5rem;
     max-height: calc(100vh - 3rem);
@@ -1758,8 +1837,16 @@ a {
     gap: 1rem;
   }
 
-  .dashboard-layout__sidebar .panel,
-  .page-layout__sidebar .panel {
+  .dashboard-layout__sidebar .panel {
+    margin-bottom: 0;
+  }
+
+  .customer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem;
+  }
+
+  .customer-grid > .panel {
     margin-bottom: 0;
   }
 

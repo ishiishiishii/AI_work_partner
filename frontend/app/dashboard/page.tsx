@@ -1,11 +1,11 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { ActivityPlanList, type PlanEditFields } from "@/components/dashboard/ActivityPlanList";
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
-import { MapPanel } from "@/components/dashboard/MapPanel";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { RoutePlanPanel } from "@/components/dashboard/RoutePlanPanel";
 import {
@@ -14,9 +14,11 @@ import {
   createPlan,
   deleteActivityResult,
   fetchActivityPlans,
+  fetchCustomers,
   fetchDeals,
   fetchForecast,
   fetchRepAffinity,
+  fetchRepTerritory,
   fetchSalesTarget,
   generateActivityPlans,
   postActivityResult,
@@ -31,6 +33,7 @@ import { mockTaskSuggestions } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type {
   ActivityPlan,
+  Customer,
   Deal,
   DealResultStatus,
   Forecast,
@@ -38,9 +41,23 @@ import type {
   ReplanInfo,
   RoutePlanPreview,
   SalesTarget,
+  Territory,
 } from "@/types";
 
-const TARGET_MONTH = "2026-08";
+// leafletはブラウザのwindow/documentに直接依存しておりSSR不可なため、
+// Next.jsのサーバー描画パスに乗らないよう動的import(ssr:false)にする。
+const MapPanel = dynamic(() => import("@/components/dashboard/MapPanel").then((m) => m.MapPanel), {
+  ssr: false,
+});
+
+// 以前は "2026-08" にハードコードされており、実際の日付とズレていた
+// (AIチャットにも「今日」を伝えていなかった。backend/app/services/qwen_chat.py 参照)。
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+const TARGET_MONTH = getCurrentMonth();
 
 export default function DashboardPage() {
   const { selectedRep } = useRep();
@@ -51,11 +68,16 @@ export default function DashboardPage() {
   const [plans, setPlans] = useState<ActivityPlan[]>([]);
   const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [territory, setTerritory] = useState<Territory | null>(null);
   const [affinities, setAffinities] = useState<RepAffinity[]>([]);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
+  const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
+  const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
   const [routePlan, setRoutePlan] = useState<RoutePlanPreview | null>(null);
@@ -94,20 +116,17 @@ export default function DashboardPage() {
         ]);
         if (cancelled) return;
 
-        // 訪問系の計画が1件も無ければ、初回だけAIに作ってもらう
-        // (顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない)
+        // 顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない
         const initialVisitPlans = fetchedPlans.filter((plan) => plan.category === "visit");
-        const resolvedVisitPlans =
-          initialVisitPlans.length > 0
-            ? initialVisitPlans
-            : await generateActivityPlans(repId, TARGET_MONTH);
-        if (cancelled) return;
+        setNeedsInitialPlan(initialVisitPlans.length === 0);
 
         // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(repId);
-        const [fetchedAffinities, fetchedDeals] = await Promise.all([
+        const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
           fetchRepAffinity(repId),
           fetchDeals(repId),
+          fetchCustomers(repId),
+          fetchRepTerritory(repId),
         ]);
         if (cancelled) return;
 
@@ -119,10 +138,12 @@ export default function DashboardPage() {
             target_deal_count: 0,
           },
         );
-        setPlans(resolvedVisitPlans);
+        setPlans(initialVisitPlans);
         setDailyTasks(fetchedPlans.filter((plan) => plan.category === "task"));
         setAffinities(fetchedAffinities);
         setDeals(fetchedDeals);
+        setCustomers(fetchedCustomers);
+        setTerritory(fetchedTerritory);
         await refreshForecast(repId);
       } catch (error) {
         if (!cancelled) {
@@ -141,9 +162,30 @@ export default function DashboardPage() {
 
   async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
     if (REP_ID === null) return;
-    const updated = await saveSalesTarget(REP_ID, TARGET_MONTH, input);
+    const repId = REP_ID;
+    const updated = await saveSalesTarget(repId, TARGET_MONTH, input);
     setTarget(updated);
-    await refreshForecast(REP_ID);
+    await refreshForecast(repId);
+
+    // 目標保存はここで完了させ(GoalCard側の「保存中...」を即座に終える)、
+    // まだ計画が無い月の初回AI生成は裏側で別途走らせる(数分かかり得るため)
+    if (needsInitialPlan) {
+      void generateInitialPlan(repId);
+    }
+  }
+
+  async function generateInitialPlan(repId: number) {
+    setIsGeneratingInitialPlan(true);
+    try {
+      const generated = await generateActivityPlans(repId, TARGET_MONTH);
+      setPlans(generated);
+      setNeedsInitialPlan(false);
+      await refreshForecast(repId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
+    } finally {
+      setIsGeneratingInitialPlan(false);
+    }
   }
 
   async function handleRegenerate() {
@@ -489,6 +531,7 @@ export default function DashboardPage() {
   // フォールバックする
   const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans);
   const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
+  const openPlanCount = forecast ? forecast.open_plan_count : plans.length;
 
   return (
     <main className="dashboard-main">
@@ -500,7 +543,9 @@ export default function DashboardPage() {
             target={target}
             forecastAmount={forecastAmount}
             achievementRate={achievementRate}
+            openPlanCount={openPlanCount}
             onSave={handleTargetSave}
+            willGeneratePlan={needsInitialPlan}
           />
           <RoutePlanPanel
             plan={routePlan}
@@ -509,16 +554,24 @@ export default function DashboardPage() {
           />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
-          <div className="regenerate-bar">
-            <button
-              type="button"
-              className="regenerate-button"
-              onClick={handleRegenerate}
-              disabled={isRegenerating}
-            >
-              {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
-            </button>
-          </div>
+          {needsInitialPlan ? (
+            <p className="activity-plan-list__empty">
+              {isGeneratingInitialPlan
+                ? "AIが今月の活動計画を作成しています(数分かかる場合があります)..."
+                : "目標を保存すると、AIが今月の活動計画を作成します。"}
+            </p>
+          ) : (
+            <div className="regenerate-bar">
+              <button
+                type="button"
+                className="regenerate-button"
+                onClick={handleRegenerate}
+                disabled={isRegenerating}
+              >
+                {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
+              </button>
+            </div>
+          )}
           <ActivityPlanList
             repId={selectedRep.rep_id}
             plans={plans}
@@ -539,7 +592,7 @@ export default function DashboardPage() {
             plans={plans}
             affinities={affinities}
           />
-          <MapPanel />
+          <MapPanel customers={customers} territory={territory} />
           <AiReasoningPanel plans={plans} />
         </div>
       </div>

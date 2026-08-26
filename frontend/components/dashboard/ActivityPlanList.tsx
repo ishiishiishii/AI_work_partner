@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { fetchProducts } from "@/lib/api";
 import { mockTaskSuggestions } from "@/lib/mockData";
+import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
 import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
@@ -300,6 +301,7 @@ export function ActivityPlanList({
   onCommitProgress,
 }: ActivityPlanListProps) {
   const router = useRouter();
+  const { setOpenRichPlanCreator } = useQuickAddPlan();
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [contactTypeSelections, setContactTypeSelections] = useState<Record<number, string>>({});
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
@@ -323,13 +325,7 @@ export function ActivityPlanList({
       cancelled = true;
     };
   }, []);
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const earliest = plans.reduce(
-      (min, plan) => (plan.plan_date < min ? plan.plan_date : min),
-      plans[0]?.plan_date,
-    );
-    return earliest ?? formatISODate(new Date());
-  });
+  const [selectedDate, setSelectedDate] = useState(() => formatISODate(new Date()));
 
   const range = getRange(viewMode, selectedDate);
   const filteredPlans = plans.filter(
@@ -518,8 +514,8 @@ export function ActivityPlanList({
       <>
         <div
           className="activity-plan-list__clickable"
-          onDoubleClick={() => openDetail(plan)}
-          title="ダブルクリックで詳細を表示"
+          onClick={() => openDetail(plan)}
+          title="クリックで詳細を表示"
         >
           {dateLabel !== null && <div className="activity-plan-list__date">{dateLabel}</div>}
           <div className="activity-plan-list__main">
@@ -527,7 +523,7 @@ export function ActivityPlanList({
               <div className="activity-plan-list__customer">
                 <span
                   className="activity-plan-list__link"
-                  onDoubleClick={(event) => {
+                  onClick={(event) => {
                     event.stopPropagation();
                     openProductDetail(plan.product_name);
                   }}
@@ -666,6 +662,20 @@ export function ActivityPlanList({
     });
   }
 
+  // 全ページ共通のQuickAddFab(右下＋)が「予定」を選んだとき、この元々の詳細
+  // フォームへ委譲できるようにContextへ登録する。マウント中(=ダッシュボード
+  // 表示中)だけ登録し、離れたら解除する。refで包むのは、登録自体は最初の
+  // 1回だけで良い一方、呼び出し時には常に最新のstartCreate(selectedDateなど
+  // を閉じ込めた版)を使いたいため。
+  const startCreateRef = useRef(startCreate);
+  useEffect(() => {
+    startCreateRef.current = startCreate;
+  });
+  useEffect(() => {
+    setOpenRichPlanCreator(() => startCreateRef.current());
+    return () => setOpenRichPlanCreator(null);
+  }, [setOpenRichPlanCreator]);
+
   function cancelEdit() {
     if (newPlanDraft) {
       setNewPlanDraft(null);
@@ -700,6 +710,11 @@ export function ActivityPlanList({
   function jumpToDay(date: string) {
     setSelectedDate(date);
     setViewMode("day");
+  }
+
+  // 表示中のビュー(日/週/月)を保ったまま、選択日だけ今日に戻す
+  function jumpToToday() {
+    setSelectedDate(todayIso);
   }
 
   function handleShift(direction: -1 | 1) {
@@ -737,6 +752,14 @@ export function ActivityPlanList({
       <div className="activity-plan-list__nav">
         <button type="button" onClick={() => handleShift(-1)}>
           ← 前へ
+        </button>
+        <button
+          type="button"
+          className="activity-plan-list__today-button"
+          onClick={jumpToToday}
+          disabled={selectedDate === todayIso}
+        >
+          今日
         </button>
         <button type="button" onClick={() => handleShift(1)}>
           次へ →
@@ -797,8 +820,8 @@ export function ActivityPlanList({
                 <h3 className="activity-plan-list__group-title">
                   <span
                     className="activity-plan-list__link"
-                    onDoubleClick={() => openCustomerDetail(group.customerId)}
-                    title="ダブルクリックで顧客詳細へ"
+                    onClick={() => openCustomerDetail(group.customerId)}
+                    title="クリックで顧客詳細へ"
                   >
                     {group.customerName}
                   </span>
@@ -1191,9 +1214,6 @@ export function ActivityPlanList({
       </div>
     )}
 
-    <button type="button" className="plan-fab" onClick={() => startCreate()} aria-label="予定を追加" title="予定を追加">
-      ＋
-    </button>
     </>
   );
 }

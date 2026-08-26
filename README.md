@@ -131,6 +131,18 @@ docker compose exec api pytest -q
 docker compose exec web npm run build
 ```
 
+### 5. AIチャット機能を使うには
+
+`/api/ai/chat` はQwen（vLLM、OpenAI互換API）に接続します。接続先は
+`.env` の `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` で設定します。
+`.env.example` にはプレースホルダしか含まれていません。
+
+- `.env` は `.gitignore` 対象です。実際のQwenサーバーのIP・ポート・APIキーは、
+  非公開の手段でチームメンバーから共有してもらってください。
+- `host.docker.internal` が使えるのは、Qwenサーバーを自分のPCで動かしている場合です。
+  別マシンの場合は、そのマシンのLAN上の実IPを設定してください。
+- `.env` の変更後は `docker compose up -d api` でコンテナを作り直してください。
+
 ## GitHub Codespaces でスマホ等の別端末から確認する
 
 同じLANに繋げない端末（スマホ等）で `/login` などを確認したい場合、`.devcontainer` を使って
@@ -199,3 +211,5 @@ supabase stop
 - **訪問候補が0件になる**: Geocoding CLI実行後、顧客の `geocoding_status` が `success` か確認します。
 - **ルートAPIが503になる**: 車・徒歩・自転車は`GOOGLE_MAPS_API_KEY`とRoutes APIの設定を、
   公共交通は`docker compose ps otp`と`docker compose logs otp`でOpenTripPlannerの起動状態を確認します。
+- **AIチャットが `Qwen APIに接続できませんでした` を返す**: `.env` の `AI_BASE_URL` が未設定、
+  または自分のPCに向いたままになっていないか確認してください。
