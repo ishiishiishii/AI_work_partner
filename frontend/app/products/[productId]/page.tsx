@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { fetchProducts } from "@/lib/api";
-import { getProductDummyDetails } from "@/lib/mockData";
 import type { Product } from "@/types";
 
 export default function ProductDetailPage() {
@@ -58,38 +57,71 @@ export default function ProductDetailPage() {
     );
   }
 
-  const details = getProductDummyDetails(product);
+  const priceRangeText = `¥${product.price_min.toLocaleString("ja-JP")} 〜 ¥${product.price_max.toLocaleString("ja-JP")}`;
+  const leadTimeText = `約${product.lead_time_days}営業日`;
+  const monogram = product.product_name.charAt(0);
 
   return (
-    <main>
+    <main className="wide-main product-detail">
       <Link href="/products" className="customer-detail__back">
         ← 商品カタログに戻る
       </Link>
-      <h1>{product.product_name}</h1>
-      <p>
-        {product.category_name}・{product.subcategory_name}
-      </p>
 
-      <section className="panel">
-        <p>{details.description}</p>
-        <dl className="goal-card__numbers customer-detail__summary">
-          <div>
-            <dt>価格帯</dt>
-            <dd>{details.priceRangeText}</dd>
+      <section className="panel product-detail__hero">
+        <div className="product-detail__monogram" aria-hidden="true">
+          <span>{monogram}</span>
+        </div>
+        <div className="product-detail__hero-body">
+          <div className="product-detail__breadcrumb">
+            <span className="product-detail__tag">{product.category_name}</span>
+            <span className="product-detail__breadcrumb-sep">/</span>
+            <span className="product-detail__tag product-detail__tag--sub">{product.subcategory_name}</span>
           </div>
-          <div>
-            <dt>納期目安</dt>
-            <dd>{details.leadTimeText}</dd>
+          <h1>{product.product_name}</h1>
+          <div className="product-detail__quickfacts">
+            <span className="product-detail__pill">
+              <span className="product-detail__pill-label">価格帯</span>
+              {priceRangeText}
+            </span>
+            <span className="product-detail__pill">
+              <span className="product-detail__pill-label">納期</span>
+              {leadTimeText}
+            </span>
           </div>
-          <div>
-            <dt>特徴</dt>
-            <dd>{details.features.join("・")}</dd>
-          </div>
-        </dl>
-        <p className="activity-plan-list__empty">
-          ※ 商品の詳細スペックを管理するAPIがまだ無いため、上記は参考情報(ダミー)です。
-        </p>
+        </div>
       </section>
+
+      <div className="product-detail__layout">
+        <section className="panel product-detail__stats-panel">
+          <h2>スペック</h2>
+          <dl className="product-detail__stats">
+            <div className="product-detail__stat">
+              <dt>価格帯</dt>
+              <dd>{priceRangeText}</dd>
+            </div>
+            <div className="product-detail__stat">
+              <dt>納期目安</dt>
+              <dd>{leadTimeText}</dd>
+            </div>
+            <div className="product-detail__stat">
+              <dt>カテゴリ</dt>
+              <dd>{product.category_name}</dd>
+            </div>
+          </dl>
+          <div className="product-detail__features">
+            {product.features.map((feature) => (
+              <span key={feature} className="product-detail__feature-chip">
+                {feature}
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="panel product-detail__description">
+          <h2>商品概要</h2>
+          <p>{product.description}</p>
+        </section>
+      </div>
     </main>
   );
 }

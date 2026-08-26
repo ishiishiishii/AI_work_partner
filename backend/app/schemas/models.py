@@ -264,6 +264,11 @@ class ProductOut(OrmModel):
     subcategory_name: str
     category_id: int
     category_name: str
+    description: str
+    price_min: int
+    price_max: int
+    lead_time_days: int
+    features: list[str]
 
 
 class ReplanRequest(BaseModel):

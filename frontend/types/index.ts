@@ -100,6 +100,11 @@ export type Product = {
   subcategory_name: string;
   category_id: number;
   category_name: string;
+  description: string;
+  price_min: number;
+  price_max: number;
+  lead_time_days: number;
+  features: string[];
 };
 
 // 新規顧客登録・商談登録/編集フォームのセレクトボックス用マスタ。GET /api/masters が返す。
