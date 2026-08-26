@@ -37,6 +37,18 @@ CREATE_SALES_ROUTE_PLAN_TOOL = {
                     "enum": ["balanced", "sales", "gross_profit", "short_travel"],
                     "default": "balanced",
                 },
+                "sales_weight_percent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "売上と粗利の収益評価内で売上を重視する割合。gross_profit_weight_percentとの合計は100。",
+                },
+                "gross_profit_weight_percent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "売上と粗利の収益評価内で粗利を重視する割合。sales_weight_percentとの合計は100。",
+                },
                 "max_visits": {
                     "type": "integer",
                     "minimum": 1,
@@ -62,6 +74,17 @@ CREATE_SALES_ROUTE_PLAN_TOOL = {
                     "properties": {
                         "kind": {"type": "string", "enum": ["branch", "custom"]},
                         "address": {"type": "string"},
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": False,
+                },
+                "search_area": {
+                    "type": "object",
+                    "description": "訪問候補を絞るエリア。区名や駅名を中心に半径指定できる。",
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["auto", "custom"]},
+                        "query": {"type": "string", "description": "例: 新宿区、東京駅"},
+                        "radius_km": {"type": "integer", "minimum": 1, "maximum": 50},
                     },
                     "required": ["kind"],
                     "additionalProperties": False,

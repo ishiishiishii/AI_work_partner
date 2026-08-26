@@ -25,6 +25,8 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
   const existingWonCount = totalWonCount - newWonCount;
   const newWinRate = newDealCount > 0 ? newWonCount / newDealCount : 0;
   const existingWinRate = existingDealCount > 0 ? existingWonCount / existingDealCount : 0;
+  const newRatioPercent = totalDealCount > 0 ? Math.round((newDealCount / totalDealCount) * 100) : 0;
+  const existingRatioPercent = 100 - newRatioPercent;
 
   if (ranked.length === 0) {
     return null;
@@ -49,15 +51,23 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
       </dl>
 
       <h3 className="affinity-summary__subheading">新規開拓・既存深耕の割合(商談数ベース)</h3>
-      <div className="affinity-summary__ratio-legend">
-        <span className="affinity-summary__ratio-item">
-          <span className="affinity-summary__ratio-dot affinity-summary__ratio-dot--new" />
-          新規開拓 <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
-        </span>
-        <span className="affinity-summary__ratio-item">
-          <span className="affinity-summary__ratio-dot affinity-summary__ratio-dot--existing" />
-          既存深耕 <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
-        </span>
+      <div className="affinity-summary__ratio-bar">
+        {newRatioPercent > 0 && (
+          <div
+            className="affinity-summary__ratio-segment affinity-summary__ratio-segment--new"
+            style={{ "--ratio-width": `${newRatioPercent}%` } as React.CSSProperties}
+          >
+            新規開拓 <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
+          </div>
+        )}
+        {existingRatioPercent > 0 && (
+          <div
+            className="affinity-summary__ratio-segment affinity-summary__ratio-segment--existing"
+            style={{ "--ratio-width": `${existingRatioPercent}%` } as React.CSSProperties}
+          >
+            既存深耕 <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
+          </div>
+        )}
       </div>
 
       <h3 className="affinity-summary__subheading">得意分野TOP{TOP_COUNT}</h3>

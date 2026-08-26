@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.services.route_optimization import (
+    AffinityEvidence,
     DealEconomics,
     MatrixCell,
     Portfolio,
@@ -14,6 +15,7 @@ from app.services.route_optimization import (
     generate_portfolios,
     route_portfolio,
     score_candidates,
+    selection_reason,
 )
 
 
@@ -77,6 +79,42 @@ def test_economics_uses_decimal_and_preserves_unknown_or_negative_profit() -> No
 def test_probability_out_of_range_is_rejected() -> None:
     with pytest.raises(ValueError):
         DealEconomics(Decimal("100"), Decimal("50"), Decimal("101"))
+
+
+def test_salesperson_affinity_changes_candidate_value_for_equal_deals() -> None:
+    strong = candidate(1, "1000", "500", "50")
+    weak = candidate(2, "1000", "500", "50")
+    strong.affinity_evidence.append(
+        AffinityEvidence(
+            industry_name="製造業",
+            category_name="省エネ機器",
+            deal_count=10,
+            won_count=7,
+            win_rate=Decimal("0.7"),
+            match_score=Decimal("53.85"),
+        )
+    )
+    weak.affinity_evidence.append(
+        AffinityEvidence(
+            industry_name="製造業",
+            category_name="省エネ機器",
+            deal_count=5,
+            won_count=1,
+            win_rate=Decimal("0.2"),
+            match_score=Decimal("12.5"),
+        )
+    )
+
+    score_candidates(
+        [strong, weak],
+        target_date=date(2026, 8, 26),
+        weights={"affinity": 100},
+    )
+
+    assert strong.value_score == Decimal("53.85")
+    assert weak.value_score == Decimal("12.50")
+    assert "製造業×省エネ機器" in selection_reason(strong)
+    assert "過去10件中7件成約" in selection_reason(strong)
 
 
 def test_cp_sat_generates_unique_sets_and_keeps_must_visit() -> None:
@@ -186,6 +224,37 @@ def test_evaluator_never_trades_away_required_target_condition() -> None:
         },
     )
     assert evaluate_options([relaxed, strict]) is strict
+
+
+def test_evaluator_honors_weighted_business_value_before_raw_profit() -> None:
+    high_fit = RoutedOption(
+        Portfolio((0,), Decimal("90"), "optimal"),
+        "feasible",
+        [],
+        20,
+        1000,
+        0,
+        True,
+        {
+            "expected_gross_profit": Decimal("100"),
+            "expected_sales": Decimal("200"),
+        },
+    )
+    high_raw_profit = RoutedOption(
+        Portfolio((1,), Decimal("40"), "optimal"),
+        "feasible",
+        [],
+        20,
+        1000,
+        0,
+        True,
+        {
+            "expected_gross_profit": Decimal("1000"),
+            "expected_sales": Decimal("2000"),
+        },
+    )
+
+    assert evaluate_options([high_raw_profit, high_fit]) is high_fit
 
 
 def test_evaluator_rejects_all_infeasible_options() -> None:

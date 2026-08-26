@@ -583,7 +583,8 @@ def search_products(conn: Connection, name: str | None = None) -> list[dict]:
         f"""
         select p.product_id, p.product_name,
                ps.subcategory_id, ps.subcategory_name,
-               pc.category_id, pc.category_name
+               pc.category_id, pc.category_name,
+               p.description, p.price_min, p.price_max, p.lead_time_days, p.features
         from product p
         join product_subcategory ps on ps.subcategory_id = p.subcategory_id
         join product_category pc on pc.category_id = ps.category_id

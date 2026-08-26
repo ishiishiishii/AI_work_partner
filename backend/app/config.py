@@ -41,9 +41,10 @@ class Settings(BaseSettings):
     route_default_travel_time_buffer_percent: int = 20
     route_default_access_buffer_min: int = 10
     route_default_return_buffer_min: int = 30
-    route_sales_weight: int = 25
-    route_gross_profit_weight: int = 35
-    route_urgency_weight: int = 20
+    route_sales_weight: int = 20
+    route_gross_profit_weight: int = 30
+    route_affinity_weight: int = 15
+    route_urgency_weight: int = 15
     route_phase_weight: int = 10
     route_target_gap_weight: int = 10
 

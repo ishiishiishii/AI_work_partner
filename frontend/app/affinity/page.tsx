@@ -44,7 +44,7 @@ export default function AffinityPage() {
 
   if (!selectedRep) {
     return (
-      <main>
+      <main className="wide-main">
         <h1>得意分野</h1>
         <p>読み込み中...</p>
       </main>
@@ -52,7 +52,7 @@ export default function AffinityPage() {
   }
 
   return (
-    <main>
+    <main className="wide-main">
       <h1>得意分野</h1>
       <p>
         {selectedRep.rep_name}さんの過去の成約・失注実績から、業種・商材カテゴリ・案件パターンごとの成約率を算出しています。

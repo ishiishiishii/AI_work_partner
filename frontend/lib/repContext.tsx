@@ -24,7 +24,8 @@ const PUBLIC_PATHS = ["/login"];
 
 export function RepProvider({ children }: { children: React.ReactNode }) {
   const [authenticatedRepId, setAuthenticatedRepId] = useState<number | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isSessionLoading, setIsSessionLoading] = useState(true);
+  const [isRepListLoading, setIsRepListLoading] = useState(true);
   const [allReps, setAllReps] = useState<SalesRep[]>([]);
   const router = useRouter();
   const pathname = usePathname();
@@ -32,14 +33,17 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     fetchReps()
       .then(setAllReps)
-      .catch((error) => console.error("担当者一覧の取得に失敗しました", error));
+      .catch((error) => console.error("担当者一覧の取得に失敗しました", error))
+      .finally(() => setIsRepListLoading(false));
   }, []);
 
   useEffect(() => {
     getAuthenticatedRepId()
       .then(setAuthenticatedRepId)
-      .finally(() => setIsAuthLoading(false));
+      .finally(() => setIsSessionLoading(false));
   }, []);
+
+  const isAuthLoading = isSessionLoading || isRepListLoading;
 
   useEffect(() => {
     if (isAuthLoading) return;

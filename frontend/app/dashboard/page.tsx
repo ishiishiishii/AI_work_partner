@@ -66,7 +66,7 @@ function getCurrentMonth(): string {
 const TARGET_MONTH = getCurrentMonth();
 
 export default function DashboardPage() {
-  const { selectedRep } = useRep();
+  const { selectedRep, isAuthLoading } = useRep();
   const REP_ID = selectedRep?.rep_id ?? null;
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -511,11 +511,22 @@ export default function DashboardPage() {
     }
   }
 
-  if (!selectedRep || isLoading) {
+  if (isAuthLoading || (selectedRep && isLoading)) {
     return (
       <main>
         <h1>営業ダッシュボード</h1>
         <p>読み込み中...</p>
+      </main>
+    );
+  }
+
+  if (!selectedRep) {
+    return (
+      <main>
+        <h1>営業ダッシュボード</h1>
+        <p className="activity-plan-list__empty">
+          ログイン情報または担当者情報を確認できません。ログイン画面からやり直してください。
+        </p>
       </main>
     );
   }

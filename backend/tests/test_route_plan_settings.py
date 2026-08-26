@@ -15,7 +15,10 @@ from app.services.route_optimization import (
 from app.services.route_planning import (
     TRAVEL_MODE_CACHE_KEYS,
     _add_realistic_travel_time,
+    _limit_scored_candidates,
     _refine_transit_option,
+    _resolve_search_area,
+    policy_weights,
 )
 
 
@@ -39,6 +42,126 @@ def test_custom_endpoint_requires_address() -> None:
             target_date="2026-08-26",
             start_location={"kind": "custom"},
         )
+
+
+def test_custom_search_area_requires_query_and_valid_radius() -> None:
+    request = RoutePlanPreviewRequest(
+        target_date="2026-08-26",
+        search_area={"kind": "custom", "query": "新宿区", "radius_km": 5},
+    )
+    assert request.search_area.query == "新宿区"
+    assert request.search_area.radius_km == 5
+
+    with pytest.raises(ValidationError):
+        RoutePlanPreviewRequest(
+            target_date="2026-08-26",
+            search_area={"kind": "custom", "radius_km": 5},
+        )
+
+    with pytest.raises(ValidationError):
+        RoutePlanPreviewRequest(
+            target_date="2026-08-26",
+            search_area={"kind": "custom", "query": "新宿区", "radius_km": 0},
+        )
+
+
+def test_auto_search_area_uses_start_location_as_center() -> None:
+    request = RoutePlanPreviewRequest(target_date="2026-08-26")
+    resolved = _resolve_search_area(
+        {"location": "東京都千代田区"},
+        request.search_area,
+        start_location={"latitude": 35.6812, "longitude": 139.7671},
+    )
+
+    assert resolved["kind"] == "auto"
+    assert resolved["latitude"] == 35.6812
+    assert resolved["longitude"] == 139.7671
+
+
+def test_district_search_area_prefers_registered_customer_center() -> None:
+    class FakeResult:
+        def fetchone(self):
+            return {"latitude": 35.69389, "longitude": 139.703613}
+
+    class FakeConnection:
+        def execute(self, query, params):
+            assert "avg(c.latitude)" in query
+            assert params == (1, "%新宿区%")
+            return FakeResult()
+
+    request = RoutePlanPreviewRequest(
+        target_date="2026-08-26",
+        search_area={"kind": "custom", "query": "新宿区", "radius_km": 5},
+    )
+    resolved = _resolve_search_area(
+        {"branch_id": 1, "location": "東京都千代田区"},
+        request.search_area,
+        start_location={"latitude": 35.6812, "longitude": 139.7671},
+        conn=FakeConnection(),  # type: ignore[arg-type]
+    )
+
+    assert resolved["latitude"] == pytest.approx(35.69389)
+    assert resolved["longitude"] == pytest.approx(139.703613)
+    assert resolved["geocode_accuracy"] == "customer-centroid;source=database"
+
+
+def test_custom_sales_and_profit_weights_must_add_up_to_100() -> None:
+    request = RoutePlanPreviewRequest(
+        target_date="2026-08-26",
+        sales_weight_percent=70,
+        gross_profit_weight_percent=30,
+    )
+    assert request.sales_weight_percent == 70
+    assert request.gross_profit_weight_percent == 30
+
+    with pytest.raises(ValidationError):
+        RoutePlanPreviewRequest(
+            target_date="2026-08-26",
+            sales_weight_percent=70,
+            gross_profit_weight_percent=20,
+        )
+
+    with pytest.raises(ValidationError):
+        RoutePlanPreviewRequest(
+            target_date="2026-08-26",
+            sales_weight_percent=70,
+        )
+
+
+def test_custom_sales_profit_balance_preserves_other_policy_weights() -> None:
+    default = policy_weights("balanced")
+    custom = policy_weights(
+        "balanced",
+        sales_weight_percent=80,
+        gross_profit_weight_percent=20,
+    )
+
+    economics_total = default["sales"] + default["gross_profit"]
+    assert custom["sales"] == round(economics_total * 0.8)
+    assert custom["gross_profit"] == economics_total - custom["sales"]
+    assert custom["affinity"] == default["affinity"]
+    assert custom["urgency"] == default["urgency"]
+
+
+def test_candidate_limit_keeps_mandatory_and_high_value_fit_candidates() -> None:
+    candidates = [
+        VisitCandidate(
+            customer_id=index,
+            customer_name=f"顧客{index}",
+            latitude=35.0,
+            longitude=139.0,
+            deal_ids=[index],
+            phase_names=["提案"],
+            economics=[DealEconomics(Decimal("1000"), Decimal("500"), Decimal("50"))],
+            must_visit=index == 1,
+            value_score=Decimal(str(score)),
+        )
+        for index, score in ((1, 1), (2, 90), (3, 80), (4, 10))
+    ]
+
+    selected = _limit_scored_candidates(candidates, limit=3)
+
+    assert {candidate.customer_id for candidate in selected} == {1, 2, 3}
 
 
 def test_realistic_travel_time_adds_percentage_and_access_buffer() -> None:
