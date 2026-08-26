@@ -1927,10 +1927,10 @@ a {
 .route-plan__controls select {
   width: 100%;
   min-height: 2.5rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 0.5rem;
   padding: 0.5rem;
-  background: var(--surface);
+  background: var(--card);
   color: inherit;
 }
 
@@ -1940,7 +1940,7 @@ a {
   min-width: 0;
   margin: 0;
   padding: 0.9rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 0.75rem;
 }
 
@@ -1962,7 +1962,7 @@ a {
 
 .route-plan__details summary {
   cursor: pointer;
-  color: var(--primary);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -1970,52 +1970,240 @@ a {
   margin-bottom: 0.75rem;
 }
 
+.route-plan__settings {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.9rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.route-plan__settings > summary {
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.route-plan__settings > summary::-webkit-details-marker {
+  display: none;
+}
+
+.route-plan__settings > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.route-plan__settings[open] > summary::before {
+  content: "▾ ";
+}
+
+.route-plan__result {
+  display: grid;
+  gap: 1rem;
+}
+
+.route-plan__result-heading {
+  margin: 0;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.route-plan__summary {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--bg);
+}
+
+.route-plan__summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  font-weight: 600;
+}
+
+.route-plan__date-badge {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.85rem;
+}
+
 .route-plan__locations {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
   align-items: center;
+  margin: 0;
 }
 
-.route-plan__result,
-.route-plan__stops {
+.route-plan__meta-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.route-plan__warnings {
   display: grid;
-  gap: 0.75rem;
-}
-
-.route-plan__totals {
-  display: flex;
-  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
-.route-plan__totals span {
-  padding: 0.45rem 0.65rem;
-  border-radius: 999px;
-  background: var(--background);
-  font-size: 0.85rem;
+.route-plan__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.route-plan__stat {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.6rem;
+  background: var(--bg);
+}
+
+.route-plan__stat dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.route-plan__stat dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.route-plan__stat--primary {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+
+.route-plan__stat--primary dd {
+  color: var(--accent);
 }
 
 .route-plan__stops {
-  padding-left: 1.5rem;
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.route-plan__stops li {
-  padding-left: 0.35rem;
+.route-plan__stop {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.75rem;
+  position: relative;
+  padding-bottom: 1.1rem;
 }
 
-.route-plan__stops span,
-.route-plan__stops small {
-  display: block;
-  margin-top: 0.2rem;
+.route-plan__stop:last-child {
+  padding-bottom: 0;
+}
+
+.route-plan__stop-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.route-plan__stop:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 0.99rem;
+  top: 2rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--line);
+}
+
+.route-plan__stop-body {
+  display: grid;
+  gap: 0.35rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.route-plan__stop:last-child .route-plan__stop-body {
+  border-bottom: none;
+}
+
+.route-plan__stop-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.route-plan__stop-time {
+  font-weight: 700;
+}
+
+.route-plan__stop-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.route-plan__stop-transit {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.route-plan__stop-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.route-plan__tag {
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 0.8rem;
+}
+
+.route-plan__stop-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.route-plan__stop-note {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.route-plan__return-leg {
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+
+.route-plan__selection-reason {
+  font-size: 0.9rem;
+  color: var(--muted);
 }
 
 .route-plan__transit-itinerary {
   margin-top: 0.65rem;
   padding: 0.65rem 0.75rem;
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--accent);
   border-radius: 0.35rem;
-  background: var(--background);
+  background: var(--bg);
 }
 
 .route-plan__transit-itinerary ol {
@@ -2034,6 +2222,7 @@ a {
   background: #fff7ed;
   border-radius: 0.5rem;
   padding: 0.6rem 0.75rem;
+  margin: 0;
 }
 
 .route-plan__actions {

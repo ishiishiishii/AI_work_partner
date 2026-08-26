@@ -33,17 +33,10 @@ insert into deal_result_status (status_code) values
   ('won'),
   ('lost');
 
--- Sales branches (7 offices); sales_rep.branch_id is assigned round-robin
--- below so all 50 reps are spread as evenly as possible across them.
-insert into branch (branch_name) values
-  ('札幌'),
-  ('仙台'),
-  ('東京'),
-  ('中部'),
-  ('神戸'),
-  ('広島'),
-  ('九州')
-on conflict (branch_name) do nothing;
+-- Sales branches (7 offices) are already created and seeded with `location`
+-- by migrations/20260825130000_add_branch_master.sql +
+-- 20260825160000_add_sales_route_planning.sql, so no insert is needed here
+-- (branch.location is NOT NULL and this file doesn't know its values).
 
 -- Prefecture -> branch territory map (standard Japan sales-region blocks,
 -- matching the 7 branches above). Used by planning.py::create_deal to check
