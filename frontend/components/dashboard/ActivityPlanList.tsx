@@ -59,6 +59,8 @@ const ACTIVITY_TYPE_CLASS: Record<string, string> = {
   Web会議: "activity-plan-list__type--online",
   資料作成: "activity-plan-list__type--prep",
   新規開拓: "activity-plan-list__type--prospect",
+  移動: "activity-plan-list__type--travel",
+  "準備・記録": "activity-plan-list__type--prep",
 };
 
 // 詳細モーダルのアクセントカラー(上部バーなど)を活動種別ごとに変える。
@@ -70,6 +72,8 @@ const ACTIVITY_TYPE_ACCENT: Record<string, string> = {
   Web会議: "#f472b6",
   資料作成: "#2dd4bf",
   新規開拓: "#a3e635",
+  移動: "#94a3b8",
+  "準備・記録": "#2dd4bf",
 };
 
 const VIEW_LABELS: Record<ViewMode, string> = { day: "日", week: "週", month: "月" };
@@ -906,7 +910,7 @@ export function ActivityPlanList({
             const effectiveCategory = isEditing ? editDraft.category : detailPlan.category;
             return (
               <div className="plan-modal__detail">
-                {!isCreating && (
+                {!isEditing && (
                   <div className="plan-modal__stats">
                     <span
                       className={`activity-plan-list__type ${
@@ -929,6 +933,7 @@ export function ActivityPlanList({
                     )}
                   </div>
                 )}
+                {/* 日付・時間は常に表示。種別/内容/会社名は編集時のみ(閲覧時はヘッダーと上の統計行に既に出ているため) */}
                 <dl className="plan-modal__fields">
                   <dt>日付</dt>
                   <dd>
@@ -943,22 +948,22 @@ export function ActivityPlanList({
                     )}
                   </dd>
 
-                  <dt>種別</dt>
-                  <dd>
-                    {isEditing ? (
-                      <select
-                        value={editDraft.category}
-                        onChange={(event) =>
-                          setEditDraft({ ...editDraft, category: event.target.value as ActivityPlanCategory })
-                        }
-                      >
-                        <option value="visit">{CATEGORY_LABELS.visit}</option>
-                        <option value="task">{CATEGORY_LABELS.task}</option>
-                      </select>
-                    ) : (
-                      CATEGORY_LABELS[detailPlan.category]
-                    )}
-                  </dd>
+                  {isEditing && (
+                    <>
+                      <dt>種別</dt>
+                      <dd>
+                        <select
+                          value={editDraft.category}
+                          onChange={(event) =>
+                            setEditDraft({ ...editDraft, category: event.target.value as ActivityPlanCategory })
+                          }
+                        >
+                          <option value="visit">{CATEGORY_LABELS.visit}</option>
+                          <option value="task">{CATEGORY_LABELS.task}</option>
+                        </select>
+                      </dd>
+                    </>
+                  )}
 
                   <dt>時間</dt>
                   <dd>
@@ -987,45 +992,34 @@ export function ActivityPlanList({
                     )}
                   </dd>
 
-                  <dt>内容</dt>
-                  <dd>
-                    {isEditing ? (
-                      <select
-                        value={editDraft.activity_type_name}
-                        onChange={(event) =>
-                          setEditDraft({ ...editDraft, activity_type_name: event.target.value })
-                        }
-                      >
-                        {EDITABLE_ACTIVITY_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span
-                        className={`activity-plan-list__type ${
-                          ACTIVITY_TYPE_CLASS[detailPlan.activity_type_name] ??
-                          "activity-plan-list__type--default"
-                        }`}
-                      >
-                        {detailPlan.activity_type_name}
-                      </span>
-                    )}
-                  </dd>
+                  {isEditing && (
+                    <>
+                      <dt>内容</dt>
+                      <dd>
+                        <select
+                          value={editDraft.activity_type_name}
+                          onChange={(event) =>
+                            setEditDraft({ ...editDraft, activity_type_name: event.target.value })
+                          }
+                        >
+                          {EDITABLE_ACTIVITY_TYPES.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))}
+                        </select>
+                      </dd>
 
-                  <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
-                  <dd>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editDraft.customer_name}
-                        onChange={(event) => setEditDraft({ ...editDraft, customer_name: event.target.value })}
-                      />
-                    ) : (
-                      detailPlan.customer_name
-                    )}
-                  </dd>
+                      <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
+                      <dd>
+                        <input
+                          type="text"
+                          value={editDraft.customer_name}
+                          onChange={(event) => setEditDraft({ ...editDraft, customer_name: event.target.value })}
+                        />
+                      </dd>
+                    </>
+                  )}
 
                   {effectiveCategory === "visit" && (
                     <>
@@ -1046,32 +1040,32 @@ export function ActivityPlanList({
                     </>
                   )}
 
-                  {effectiveCategory === "visit" && (
+                  {effectiveCategory === "visit" && isEditing && (
                     <>
                       <dt>成約確率</dt>
                       <dd>
-                        {isEditing ? (
-                          <span className="plan-modal__percent-input">
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={5}
-                              value={editDraft.expected_probability}
-                              onChange={(event) =>
-                                setEditDraft({
-                                  ...editDraft,
-                                  expected_probability: Number(event.target.value),
-                                })
-                              }
-                            />
-                            %
-                          </span>
-                        ) : (
-                          `${detailPlan.expected_probability.toFixed(0)}%`
-                        )}
+                        <span className="plan-modal__percent-input">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={editDraft.expected_probability}
+                            onChange={(event) =>
+                              setEditDraft({
+                                ...editDraft,
+                                expected_probability: Number(event.target.value),
+                              })
+                            }
+                          />
+                          %
+                        </span>
                       </dd>
+                    </>
+                  )}
 
+                  {effectiveCategory === "visit" && (
+                    <>
                       <dt>メモ</dt>
                       <dd>
                         {isEditing ? (

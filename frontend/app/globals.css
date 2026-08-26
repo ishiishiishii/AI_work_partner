@@ -749,6 +749,11 @@ a {
   color: #a3e635;
 }
 
+.activity-plan-list__type--travel {
+  background: color-mix(in srgb, #94a3b8 18%, transparent);
+  color: #94a3b8;
+}
+
 .activity-plan-list__amount {
   flex-shrink: 0;
   font-weight: 600;
