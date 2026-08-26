@@ -55,7 +55,7 @@ export default function CustomerDetailPage() {
         setProducts(allProducts);
         setDealPhases(masters.deal_phases);
 
-        // 過去の成約率は付加情報のため、取得に失敗してもページ全体は失敗させない
+        // 付加情報なので、取得失敗でページ全体は失敗させない
         fetchCustomerWinRate(targetId)
           .then((customerWinRate) => {
             if (cancelled) return;
@@ -65,9 +65,7 @@ export default function CustomerDetailPage() {
               rate: customerWinRate.win_rate,
             });
           })
-          .catch(() => {
-            /* 表示を諦めるだけで、ページ自体は通常通り表示する */
-          });
+          .catch(() => {});
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");

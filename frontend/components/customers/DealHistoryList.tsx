@@ -176,8 +176,6 @@ export function DealHistoryList({
                 <>
                   <p className="deal-history__note">
                     {deal.deal_phase_name}
-                    {/* 成約/失注が確定した商談は結果が出た後なので確率表示は意味を持たない。
-                        進行中の商談だけ、今後の見込みとして成約確率を表示する */}
                     {deal.deal_result_status === "ongoing" && `・成約確率${deal.win_probability}%`}
                     {deal.contract_date && `・契約日 ${formatDate(deal.contract_date)}`}
                   </p>

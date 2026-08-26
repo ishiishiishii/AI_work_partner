@@ -1,10 +1,7 @@
 import type { ActivityPlan, Deal, DealResultStatus } from "@/types";
 
-// 同じ商談(deal_id)に複数の予定(訪問+関連タスク等)が紐づくことがあるため、行ごとに
-// 合算すると同じ商談を複数回計上してしまう。商談単位で1回だけ数えるため、状態が
-// 割れている場合は won > 進行中(pending/postponed) > lost の優先順で代表の予定を
-// 選ぶ(バックエンドのforecast()と同じ考え方)。deal_idを持たない予定(事務作業など)
-// は重複しようがないのでそのまま個別に数える。
+// 同じ商談に複数の予定(訪問+関連タスク等)が紐づく場合、商談単位で1回だけ数える。
+// 状態が割れている場合は won > 進行中 > lost の優先順で代表の予定を選ぶ。
 function statusPriority(status: DealResultStatus): number {
   if (status === "won") return 2;
   if (status === "lost") return 0;

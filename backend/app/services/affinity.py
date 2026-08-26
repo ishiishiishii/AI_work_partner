@@ -83,10 +83,7 @@ group by classified.rep_id, classified.industry_id, classified.category_id, dp.p
 """
 
 
-# 顧客詳細ページの「この顧客との過去の成約率」表示用。estimate_win_probability の
-# Tier0(担当者を問わず、この顧客との成約/失注実績)と同じ集計を、表示専用に切り出した
-# もの。個々の商談に確率を出すより、確定済みの実績をこの1つの数字にまとめて見せる方が
-# 妥当という判断で追加した(進行中の商談にはestimate_win_probabilityの結果をそのまま使う)。
+# estimate_win_probability の Tier0 と同じ集計を、顧客詳細ページの表示用に切り出したもの。
 def customer_win_rate_summary(conn: Connection, customer_id: int) -> dict:
     row = conn.execute(
         """
@@ -129,17 +126,10 @@ def list_rep_affinity(conn: Connection, rep_id: int) -> list[dict]:
 _RECALCULATE_LOCK_KEY = 872346123
 
 
-# 成約確率(win_probability)の自動算出。まずこの顧客自身の過去の成約/失注実績
-# (担当者を問わず、会社としてこの顧客とやり取りしてきた勝率)を最優先で使う(Tier0)。
-# 新規顧客などこの顧客との取引実績が無ければ、商談の(業界×商品カテゴリ×パターン)が
-# rep_affinity に一致する行の勝率にフォールバックし(Tier1)。担当者本人がそのパターンで
-# 実績を持たない場合は、同業界×同規模の企業への商談(担当者問わず全社)の勝率を使い
-# (Tier1.5、"似た会社"の実績)、それも無ければ担当者の全商談を通した勝率(Tier2)、
-# それも無ければ固定値(Tier3)。
-#
-# Tier0を担当者ではなく顧客(会社)単位にしているのは、担当者×顧客の組み合わせだと
-# 実績が3件以上ある組が全体の1.4%しかなく、実用に耐えないため。顧客単位なら大半の
-# 顧客が十分な実績を持つ。ただし件数が少ない顧客(1〜2件)は数値がぶれやすい点に注意。
+# 成約確率の自動算出。顧客自身の実績(Tier0) → 担当者×業界×カテゴリ×パターンの実績
+# (Tier1) → 同業界×同規模企業の実績(Tier1.5) → 担当者全体の実績(Tier2) → 固定値(Tier3)
+# の順にフォールバックする。Tier0を担当者×顧客ではなく顧客単位にしているのは、
+# 担当者×顧客だと実績3件以上の組が全体の1.4%しかなく実用に耐えないため。
 _DEFAULT_WIN_PROBABILITY = 30
 
 _WIN_PROBABILITY_QUERY = """

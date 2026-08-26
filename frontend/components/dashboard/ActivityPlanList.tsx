@@ -209,8 +209,6 @@ function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
       const sorted = [...list].sort(
         (a, b) => b.expected_amount * b.expected_probability - a.expected_amount * a.expected_probability,
       );
-      // 同じ商談(deal_id)に紐づく予定(訪問+関連タスク等)が複数あっても二重計上しない
-      // よう、forecast.tsのcalcForecastAmountと同じロジックで商談単位に集計する
       const totalValue = calcForecastAmount(sorted);
       return { customerName, customerId, items: sorted, totalValue };
     })

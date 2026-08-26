@@ -1260,11 +1260,8 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     if not target:
         raise ValueError("target not found")
 
-    # 1つの商談(deal)には訪問+関連タスクなど複数のactivity_plan行が紐づき得るため、
-    # 行ごとにexpected_amountを合算すると同じ商談を複数回計上してしまう。商談単位で
-    # 1回だけ計上し、確度(win_probability)で重み付けした期待値にする: 成約(won)は
-    # 満額、失注(lost)は0円、それ以外(進行中)は見込み金額×確度/100。商談に紐づかない
-    # 予定(事務作業など)は行単位でそのまま計上する(deal_idが無く重複しようがないため)。
+    # 1商談に複数のactivity_plan行(訪問+関連タスク等)が紐づき得るため、商談単位で
+    # 1回だけ計上する。成約は満額、失注は0円、進行中は見込み金額×確度/100。
     stats = conn.execute(
         """
         with month_plans as (
