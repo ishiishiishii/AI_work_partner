@@ -3,7 +3,11 @@
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 import { fetchReps } from "@/lib/api";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
+import {
+  getAuthenticatedRepId,
+  signInSalesRep,
+  signOutSalesRep,
+} from "@/lib/supabase";
 import type { SalesRep } from "@/types";
 
 type RepContextValue = {
@@ -11,78 +15,66 @@ type RepContextValue = {
   selectedRep: SalesRep | null;
   setSelectedRepId: (repId: number) => void;
   isAuthLoading: boolean;
+  signIn: (repId: number, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
 };
 
 const RepContext = createContext<RepContextValue | null>(null);
-
-// ログインしていなくても見られる画面
 const PUBLIC_PATHS = ["/login"];
 
 export function RepProvider({ children }: { children: React.ReactNode }) {
-  // authenticatedRepId: ログインしているかどうかの判定に使う(アクセス制御)
-  // selectedRepId: 画面に表示する担当者。ログイン後は自由に切り替えられる
   const [authenticatedRepId, setAuthenticatedRepId] = useState<number | null>(null);
-  const [selectedRepId, setSelectedRepId] = useState<number | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [reps, setReps] = useState<SalesRep[]>([]);
+  const [allReps, setAllReps] = useState<SalesRep[]>([]);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     fetchReps()
-      .then(setReps)
-      .catch((error) => {
-        console.error("担当者一覧の取得に失敗しました", error);
-      });
+      .then(setAllReps)
+      .catch((error) => console.error("担当者一覧の取得に失敗しました", error));
   }, []);
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) {
-      setIsAuthLoading(false);
-      return;
-    }
-
-    function applySession(repId: number | null) {
-      setAuthenticatedRepId(repId);
-      setSelectedRepId(repId);
-    }
-
-    supabase.auth.getSession().then(({ data }) => {
-      applySession((data.session?.user.app_metadata.rep_id as number | undefined) ?? null);
-      setIsAuthLoading(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      applySession((session?.user.app_metadata.rep_id as number | undefined) ?? null);
-    });
-
-    return () => listener.subscription.unsubscribe();
+    getAuthenticatedRepId()
+      .then(setAuthenticatedRepId)
+      .finally(() => setIsAuthLoading(false));
   }, []);
 
   useEffect(() => {
     if (isAuthLoading) return;
-    const isPublicPath = PUBLIC_PATHS.includes(pathname);
-    if (authenticatedRepId === null && !isPublicPath) {
+    if (authenticatedRepId === null && !PUBLIC_PATHS.includes(pathname)) {
       router.replace("/login");
     }
   }, [isAuthLoading, authenticatedRepId, pathname, router]);
 
   const selectedRep =
-    selectedRepId !== null ? (reps.find((rep) => rep.rep_id === selectedRepId) ?? null) : null;
+    authenticatedRepId === null
+      ? null
+      : allReps.find((rep) => rep.rep_id === authenticatedRepId) ?? null;
+  const reps = selectedRep ? [selectedRep] : [];
 
-  async function signOut() {
-    const supabase = getSupabaseBrowserClient();
-    await supabase?.auth.signOut();
+  async function signIn(repId: number, password: string): Promise<boolean> {
+    const authenticated = await signInSalesRep(repId, password);
+    if (authenticated) setAuthenticatedRepId(repId);
+    return authenticated;
+  }
+
+  async function signOut(): Promise<void> {
+    await signOutSalesRep();
     setAuthenticatedRepId(null);
-    setSelectedRepId(null);
     router.replace("/login");
+  }
+
+  function setSelectedRepId(repId: number): void {
+    if (repId !== authenticatedRepId) {
+      console.warn("認証済み本人以外の担当者データへは切り替えられません");
+    }
   }
 
   return (
     <RepContext.Provider
-      value={{ reps, selectedRep, setSelectedRepId, isAuthLoading, signOut }}
+      value={{ reps, selectedRep, setSelectedRepId, isAuthLoading, signIn, signOut }}
     >
       {children}
     </RepContext.Provider>
@@ -91,8 +83,6 @@ export function RepProvider({ children }: { children: React.ReactNode }) {
 
 export function useRep(): RepContextValue {
   const context = useContext(RepContext);
-  if (!context) {
-    throw new Error("useRep は RepProvider の内側で使ってください");
-  }
+  if (!context) throw new Error("useRep は RepProvider の内側で使ってください");
   return context;
 }

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import close_pool, init_pool
-from app.routers import health, mvp
+from app.routers import health, mvp, route_plans
 
 
 @asynccontextmanager
@@ -31,3 +31,4 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(mvp.router)
+app.include_router(route_plans.router)

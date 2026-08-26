@@ -2,18 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
-
-// 社員ID(EMP001など)と実際のログイン用メールアドレスの対応。
-// 社員番号を管理するAPIがまだ無いため、rep_id から機械的に組み立てている。
-function employeeIdToLoginEmail(employeeId: string): string | null {
-  const match = /^EMP(\d{3,})$/i.exec(employeeId.trim());
-  if (!match) return null;
-  return `rep${Number(match[1])}@aiworkpartner.local`;
-}
+import { employeeIdToRepId } from "@/lib/demoAuth";
+import { useRep } from "@/lib/repContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { signIn } = useRep();
   const [employeeId, setEmployeeId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -22,8 +16,8 @@ export default function LoginPage() {
 
   function handleContinue(event: React.FormEvent) {
     event.preventDefault();
-    if (!employeeIdToLoginEmail(employeeId)) {
-      setError("社員IDの形式が正しくありません(例: EMP001)");
+    if (employeeIdToRepId(employeeId) === null) {
+      setError("社員IDはEMP001〜EMP050の形式で入力してください");
       return;
     }
     setError(null);
@@ -38,31 +32,27 @@ export default function LoginPage() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const email = employeeIdToLoginEmail(employeeId);
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase || !email) {
-      setError("ログインに失敗しました");
-      return;
-    }
-
     setIsSubmitting(true);
     setError(null);
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    setIsSubmitting(false);
 
-    if (signInError) {
-      // ネットワーク/接続エラー(バックエンドやSupabaseが起動していない等)は
-      // AuthRetryableFetchError として返る。認証エラー(ID/パスワード不一致)とは
-      // 原因も対処法も違うため、メッセージを出し分ける。
-      setError(
-        signInError.name === "AuthRetryableFetchError"
-          ? "Supabaseに接続できません。ローカル環境が起動しているか確認してください。"
-          : "社員IDまたはパスワードが正しくありません",
-      );
+    const repId = employeeIdToRepId(employeeId);
+    if (repId === null) {
+      setIsSubmitting(false);
+      setError("社員IDまたはパスワードが正しくありません");
       return;
     }
 
-    router.replace("/dashboard");
+    try {
+      if (!(await signIn(repId, password))) {
+        setError("社員IDまたはパスワードが正しくありません");
+        return;
+      }
+      router.replace("/dashboard");
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "ログインに失敗しました");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (

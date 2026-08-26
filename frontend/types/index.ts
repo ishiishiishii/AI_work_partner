@@ -179,6 +179,140 @@ export type ActivityPlan = {
   progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う
 };
 
+export type TransitLeg = {
+  mode: string;
+  departure_at: string;
+  arrival_at: string;
+  scheduled_departure_at: string;
+  scheduled_arrival_at: string;
+  departure_delay_sec: number;
+  arrival_delay_sec: number;
+  duration_sec: number;
+  scheduled_duration_sec: number;
+  distance_m: number;
+  from_name: string;
+  to_name: string;
+  from_stop_id: string | null;
+  to_stop_id: string | null;
+  from_platform: string | null;
+  to_platform: string | null;
+  route_name: string | null;
+  route_id: string | null;
+  headsign: string | null;
+  trip_id: string | null;
+  real_time: boolean;
+};
+
+export type TransitItinerary = {
+  departure_at: string;
+  arrival_at: string;
+  requested_departure_at: string;
+  planned_arrival_at: string;
+  duration_sec: number;
+  scheduled_duration_sec: number;
+  distance_m: number;
+  walk_distance_m: number;
+  contingency_buffer_min: number;
+  appointment_wait_min: number;
+  real_time: boolean;
+  data_status: string;
+  legs: TransitLeg[];
+};
+
+export type RoutePlanStop = {
+  visit_order: number;
+  customer_id: number;
+  customer_name: string;
+  deal_ids: number[];
+  phase_names: string[];
+  arrival_at: string;
+  departure_at: string;
+  visit_duration_min: number;
+  turnaround_buffer_min: number;
+  leg_travel_min: number;
+  leg_distance_m: number;
+  leg_details?: TransitItinerary;
+  economics: {
+    planned_sales: number;
+    planned_gross_profit: number | null;
+    gross_profit_margin: number | null;
+    expected_sales: number;
+    expected_gross_profit: number | null;
+    value_score: number;
+    gross_profit_available: boolean;
+  };
+  selection_reason: string;
+  latitude: number;
+  longitude: number;
+};
+
+export type RoutePlanEndpoint = {
+  kind: "branch" | "custom";
+  label: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  geocode_accuracy?: string;
+};
+
+export type RoutePlanPreview = {
+  plan_id: number;
+  status: "proposed" | "failed";
+  rep_id: number;
+  rep_name: string;
+  target_date: string;
+  branch: {
+    branch_id: number;
+    branch_name: string;
+    location: string;
+    latitude: number;
+    longitude: number;
+  };
+  start_location: RoutePlanEndpoint;
+  end_location: RoutePlanEndpoint;
+  travel_mode: "driving" | "transit" | "walking" | "cycling";
+  break_time: { start: string; end: string } | null;
+  realism: {
+    turnaround_buffer_min: number;
+    travel_time_buffer_percent: number;
+    access_buffer_min: number;
+    return_buffer_min: number;
+  };
+  policy: "balanced" | "sales" | "gross_profit" | "short_travel";
+  work_start: string;
+  work_end: string;
+  target_met: boolean;
+  shortfalls: {
+    expected_sales: number;
+    expected_gross_profit: number;
+  };
+  totals: {
+    planned_sales: number;
+    planned_gross_profit: number | null;
+    expected_sales: number;
+    expected_gross_profit: number | null;
+    total_travel_min: number;
+    total_distance_m: number;
+    total_wait_min: number;
+    total_turnaround_min: number;
+    visit_count: number;
+    route_end_at: string;
+  };
+  stops: RoutePlanStop[];
+  return_leg: TransitItinerary | null;
+  options: Array<{
+    rank: number;
+    selected: boolean;
+    cp_sat_status: string;
+    routing_status: string;
+    business_value: number;
+    rejection_reason: string | null;
+  }>;
+  selection_reason: string;
+  excluded_reasons: string[];
+  warnings: string[];
+};
+
 // 汎用のタスク期限。activity_planとは別で、顧客/商談との紐付けは任意。
 export type Deadline = {
   deadline_id: number;

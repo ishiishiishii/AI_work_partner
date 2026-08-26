@@ -1,0 +1,6 @@
+{
+  "transitServiceStart": "-P30D",
+  "transitServiceEnd": "P180D",
+  "subwayAccessTime": 3.0,
+  "dataImportReport": false
+}

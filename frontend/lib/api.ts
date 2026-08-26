@@ -1,4 +1,6 @@
 import type { DealEditFields } from "@/components/customers/DealHistoryList";
+import { getAccessToken } from "@/lib/supabase";
+import type { RoutePlanPreview } from "@/types";
 import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
@@ -22,7 +24,21 @@ export function getApiBaseUrl(): string {
   if (typeof window === "undefined") {
     return process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   }
-  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const configured = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  try {
+    const url = new URL(configured);
+    const pageHost = window.location.hostname;
+    if (
+      pageHost !== "localhost" &&
+      pageHost !== "127.0.0.1" &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+    ) {
+      url.hostname = pageHost;
+    }
+    return url.origin;
+  } catch {
+    return configured;
+  }
 }
 
 export async function fetchReps(): Promise<SalesRep[]> {
@@ -756,9 +772,10 @@ export async function askAiQuestion(
 ): Promise<string> {
   // ブラウザから FastAPI の localhost:8000 を直接参照すると、別PCでの
   // デモ時にそのPC自身へ接続してしまう。Next.js の同一オリジン経由で中継する。
+  const token = await getAccessToken();
   const res = await fetch("/api/ai/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({
       question,
       history,
@@ -798,3 +815,62 @@ export async function askAiQuestion(
   return body.answer;
 }
 
+
+
+async function routePlanError(res: Response, fallback: string): Promise<Error> {
+  const body: { detail?: string | { message?: string } } = await res.json().catch(() => ({}));
+  const detail =
+    typeof body.detail === "string" ? body.detail : body.detail?.message;
+  return new Error(detail || `${fallback} (HTTP ${res.status})`);
+}
+
+export async function previewSalesRoutePlan(input: {
+  target_date: string;
+  policy: RoutePlanPreview["policy"];
+  max_visits: number;
+  travel_mode: RoutePlanPreview["travel_mode"];
+  start_location: { kind: "branch" | "custom"; address?: string };
+  end_location: { kind: "branch" | "custom"; address?: string };
+  break_enabled: boolean;
+  break_start: string;
+  break_end: string;
+  turnaround_buffer_min: number;
+  travel_time_buffer_percent: number;
+  access_buffer_min: number;
+  return_buffer_min: number;
+  min_expected_sales?: number;
+  min_expected_gross_profit?: number;
+}): Promise<RoutePlanPreview> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/api/route-plans/preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await routePlanError(res, "営業ルート案の作成に失敗しました");
+  return res.json();
+}
+
+export async function approveSalesRoutePlan(
+  planId: number,
+): Promise<{ plan_id: number; status: "approved"; activity_plan_ids: number[] }> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/api/route-plans/${planId}/approve`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw await routePlanError(res, "営業ルート案の承認に失敗しました");
+  return res.json();
+}
+
+export async function rejectSalesRoutePlan(planId: number): Promise<void> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/api/route-plans/${planId}/reject`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw await routePlanError(res, "営業ルート案の却下に失敗しました");
+}

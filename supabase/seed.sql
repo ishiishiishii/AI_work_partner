@@ -42,7 +42,8 @@ insert into branch (branch_name) values
   ('中部'),
   ('神戸'),
   ('広島'),
-  ('九州');
+  ('九州')
+on conflict (branch_name) do nothing;
 
 -- Prefecture -> branch territory map (standard Japan sales-region blocks,
 -- matching the 7 branches above). Used by planning.py::create_deal to check
