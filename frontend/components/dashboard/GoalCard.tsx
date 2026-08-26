@@ -7,8 +7,9 @@ type GoalCardProps = {
   rep: SalesRep;
   target: SalesTarget;
   forecastAmount: number;
-  achievementRate: number;
-  openPlanCount: number;
+  forecastProfitAmount: number;
+  actualAchievedAmount: number;
+  actualAchievementRate: number;
   onSave: (input: { target_amount: number; target_deal_count: number }) => Promise<void> | void;
   willGeneratePlan?: boolean;
 };
@@ -22,34 +23,61 @@ function formatMonth(targetMonth: string): string {
   return `${year}年${Number(month)}月`;
 }
 
+function AchievementRing({
+  rate,
+  label,
+  modifierClass,
+}: {
+  rate: number;
+  label: string;
+  modifierClass?: string;
+}) {
+  const clampedRate = Math.max(0, rate);
+  const ringProgress = Math.min(clampedRate, 100);
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - ringProgress / 100);
+
+  return (
+    <svg className="goal-card__ring" viewBox="0 0 120 120" width="120" height="120">
+      <circle cx="60" cy="60" r={radius} className="goal-card__ring-track" />
+      <circle
+        cx="60"
+        cy="60"
+        r={radius}
+        className={`goal-card__ring-progress${modifierClass ? ` ${modifierClass}` : ""}`}
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+      />
+      <text x="60" y="56" textAnchor="middle" className="goal-card__ring-value">
+        {clampedRate.toFixed(1)}%
+      </text>
+      <text x="60" y="76" textAnchor="middle" className="goal-card__ring-label">
+        {label}
+      </text>
+    </svg>
+  );
+}
+
 export function GoalCard({
   rep,
   target,
   forecastAmount,
-  achievementRate,
-  openPlanCount,
+  forecastProfitAmount,
+  actualAchievedAmount,
+  actualAchievementRate,
   onSave,
   willGeneratePlan = false,
 }: GoalCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftAmount, setDraftAmount] = useState(String(target.target_amount));
-  const [draftCount, setDraftCount] = useState(String(target.target_deal_count));
-
-  const rate = Math.max(0, achievementRate);
-  const ringProgress = Math.min(rate, 100);
-  const radius = 52;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference * (1 - ringProgress / 100);
 
   const amountValue = Number(draftAmount);
-  const countValue = Number(draftCount);
-  const isDraftValid =
-    Number.isFinite(amountValue) && amountValue > 0 && Number.isFinite(countValue) && countValue > 0;
+  const isDraftValid = Number.isFinite(amountValue) && amountValue > 0;
 
   function startEditing() {
     setDraftAmount(String(target.target_amount));
-    setDraftCount(String(target.target_deal_count));
     setIsEditing(true);
   }
 
@@ -58,7 +86,8 @@ export function GoalCard({
       return;
     }
     setIsSaving(true);
-    await onSave({ target_amount: amountValue, target_deal_count: countValue });
+    // 目標件数はこの画面では編集不可のため、既存値をそのまま引き継いで送信する
+    await onSave({ target_amount: amountValue, target_deal_count: target.target_deal_count });
     setIsSaving(false);
     setIsEditing(false);
   }
@@ -71,94 +100,91 @@ export function GoalCard({
       </div>
 
       <div className="goal-card__body">
-        <svg className="goal-card__ring" viewBox="0 0 120 120" width="120" height="120">
-          <circle cx="60" cy="60" r={radius} className="goal-card__ring-track" />
-          <circle
-            cx="60"
-            cy="60"
-            r={radius}
-            className="goal-card__ring-progress"
-            strokeDasharray={circumference}
-            strokeDashoffset={dashOffset}
+        <div className="goal-card__rings">
+          <AchievementRing
+            rate={actualAchievementRate}
+            label="現在の実績"
+            modifierClass="goal-card__ring-progress--actual"
           />
-          <text x="60" y="56" textAnchor="middle" className="goal-card__ring-value">
-            {rate.toFixed(1)}%
-          </text>
-          <text x="60" y="76" textAnchor="middle" className="goal-card__ring-label">
-            達成見込み
-          </text>
-        </svg>
+        </div>
 
         <div className="goal-card__details">
-          {isEditing ? (
-            <div className="goal-card__edit">
-              <label className="goal-card__field">
-                <span>目標金額</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={draftAmount}
-                  onChange={(event) => setDraftAmount(event.target.value)}
-                />
-              </label>
-              <label className="goal-card__field">
-                <span>目標件数</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={draftCount}
-                  onChange={(event) => setDraftCount(event.target.value)}
-                />
-              </label>
-              {willGeneratePlan && (
-                <p className="goal-card__hint">保存すると、AIが今月の活動計画を作成します</p>
-              )}
-              <div className="goal-card__actions">
-                <button
-                  type="button"
-                  className="goal-card__save"
-                  onClick={handleSave}
-                  disabled={!isDraftValid || isSaving}
-                >
-                  {isSaving ? "保存中..." : "保存"}
-                </button>
-                <button
-                  type="button"
-                  className="goal-card__cancel"
-                  onClick={() => setIsEditing(false)}
-                  disabled={isSaving}
-                >
-                  キャンセル
-                </button>
-              </div>
+          <dl className="goal-card__numbers">
+            <div>
+              <dt>目標金額</dt>
+              <dd>
+                {isEditing ? (
+                  <form
+                    className="goal-card__amount-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      handleSave();
+                    }}
+                  >
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={draftAmount}
+                      onChange={(event) => setDraftAmount(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") setIsEditing(false);
+                      }}
+                      disabled={isSaving}
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="goal-card__save"
+                      disabled={!isDraftValid || isSaving}
+                    >
+                      {isSaving ? "保存中..." : "保存"}
+                    </button>
+                    <button
+                      type="button"
+                      className="goal-card__cancel"
+                      onClick={() => setIsEditing(false)}
+                      disabled={isSaving}
+                    >
+                      キャンセル
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    className="goal-card__amount-button"
+                    onClick={startEditing}
+                    aria-label="目標金額を変更する"
+                  >
+                    {formatYen(target.target_amount)}
+                  </button>
+                )}
+              </dd>
             </div>
-          ) : (
-            <>
-              <dl className="goal-card__numbers">
-                <div>
-                  <dt>目標金額</dt>
-                  <dd>{formatYen(target.target_amount)}</dd>
-                </div>
-                <div>
-                  <dt>目標件数</dt>
-                  <dd>{target.target_deal_count}件</dd>
-                </div>
-                <div>
-                  <dt>見込み売上</dt>
-                  <dd className="goal-card__forecast">{formatYen(forecastAmount)}</dd>
-                </div>
-                <div>
-                  <dt>未実施の予定</dt>
-                  <dd>{openPlanCount}件</dd>
-                </div>
-              </dl>
-              <button type="button" className="goal-card__edit-button" onClick={startEditing}>
-                目標を変更する
-              </button>
-            </>
+            <div>
+              <dt>見込み売上</dt>
+              <dd className="goal-card__forecast">{formatYen(forecastAmount)}</dd>
+            </div>
+            <div>
+              <dt>見込み粗利</dt>
+              <dd className="goal-card__forecast">{formatYen(forecastProfitAmount)}</dd>
+            </div>
+            <div>
+              <dt>現在の実績</dt>
+              <dd className="goal-card__actual">{formatYen(actualAchievedAmount)}</dd>
+            </div>
+          </dl>
+          {isEditing && willGeneratePlan && (
+            <p className="goal-card__hint">保存すると、AIが今月の活動計画を作成します</p>
           )}
+          <button
+            type="button"
+            className="goal-card__edit-button"
+            onClick={startEditing}
+            disabled={isEditing}
+          >
+            目標を変更する
+          </button>
         </div>
       </div>
     </section>
