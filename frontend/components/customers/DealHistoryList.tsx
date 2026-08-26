@@ -7,7 +7,6 @@ export type DealEditFields = {
   product_id: number;
   deal_phase_id: number;
   estimated_amount: number;
-  win_probability: number;
   expected_visit_count: number;
   expected_effort_hours: number;
 };
@@ -57,7 +56,6 @@ export function DealHistoryList({
       product_id: deal.product_id,
       deal_phase_id: deal.deal_phase_id,
       estimated_amount: deal.estimated_amount,
-      win_probability: deal.win_probability,
       expected_visit_count: deal.expected_visit_count,
       expected_effort_hours: deal.expected_effort_hours,
     });
@@ -143,18 +141,6 @@ export function DealHistoryList({
                     />
                   </label>
                   <label>
-                    成約確率(%)
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={editDraft.win_probability}
-                      onChange={(event) =>
-                        setEditDraft({ ...editDraft, win_probability: Number(event.target.value) })
-                      }
-                    />
-                  </label>
-                  <label>
                     想定訪問回数
                     <input
                       type="number"
@@ -189,7 +175,8 @@ export function DealHistoryList({
               ) : (
                 <>
                   <p className="deal-history__note">
-                    {deal.deal_phase_name}・成約確率{deal.win_probability}%
+                    {deal.deal_phase_name}
+                    {deal.deal_result_status === "ongoing" && `・成約確率${deal.win_probability}%`}
                     {deal.contract_date && `・契約日 ${formatDate(deal.contract_date)}`}
                   </p>
                   <p className="deal-history__note">原価 {formatYen(deal.cost)}</p>

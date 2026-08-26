@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { fetchProducts } from "@/lib/api";
+import { calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
 import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
@@ -223,10 +224,7 @@ function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
       const sorted = [...list].sort(
         (a, b) => b.expected_amount * b.expected_probability - a.expected_amount * a.expected_probability,
       );
-      const totalValue = sorted.reduce(
-        (sum, plan) => sum + (plan.expected_amount * plan.expected_probability) / 100,
-        0,
-      );
+      const totalValue = calcForecastAmount(sorted);
       return { customerName, customerId, items: sorted, totalValue };
     })
     .sort((a, b) => b.totalValue - a.totalValue);

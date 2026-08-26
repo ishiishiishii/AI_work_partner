@@ -632,7 +632,6 @@ export async function createDeal(
     product_id: number;
     deal_phase_id: number;
     estimated_amount: number;
-    win_probability: number;
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
@@ -648,7 +647,6 @@ export async function createDeal(
       product_id: input.product_id,
       deal_phase_id: input.deal_phase_id,
       estimated_amount: input.estimated_amount,
-      win_probability: input.win_probability,
       expected_visit_count: input.expected_visit_count,
       expected_effort_hours: input.expected_effort_hours,
       deal_start_date: input.deal_start_date || null,
@@ -715,6 +713,20 @@ export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
     avg_won_amount: Number(row.avg_won_amount),
     affinity_score: Number(row.affinity_score),
   }));
+}
+
+export type CustomerWinRate = {
+  customer_id: number;
+  closed_count: number;
+  won_count: number;
+  win_rate: number | null;
+};
+
+export async function fetchCustomerWinRate(customerId: number): Promise<CustomerWinRate> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers/${customerId}/win-rate`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`成約率の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
 }
 
 type ApiForecast = {

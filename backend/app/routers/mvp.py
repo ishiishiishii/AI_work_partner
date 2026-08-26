@@ -8,6 +8,7 @@ from app.schemas.models import (
     CustomerCreate,
     CustomerOut,
     CustomerSuggestionOut,
+    CustomerWinRateOut,
     DeadlineCreate,
     DeadlineOut,
     DealCreate,
@@ -148,6 +149,13 @@ def get_stale_customers(
     return [StaleCustomerOut.model_validate(row) for row in rows]
 
 
+@router.get("/customers/{customer_id}/win-rate", response_model=CustomerWinRateOut)
+def get_customer_win_rate(customer_id: int) -> CustomerWinRateOut:
+    with get_connection() as conn:
+        row = affinity.customer_win_rate_summary(conn, customer_id)
+    return CustomerWinRateOut.model_validate(row)
+
+
 @router.get("/deadlines", response_model=list[DeadlineOut])
 def get_deadlines(rep_id: int | None = None) -> list[DeadlineOut]:
     with get_connection() as conn:
@@ -191,7 +199,6 @@ def post_deal(body: DealCreate) -> DealOut:
                 product_id=body.product_id,
                 deal_phase_id=body.deal_phase_id,
                 estimated_amount=body.estimated_amount,
-                win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 deal_start_date=body.deal_start_date or date.today(),
@@ -212,7 +219,6 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 product_id=body.product_id,
                 deal_phase_id=body.deal_phase_id,
                 estimated_amount=body.estimated_amount,
-                win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
             )

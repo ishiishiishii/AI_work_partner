@@ -9,7 +9,6 @@ type NewDealFormProps = {
     product_id: number;
     deal_phase_id: number;
     estimated_amount: number;
-    win_probability: number;
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
@@ -20,7 +19,6 @@ const initialDraft = {
   product_id: "",
   deal_phase_id: "",
   estimated_amount: "",
-  win_probability: "",
   expected_visit_count: "",
   expected_effort_hours: "",
   deal_start_date: "",
@@ -55,7 +53,6 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
     draft.product_id !== "" &&
     draft.deal_phase_id !== "" &&
     draft.estimated_amount !== "" &&
-    draft.win_probability !== "" &&
     draft.expected_visit_count !== "" &&
     draft.expected_effort_hours !== "";
 
@@ -70,7 +67,6 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
         product_id: Number(draft.product_id),
         deal_phase_id: Number(draft.deal_phase_id),
         estimated_amount: Number(draft.estimated_amount),
-        win_probability: Number(draft.win_probability),
         expected_visit_count: Number(draft.expected_visit_count),
         expected_effort_hours: Number(draft.expected_effort_hours),
         deal_start_date: draft.deal_start_date || undefined,
@@ -121,17 +117,6 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
             value={draft.estimated_amount}
             onChange={(event) => setDraft({ ...draft, estimated_amount: event.target.value })}
             placeholder="例: 500000"
-          />
-        </label>
-        <label className="goal-card__field">
-          <span>成約確率(%)</span>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            value={draft.win_probability}
-            onChange={(event) => setDraft({ ...draft, win_probability: event.target.value })}
-            placeholder="例: 30"
           />
         </label>
         <label className="goal-card__field">
