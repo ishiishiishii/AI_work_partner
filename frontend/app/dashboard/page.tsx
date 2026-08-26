@@ -28,7 +28,13 @@ import {
   updatePlan,
   updatePlanProgress,
 } from "@/lib/api";
-import { calcAchievementRate, calcForecastAmount } from "@/lib/forecast";
+import {
+  calcAchievementRate,
+  calcActualAchievedAmount,
+  calcActualAchievementRate,
+  calcForecastAmount,
+  calcForecastProfit,
+} from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useRep } from "@/lib/repContext";
 import type {
@@ -531,7 +537,15 @@ export default function DashboardPage() {
   // フォールバックする
   const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans);
   const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
-  const openPlanCount = forecast ? forecast.open_plan_count : plans.length;
+
+  // 見込み粗利。バックエンドのforecastにはまだ粗利が無いため、
+  // planに紐づくdeal.profitからクライアント側で算出する
+  const forecastProfitAmount = calcForecastProfit(plans, deals);
+
+  // 「現在の実績」は成約(won)確定分のみの金額。バックエンドのforecastには
+  // 見込み(未対応・延期分含む)しか無いため、常にplansから算出する
+  const actualAchievedAmount = calcActualAchievedAmount(plans);
+  const actualAchievementRate = calcActualAchievementRate(plans, target.target_amount);
 
   return (
     <main className="dashboard-main">
@@ -542,8 +556,9 @@ export default function DashboardPage() {
             rep={selectedRep}
             target={target}
             forecastAmount={forecastAmount}
-            achievementRate={achievementRate}
-            openPlanCount={openPlanCount}
+            forecastProfitAmount={forecastProfitAmount}
+            actualAchievedAmount={actualAchievedAmount}
+            actualAchievementRate={actualAchievementRate}
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />

@@ -78,7 +78,7 @@ export function AiChatPanel({ target, achievementRate, plans, affinities }: AiCh
 
   return (
     <section className="panel ai-chat">
-      <h2>AIに質問する</h2>
+      <h2>AIに質問する(今後拡張予定)</h2>
       <div className="ai-chat__messages" aria-live="polite">
         {messages.map((message) => (
           <div
