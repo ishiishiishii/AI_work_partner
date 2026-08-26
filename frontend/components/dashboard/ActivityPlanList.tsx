@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
 import { fetchProducts } from "@/lib/api";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
@@ -59,6 +59,17 @@ const ACTIVITY_TYPE_CLASS: Record<string, string> = {
   Web会議: "activity-plan-list__type--online",
   資料作成: "activity-plan-list__type--prep",
   新規開拓: "activity-plan-list__type--prospect",
+};
+
+// 詳細モーダルのアクセントカラー(上部バーなど)を活動種別ごとに変える。
+// 色自体は既存のバッジ配色(activity-plan-list__type--*)と揃えている
+const ACTIVITY_TYPE_ACCENT: Record<string, string> = {
+  訪問: "var(--accent)",
+  電話: "#a78bfa",
+  メール: "#38bdf8",
+  Web会議: "#f472b6",
+  資料作成: "#2dd4bf",
+  新規開拓: "#a3e635",
 };
 
 const VIEW_LABELS: Record<ViewMode, string> = { day: "日", week: "週", month: "月" };
@@ -873,9 +884,18 @@ export function ActivityPlanList({
 
     {detailPlan && (
       <div className="plan-modal-overlay" onClick={closeDetail}>
-        <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="plan-modal"
+          style={{ "--type-accent": ACTIVITY_TYPE_ACCENT[detailPlan.activity_type_name] ?? "var(--accent)" } as CSSProperties}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className="plan-modal__header">
-            <h3>{isCreating ? "予定を追加" : "予定の詳細"}</h3>
+            <div className="plan-modal__header-text">
+              <span className="plan-modal__eyebrow">
+                {isCreating ? "新規作成" : CATEGORY_LABELS[detailPlan.category]}
+              </span>
+              <h3>{isCreating ? "予定を追加" : detailPlan.customer_name || "予定の詳細"}</h3>
+            </div>
             <button type="button" className="plan-modal__close" onClick={closeDetail} aria-label="閉じる">
               ×
             </button>
@@ -886,6 +906,29 @@ export function ActivityPlanList({
             const effectiveCategory = isEditing ? editDraft.category : detailPlan.category;
             return (
               <div className="plan-modal__detail">
+                {!isCreating && (
+                  <div className="plan-modal__stats">
+                    <span
+                      className={`activity-plan-list__type ${
+                        ACTIVITY_TYPE_CLASS[detailPlan.activity_type_name] ?? "activity-plan-list__type--default"
+                      }`}
+                    >
+                      {detailPlan.activity_type_name}
+                    </span>
+                    {detailPlan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
+                    {effectiveCategory === "visit" && (
+                      <span className="plan-modal__stat-chip">優先度{detailPlan.priority}</span>
+                    )}
+                    {effectiveCategory === "visit" && (
+                      <span className="plan-modal__stat-chip">
+                        成約確率{detailPlan.expected_probability.toFixed(0)}%
+                      </span>
+                    )}
+                    {detailPlan.expected_amount > 0 && (
+                      <span className="plan-modal__stat-amount">{formatYen(detailPlan.expected_amount)}</span>
+                    )}
+                  </div>
+                )}
                 <dl className="plan-modal__fields">
                   <dt>日付</dt>
                   <dd>
@@ -1003,17 +1046,8 @@ export function ActivityPlanList({
                     </>
                   )}
 
-                  {detailPlan.expected_amount > 0 && (
-                    <>
-                      <dt>見込み金額</dt>
-                      <dd>{formatYen(detailPlan.expected_amount)}</dd>
-                    </>
-                  )}
                   {effectiveCategory === "visit" && (
                     <>
-                      <dt>優先度</dt>
-                      <dd>優先度{detailPlan.priority}</dd>
-
                       <dt>成約確率</dt>
                       <dd>
                         {isEditing ? (
@@ -1048,7 +1082,7 @@ export function ActivityPlanList({
                             rows={3}
                           />
                         ) : (
-                          (detailPlan.memo ?? "(メモなし)")
+                          <span className="plan-modal__memo-display">{detailPlan.memo ?? "(メモなし)"}</span>
                         )}
                       </dd>
 
@@ -1105,10 +1139,14 @@ export function ActivityPlanList({
                     <p>{detailPlan.reasoning_text}</p>
                   </div>
                 )}
-                <div className="activity-plan-list__edit-actions">
+                <div className="activity-plan-list__edit-actions plan-modal__actions">
                   {isEditing ? (
                     <>
-                      <button type="button" className="activity-plan-list__result-button" onClick={saveEdit}>
+                      <button
+                        type="button"
+                        className="activity-plan-list__result-button plan-modal__primary-button"
+                        onClick={saveEdit}
+                      >
                         保存
                       </button>
                       <button type="button" className="activity-plan-list__undo-button" onClick={cancelEdit}>
@@ -1120,7 +1158,7 @@ export function ActivityPlanList({
                       {detailPlan.is_ai_generated && (
                         <button
                           type="button"
-                          className="activity-plan-list__result-button"
+                          className="activity-plan-list__result-button plan-modal__primary-button"
                           onClick={() => onConfirmPlan(detailPlan.plan_id)}
                         >
                           確定する
