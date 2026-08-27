@@ -6,7 +6,7 @@ import { fetchProducts } from "@/lib/api";
 import { calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
-import type { ActivityPlan, ActivityPlanCategory, Deal, DealResultStatus } from "@/types";
+import type { ActivityPlan, ActivityPlanCategory, Customer, Deal, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
   plan_date: string;
@@ -15,6 +15,9 @@ export type PlanEditFields = {
   category: ActivityPlanCategory;
   activity_type_name: string;
   customer_name: string;
+  // customer_nameが既存顧客と完全一致した時だけ入る(手軽に選べるオートコンプリート用)。
+  // 新規作成時のみ使われ、既存予定の編集ではバックエンドに送られない(lib/api.ts updatePlan参照)
+  customer_id?: number | null;
   product_name: string | null;
   expected_probability: number;
   memo: string | null;
@@ -30,7 +33,9 @@ type ActivityPlanListProps = {
   plans: ActivityPlan[];
   dailyTasks: ActivityPlan[];
   deals: Deal[];
+  customers: Customer[];
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
+  onPostpone: (planId: number, newDate: string, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
   onEditPlan: (planId: number, updates: PlanEditFields) => void;
   onAddPlan: (plan: ActivityPlan) => void;
@@ -307,7 +312,9 @@ export function ActivityPlanList({
   plans,
   dailyTasks,
   deals,
+  customers,
   onResultChange,
+  onPostpone,
   onRequestAlternative,
   onEditPlan,
   onAddPlan,
@@ -323,6 +330,9 @@ export function ActivityPlanList({
   const [newPlanDraft, setNewPlanDraft] = useState<ActivityPlan | null>(null);
   const [editDraft, setEditDraft] = useState<(PlanEditFields & { planId: number }) | null>(null);
   const [gapPicker, setGapPicker] = useState<{ start: string; maxEnd: string; end: string } | null>(null);
+  // 「延期」ボタンを押した予定について、その場で延期先の日付を選ぶための状態
+  const [postponingPlanId, setPostponingPlanId] = useState<number | null>(null);
+  const [postponeDate, setPostponeDate] = useState("");
   // 「月」表示で商品名をダブルクリックした際に商品詳細ページへ飛べるよう、
   // 商品名→product_id の対応をあらかじめ取得しておく
   const [productIdByName, setProductIdByName] = useState<Map<string, number>>(new Map());
@@ -469,9 +479,47 @@ export function ActivityPlanList({
     return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
   }
 
+  function startPostpone(plan: ActivityPlan) {
+    setPostponingPlanId(plan.plan_id);
+    // 「延期」なので元の予定日より後をデフォルトにする(1週間後)
+    setPostponeDate(formatISODate(addDays(parseISODate(plan.plan_date), 7)));
+  }
+
+  function confirmPostpone(plan: ActivityPlan) {
+    if (!postponeDate) return;
+    onPostpone(plan.plan_id, postponeDate, getSelectedContactType(plan));
+    setPostponingPlanId(null);
+  }
+
   // ステータスの記録・取り消しUI。一覧行と詳細モーダルの両方で同じものを使う
   function renderResultControls(plan: ActivityPlan) {
     if (plan.result_status === "pending") {
+      if (postponingPlanId === plan.plan_id) {
+        return (
+          <div className="activity-plan-list__postpone-form">
+            <label>
+              延期先の日付
+              <input
+                type="date"
+                min={formatISODate(addDays(parseISODate(plan.plan_date), 1))}
+                value={postponeDate}
+                onChange={(event) => setPostponeDate(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="activity-plan-list__result-button"
+              disabled={!postponeDate}
+              onClick={() => confirmPostpone(plan)}
+            >
+              この日に延期する
+            </button>
+            <button type="button" className="activity-plan-list__undo-button" onClick={() => setPostponingPlanId(null)}>
+              キャンセル
+            </button>
+          </div>
+        );
+      }
       return (
         <>
           <label className="activity-plan-list__contact-type">
@@ -497,7 +545,11 @@ export function ActivityPlanList({
               key={option.value}
               type="button"
               className="activity-plan-list__result-button"
-              onClick={() => onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))}
+              onClick={() =>
+                option.value === "postponed"
+                  ? startPostpone(plan)
+                  : onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))
+              }
             >
               {option.label}
             </button>
@@ -619,6 +671,7 @@ export function ActivityPlanList({
       category: plan.category,
       activity_type_name: plan.activity_type_name,
       customer_name: plan.customer_name,
+      customer_id: plan.customer_id,
       product_name: plan.product_name,
       expected_probability: plan.expected_probability,
       memo: plan.memo,
@@ -671,6 +724,7 @@ export function ActivityPlanList({
       category: draft.category,
       activity_type_name: draft.activity_type_name,
       customer_name: draft.customer_name,
+      customer_id: draft.customer_id,
       product_name: draft.product_name,
       expected_probability: draft.expected_probability,
       memo: draft.memo,
@@ -1015,8 +1069,22 @@ export function ActivityPlanList({
                         <input
                           type="text"
                           value={editDraft.customer_name}
-                          onChange={(event) => setEditDraft({ ...editDraft, customer_name: event.target.value })}
+                          // 既存顧客と完全一致すればcustomer_idも紐づける(新規作成時のみ有効。
+                          // lib/api.ts updatePlanは既存予定の編集ではこのフィールドを送らない)
+                          list={effectiveCategory === "visit" ? "activity-plan-list__customer-options" : undefined}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            const matched = customers.find((customer) => customer.customer_name === value);
+                            setEditDraft({ ...editDraft, customer_name: value, customer_id: matched?.customer_id ?? null });
+                          }}
                         />
+                        {effectiveCategory === "visit" && (
+                          <datalist id="activity-plan-list__customer-options">
+                            {customers.map((customer) => (
+                              <option key={customer.customer_id} value={customer.customer_name} />
+                            ))}
+                          </datalist>
+                        )}
                       </dd>
                     </>
                   )}

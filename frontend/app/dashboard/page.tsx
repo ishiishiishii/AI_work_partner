@@ -23,7 +23,6 @@ import {
   generateActivityPlans,
   postActivityResult,
   recalculateRepAffinity,
-  replanActivityPlans,
   saveSalesTarget,
   updatePlan,
   updatePlanProgress,
@@ -193,13 +192,19 @@ export default function DashboardPage() {
   }
 
   async function handleRegenerate() {
-    if (REP_ID === null) return;
+    if (REP_ID === null || !target) return;
     const repId = REP_ID;
     setIsRegenerating(true);
     try {
+      const before = calcAchievementRate(plans, target.target_amount, deals);
       const fresh = await generateActivityPlans(repId, TARGET_MONTH);
+      const after = calcAchievementRate(fresh, target.target_amount, deals);
       setPlans(fresh);
-      setReplan(null);
+      setReplan({
+        before_achievement_rate: before,
+        after_achievement_rate: after,
+        reason: "手動でAIに残り期間の計画を組み直してもらいました",
+      });
       await refreshForecast(repId);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
@@ -270,22 +275,53 @@ export default function DashboardPage() {
       setPlans(plans); // ロールバック
       return;
     }
+  }
 
-    if (status === "lost" || status === "postponed") {
-      const before = calcAchievementRate(updatedPlans, target.target_amount, deals);
-      try {
-        const freshPlans = await replanActivityPlans(REP_ID, TARGET_MONTH);
-        const after = calcAchievementRate(freshPlans, target.target_amount, deals);
-        setPlans(freshPlans);
-        setReplan({
-          before_achievement_rate: before,
-          after_achievement_rate: after,
-          reason: "商談結果を反映し、AIが残り期間の計画を組み直しました",
-        });
-        await refreshForecast(REP_ID);
-      } catch (error) {
-        setLoadError(error instanceof Error ? error.message : "再計画に失敗しました");
-      }
+  // 「延期」は結果を記録するだけでなく、その場で選んだ日付に予定を移す。
+  // 以前は失注/延期のたびに月の残り全体をAIが自動で組み直しており、「急に予定が変わる」
+  // 原因になっていた。今は結果の記録と再計画を分離し、延期先はユーザーが直接指定する
+  // (再計画したい場合は「AIに計画を作り直してもらう」ボタンを任意のタイミングで使う)。
+  async function handlePostpone(planId: number, newDate: string, activityTypeName: string) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    if (!changedPlan || REP_ID === null) return;
+
+    setPlans((prev) =>
+      prev.map((plan) => (plan.plan_id === planId ? { ...plan, result_status: "postponed", activity_type_name: activityTypeName } : plan)),
+    );
+
+    try {
+      const result = await postActivityResult(REP_ID, changedPlan, "postponed", activityTypeName);
+      setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
+
+      const created = await createPlan(REP_ID, {
+        plan_date: newDate,
+        start_time: changedPlan.start_time,
+        end_time: changedPlan.end_time,
+        category: changedPlan.category,
+        activity_type: changedPlan.activity_type_name,
+        customer_id: changedPlan.customer_id,
+        deal_id: changedPlan.deal_id,
+        priority: changedPlan.priority,
+        expected_amount: changedPlan.expected_amount,
+        expected_probability: changedPlan.expected_probability,
+        rationale: `${changedPlan.plan_date}の予定を延期`,
+      });
+
+      const rescheduled: ActivityPlan = {
+        ...changedPlan,
+        plan_id: created.plan_id,
+        plan_date: newDate,
+        is_ai_generated: false,
+        reasoning_text: `${changedPlan.plan_date}の予定を延期`,
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+      };
+      setPlans((prev) => prev.concat(rescheduled));
+      await refreshForecast(REP_ID);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "延期の処理に失敗しました");
+      setPlans(plans); // ロールバック
     }
   }
 
@@ -599,7 +635,9 @@ export default function DashboardPage() {
             plans={plans}
             dailyTasks={dailyTasks}
             deals={deals}
+            customers={customers}
             onResultChange={handleResultChange}
+            onPostpone={handlePostpone}
             onRequestAlternative={handleRequestAlternative}
             onEditPlan={handleEditPlan}
             onAddPlan={handleAddPlan}
