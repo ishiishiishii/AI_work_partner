@@ -1,0 +1,635 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { PlanEditFields } from "@/components/dashboard/ActivityPlanList";
+import {
+  cancelPlan,
+  createManualPlan,
+  createPlan,
+  deleteActivityResult,
+  fetchActivityPlans,
+  fetchCustomers,
+  fetchDeals,
+  fetchForecast,
+  fetchRepAffinity,
+  fetchRepTerritory,
+  fetchSalesTarget,
+  generateActivityPlans,
+  postActivityResult,
+  recalculateRepAffinity,
+  saveSalesTarget,
+  updatePlan,
+  updatePlanProgress,
+} from "@/lib/api";
+import {
+  calcAchievementRate,
+  calcActualAchievedAmount,
+  calcActualAchievementRate,
+  calcForecastAmount,
+  calcForecastProfit,
+} from "@/lib/forecast";
+import { mockTaskSuggestions } from "@/lib/mockData";
+import type {
+  ActivityPlan,
+  Customer,
+  Deal,
+  DealResultStatus,
+  Forecast,
+  RepAffinity,
+  ReplanInfo,
+  SalesTarget,
+  Territory,
+} from "@/types";
+
+// 以前は "2026-08" にハードコードされており、実際の日付とズレていた
+// (AIチャットにも「今日」を伝えていなかった。backend/app/services/qwen_chat.py 参照)。
+export function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export const TARGET_MONTH = getCurrentMonth();
+
+// 「対応が難しい」ボタンの差し替え提案。ユーザーが確定するまでの一時的な状態
+type AltPreview =
+  | {
+      kind: "task";
+      planId: number;
+      foundInPlans: boolean;
+      changedPlan: ActivityPlan;
+      label: string;
+      candidateTask: (typeof mockTaskSuggestions)[number];
+    }
+  | {
+      kind: "deal";
+      planId: number;
+      changedPlan: ActivityPlan;
+      label: string;
+      candidateDeal: Deal;
+    };
+
+// 目標入力→計画生成→根拠→結果入力→再計画のコア体験を、ダッシュボードと
+// 活動計画ページの両方で同じ挙動にするための共有フック(MVPコア体験は
+// AGENTS.mdの方針によりこの一箇所のロジックのみで実装する)。
+export function useDashboardData(repId: number | null) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [target, setTarget] = useState<SalesTarget | null>(null);
+  const [plans, setPlans] = useState<ActivityPlan[]>([]);
+  const [dailyTasks, setDailyTasks] = useState<ActivityPlan[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [territory, setTerritory] = useState<Territory | null>(null);
+  const [affinities, setAffinities] = useState<RepAffinity[]>([]);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [replan, setReplan] = useState<ReplanInfo | null>(null);
+  const [altNotice, setAltNotice] = useState<string | null>(null);
+  // 「対応が難しい」の差し替え候補。確定するまでバックエンドには送らない
+  const [altPreview, setAltPreview] = useState<AltPreview | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
+  const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
+  const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
+  // plan_id -> バックエンドに登録済みの result_id(取り消し時にどれを消すか特定するため)
+  const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
+
+  // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
+  // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
+  async function refreshForecast(rid: number) {
+    try {
+      setForecast(await fetchForecast(rid, TARGET_MONTH));
+    } catch {
+      setForecast(null);
+    }
+  }
+
+  async function handleRouteApproved(): Promise<void> {
+    if (repId === null) return;
+    const fresh = await fetchActivityPlans(repId);
+    setPlans(fresh.filter((plan) => plan.category === "visit"));
+    setDailyTasks(fresh.filter((plan) => plan.category === "task"));
+    await refreshForecast(repId);
+  }
+
+  useEffect(() => {
+    if (repId === null) return;
+    const rid = repId;
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        const [fetchedTarget, fetchedPlans] = await Promise.all([
+          fetchSalesTarget(rid, TARGET_MONTH),
+          fetchActivityPlans(rid),
+        ]);
+        if (cancelled) return;
+
+        // 顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない
+        const initialVisitPlans = fetchedPlans.filter((plan) => plan.category === "visit");
+        setNeedsInitialPlan(initialVisitPlans.length === 0);
+
+        // 自己分析スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
+        await recalculateRepAffinity(rid);
+        const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
+          fetchRepAffinity(rid),
+          fetchDeals({ repId: rid }),
+          fetchCustomers(rid),
+          fetchRepTerritory(rid),
+        ]);
+        if (cancelled) return;
+
+        setTarget(
+          fetchedTarget ?? {
+            rep_id: rid,
+            target_month: TARGET_MONTH,
+            target_amount: 0,
+            target_deal_count: 0,
+          },
+        );
+        setPlans(initialVisitPlans);
+        setDailyTasks(fetchedPlans.filter((plan) => plan.category === "task"));
+        setAffinities(fetchedAffinities);
+        setDeals(fetchedDeals);
+        setCustomers(fetchedCustomers);
+        setTerritory(fetchedTerritory);
+        await refreshForecast(rid);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "読み込みに失敗しました");
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [repId]);
+
+  async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
+    if (repId === null) return;
+    const rid = repId;
+    const updated = await saveSalesTarget(rid, TARGET_MONTH, input);
+    setTarget(updated);
+    await refreshForecast(rid);
+
+    // 目標保存はここで完了させ(GoalCard側の「保存中...」を即座に終える)、
+    // まだ計画が無い月の初回AI生成は裏側で別途走らせる(数分かかり得るため)
+    if (needsInitialPlan) {
+      void generateInitialPlan(rid);
+    }
+  }
+
+  async function generateInitialPlan(rid: number) {
+    setIsGeneratingInitialPlan(true);
+    try {
+      const generated = await generateActivityPlans(rid, TARGET_MONTH);
+      setPlans(generated);
+      setNeedsInitialPlan(false);
+      await refreshForecast(rid);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
+    } finally {
+      setIsGeneratingInitialPlan(false);
+    }
+  }
+
+  async function handleRegenerate() {
+    if (repId === null || !target) return;
+    const rid = repId;
+    setIsRegenerating(true);
+    try {
+      const before = calcAchievementRate(plans, target.target_amount, deals);
+      const fresh = await generateActivityPlans(rid, TARGET_MONTH);
+      const after = calcAchievementRate(fresh, target.target_amount, deals);
+      setPlans(fresh);
+      setReplan({
+        before_achievement_rate: before,
+        after_achievement_rate: after,
+        reason: "手動でAIに残り期間の計画を組み直してもらいました",
+      });
+      await refreshForecast(rid);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
+    } finally {
+      setIsRegenerating(false);
+    }
+  }
+
+  async function handleResultChange(planId: number, status: DealResultStatus, activityTypeName: string) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    if (!changedPlan || !target || repId === null) return;
+
+    // 同じ結果をもう一度押したら取り消し。バックエンドに送信済みの記録があれば、
+    // そちらも削除して商談/計画のステータスを登録前に戻す。
+    if (changedPlan.result_status === status) {
+      const resultId = resultIdByPlan[planId];
+      setPlans((prev) =>
+        prev.map((plan) => (plan.plan_id === planId ? { ...plan, result_status: "pending" } : plan)),
+      );
+
+      // 「対応が難しい」の差し替え等、バックエンドに送信されていない結果は表示を戻すだけ
+      if (resultId === undefined) return;
+
+      setResultIdByPlan((prev) => {
+        const next = { ...prev };
+        delete next[planId];
+        return next;
+      });
+
+      try {
+        await deleteActivityResult(repId, resultId);
+        if (status === "won" || status === "lost") {
+          // 成約/失注の取り消しは自己分析スコアにも影響するため、最新値を取り直す
+          await recalculateRepAffinity(repId);
+          setAffinities(await fetchRepAffinity(repId));
+        }
+        await refreshForecast(repId);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "結果の取り消しに失敗しました");
+      }
+      return;
+    }
+
+    const updatedPlans = plans.map((plan) =>
+      plan.plan_id === planId
+        ? { ...plan, result_status: status, activity_type_name: activityTypeName }
+        : plan,
+    );
+    setPlans(updatedPlans);
+
+    // 「対応が難しい」で差し替えたローカル専用の計画には実在する deal_id が無いため、
+    // バックエンドへは送信せず表示のみ更新する
+    if (!changedPlan.deal_id) {
+      return;
+    }
+
+    try {
+      const result = await postActivityResult(
+        repId,
+        changedPlan,
+        status as Exclude<DealResultStatus, "pending">,
+        activityTypeName,
+      );
+      setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
+      await refreshForecast(repId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
+      setPlans(plans); // ロールバック
+      return;
+    }
+  }
+
+  // 「対応が難しい」と同じパターン(新しい予定を作って元をキャンセル)。結果として
+  // 記録すると「取り消す」操作が生え、取り消すと延期先と重複してしまうため避けている。
+  async function handlePostpone(planId: number, newDate: string, activityTypeName: string) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    if (!changedPlan || repId === null) return;
+
+    try {
+      const created = await createPlan(repId, {
+        plan_date: newDate,
+        start_time: changedPlan.start_time,
+        end_time: changedPlan.end_time,
+        category: changedPlan.category,
+        activity_type: activityTypeName,
+        customer_id: changedPlan.customer_id,
+        deal_id: changedPlan.deal_id,
+        priority: changedPlan.priority,
+        expected_amount: changedPlan.expected_amount,
+        expected_probability: changedPlan.expected_probability,
+        rationale: `${changedPlan.plan_date}の予定を延期`,
+      });
+      await cancelPlan(repId, planId);
+
+      const rescheduled: ActivityPlan = {
+        ...changedPlan,
+        plan_id: created.plan_id,
+        plan_date: newDate,
+        activity_type_name: activityTypeName,
+        is_ai_generated: false,
+        reasoning_text: `${changedPlan.plan_date}の予定を延期`,
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+      };
+      setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(rescheduled));
+      await refreshForecast(repId);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "延期の処理に失敗しました");
+    }
+  }
+
+  async function handleEditPlan(planId: number, updates: PlanEditFields) {
+    if (repId === null) return;
+    const targetPlan = [...plans, ...dailyTasks].find((plan) => plan.plan_id === planId);
+    if (!targetPlan) return;
+
+    const previousPlans = plans;
+    const previousTasks = dailyTasks;
+    const updated: ActivityPlan = { ...targetPlan, ...updates };
+
+    // 種別(訪問/事務作業)を切り替えた場合は、表示するリスト自体を跨いで移動させる
+    const nextPlans = plans.filter((plan) => plan.plan_id !== planId);
+    const nextTasks = dailyTasks.filter((task) => task.plan_id !== planId);
+    if (updated.category === "visit") {
+      setPlans([...nextPlans, updated]);
+      setDailyTasks(nextTasks);
+    } else {
+      setDailyTasks([...nextTasks, updated]);
+      setPlans(nextPlans);
+    }
+
+    try {
+      await updatePlan(repId, planId, updates);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "予定の更新に失敗しました");
+      setPlans(previousPlans);
+      setDailyTasks(previousTasks);
+    }
+  }
+
+  async function handleAddPlan(newPlan: ActivityPlan) {
+    if (repId === null) return;
+    try {
+      const created = await createManualPlan(repId, {
+        plan_date: newPlan.plan_date,
+        start_time: newPlan.start_time,
+        end_time: newPlan.end_time,
+        category: newPlan.category,
+        activity_type_name: newPlan.activity_type_name,
+        customer_name: newPlan.customer_name,
+        customer_id: newPlan.customer_id,
+        deal_id: newPlan.deal_id,
+        priority: newPlan.priority,
+        product_name: newPlan.product_name,
+        expected_amount: newPlan.expected_amount,
+        expected_probability: newPlan.expected_probability,
+      });
+      if (created.category === "visit") {
+        setPlans((prev) => [...prev, created]);
+      } else {
+        setDailyTasks((prev) => [...prev, created]);
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "予定の追加に失敗しました");
+    }
+  }
+
+  // 「確定する」はAI提案フラグだけを外す。提案理由(reasoning_text)はそのまま残す
+  function handleConfirmPlan(planId: number) {
+    setPlans((prev) =>
+      prev.map((plan) => (plan.plan_id === planId ? { ...plan, is_ai_generated: false } : plan)),
+    );
+    setDailyTasks((prev) =>
+      prev.map((task) => (task.plan_id === planId ? { ...task, is_ai_generated: false } : task)),
+    );
+  }
+
+  // スライダー操作中は見た目だけ即時更新する(ドラッグ中に onChange が連発するため、
+  // バックエンドへの保存はドラッグ完了時の handleCommitProgress にまとめる)。
+  function handleUpdateProgress(planId: number, percent: number) {
+    setPlans((prev) =>
+      prev.map((plan) => (plan.plan_id === planId ? { ...plan, progress_percent: percent } : plan)),
+    );
+    setDailyTasks((prev) =>
+      prev.map((task) => (task.plan_id === planId ? { ...task, progress_percent: percent } : task)),
+    );
+  }
+
+  async function handleCommitProgress(planId: number, percent: number) {
+    if (repId === null) return;
+    try {
+      await updatePlanProgress(repId, planId, percent);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "進捗の保存に失敗しました");
+    }
+  }
+
+  // 候補の計算のみ行う。確定はconfirmAlternativeで、まだ何も送信しない
+  function handleRequestAlternative(planId: number) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId) ?? dailyTasks.find((task) => task.plan_id === planId);
+    if (!changedPlan) return;
+    const foundInPlans = plans.some((plan) => plan.plan_id === planId);
+    setAltNotice(null);
+
+    if (changedPlan.category === "task") {
+      // 商談のような実データが無い事務作業は、固定の候補プールから未使用のものを提示する
+      const usedTitles = new Set([...plans, ...dailyTasks].map((item) => item.customer_name));
+      const candidateTask = mockTaskSuggestions.find((task) => !usedTitles.has(task.title));
+      if (!candidateTask) {
+        setAltNotice("現在、差し替えられる事務作業の候補がありません。");
+        return;
+      }
+      setAltPreview({
+        kind: "task",
+        planId,
+        foundInPlans,
+        changedPlan,
+        label: candidateTask.title,
+        candidateTask,
+      });
+      return;
+    }
+
+    // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
+    const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
+    const candidateDeal = [...deals]
+      .filter((deal) => deal.deal_result_status === "ongoing" && !usedDealIds.has(deal.deal_id))
+      .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
+    if (!candidateDeal) {
+      setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
+      return;
+    }
+    setAltPreview({
+      kind: "deal",
+      planId,
+      changedPlan,
+      label: `${candidateDeal.customer_name}(${candidateDeal.product_name})`,
+      candidateDeal,
+    });
+  }
+
+  function cancelAlternativePreview() {
+    setAltPreview(null);
+  }
+
+  async function confirmAlternative() {
+    if (!altPreview || !target || repId === null) return;
+    const preview = altPreview;
+    setAltPreview(null);
+    const { planId, changedPlan } = preview;
+
+    if (preview.kind === "task") {
+      const { candidateTask, foundInPlans } = preview;
+      try {
+        // 差し替え候補を実在の予定として登録し元の予定は取り消す(どちらもバックエンドに反映。
+        // 以前はローカル専用の plan_id しか持たず、リロードすると消えていた)。
+        const created = await createPlan(repId, {
+          plan_date: changedPlan.plan_date,
+          category: "task",
+          activity_type: candidateTask.activityTypeName,
+          customer_id: null,
+          deal_id: null,
+          priority: changedPlan.priority,
+          title: candidateTask.title,
+          rationale: candidateTask.reasoningText,
+        });
+        await cancelPlan(repId, planId);
+
+        const candidate: ActivityPlan = {
+          plan_id: created.plan_id,
+          rep_id: changedPlan.rep_id,
+          plan_date: changedPlan.plan_date,
+          // 時間が(手動編集などで)設定済みならそのまま引き継ぐ
+          start_time: changedPlan.start_time,
+          end_time: changedPlan.end_time,
+          category: "task",
+          customer_id: null,
+          customer_name: candidateTask.title,
+          deal_id: null,
+          product_name: null,
+          activity_type_name: candidateTask.activityTypeName,
+          priority: changedPlan.priority,
+          expected_amount: 0,
+          expected_probability: 0,
+          is_ai_generated: true,
+          reasoning_text: candidateTask.reasoningText,
+          result_status: "pending",
+          memo: null,
+          progress_percent: 0,
+        };
+
+        if (foundInPlans) {
+          setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(candidate));
+        } else {
+          setDailyTasks((prev) => prev.filter((task) => task.plan_id !== planId).concat(candidate));
+        }
+        setReplan({
+          before_achievement_rate: calcAchievementRate(plans, target.target_amount, deals),
+          after_achievement_rate: calcAchievementRate(plans, target.target_amount, deals),
+          reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが「${candidate.customer_name}」に差し替えました`,
+        });
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "予定の差し替えに失敗しました");
+      }
+      return;
+    }
+
+    const { candidateDeal } = preview;
+    const reasoningText = `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`;
+
+    try {
+      // 差し替え候補を本物の予定として登録し、元の予定は取り消す(どちらもバックエンドに反映)。
+      // 以前はローカル専用の仮 plan_id(900000+deal_id)を使っていたため、結果を記録しようと
+      // すると実在しない plan_id で外部キー違反になり得た。
+      const created = await createPlan(repId, {
+        plan_date: changedPlan.plan_date,
+        category: "visit",
+        activity_type: "visit",
+        customer_id: candidateDeal.customer_id,
+        deal_id: candidateDeal.deal_id,
+        priority: changedPlan.priority,
+        expected_amount: candidateDeal.estimated_amount,
+        expected_probability: candidateDeal.win_probability,
+        rationale: reasoningText,
+      });
+      await cancelPlan(repId, planId);
+
+      const candidate: ActivityPlan = {
+        plan_id: created.plan_id,
+        rep_id: candidateDeal.rep_id,
+        plan_date: changedPlan.plan_date,
+        // 時間が(手動編集などで)設定済みならそのまま引き継ぐ
+        start_time: changedPlan.start_time,
+        end_time: changedPlan.end_time,
+        category: "visit",
+        customer_id: candidateDeal.customer_id,
+        customer_name: candidateDeal.customer_name,
+        deal_id: candidateDeal.deal_id,
+        product_name: candidateDeal.product_name,
+        activity_type_name: "訪問",
+        priority: changedPlan.priority,
+        expected_amount: candidateDeal.estimated_amount,
+        expected_probability: candidateDeal.win_probability,
+        is_ai_generated: true,
+        reasoning_text: reasoningText,
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+      };
+
+      const before = calcAchievementRate(plans, target.target_amount, deals);
+      const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
+      const after = calcAchievementRate(nextPlans, target.target_amount, deals);
+
+      setPlans(nextPlans);
+      setReplan({
+        before_achievement_rate: before,
+        after_achievement_rate: after,
+        reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが${candidate.customer_name}への提案に差し替えました`,
+      });
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "計画の差し替えに失敗しました");
+    }
+  }
+
+  // バックエンドの forecast は成約/失注の実績まで反映した正確な値。
+  // 目標(sales_target)が未登録の月は 404 になるため、その場合だけクライアント計算に
+  // フォールバックする
+  const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans, deals);
+  const achievementRate = forecast
+    ? forecast.achievement_rate
+    : target
+      ? calcAchievementRate(plans, target.target_amount, deals)
+      : 0;
+
+  // 見込み粗利。バックエンドのforecastにはまだ粗利が無いため、
+  // planに紐づくdeal.profitからクライアント側で算出する
+  const forecastProfitAmount = calcForecastProfit(plans, deals);
+
+  // 「現在の実績」は成約(won)確定分のみの金額。バックエンドのforecastには
+  // 見込み(未対応・延期分含む)しか無いため、常にplansから算出する
+  const actualAchievedAmount = calcActualAchievedAmount(plans, deals);
+  const actualAchievementRate = target ? calcActualAchievementRate(plans, target.target_amount, deals) : 0;
+
+  return {
+    isLoading,
+    loadError,
+    target,
+    plans,
+    dailyTasks,
+    deals,
+    customers,
+    territory,
+    affinities,
+    replan,
+    altNotice,
+    altPreview,
+    isRegenerating,
+    needsInitialPlan,
+    isGeneratingInitialPlan,
+    forecastAmount,
+    achievementRate,
+    forecastProfitAmount,
+    actualAchievedAmount,
+    actualAchievementRate,
+    handleTargetSave,
+    handleRouteApproved,
+    handleRegenerate,
+    handleResultChange,
+    handlePostpone,
+    handleEditPlan,
+    handleAddPlan,
+    handleConfirmPlan,
+    handleUpdateProgress,
+    handleCommitProgress,
+    handleRequestAlternative,
+    confirmAlternative,
+    cancelAlternativePreview,
+  };
+}

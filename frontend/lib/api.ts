@@ -394,6 +394,9 @@ export async function createManualPlan(
     customer_id: number | null;
     deal_id: number | null;
     priority: number;
+    product_name: string | null;
+    expected_amount: number;
+    expected_probability: number;
   },
 ): Promise<ActivityPlan> {
   const base = getApiBaseUrl();
@@ -412,6 +415,9 @@ export async function createManualPlan(
         customer_id: input.customer_id,
         deal_id: input.deal_id,
         priority: input.priority,
+        product_name_override: input.product_name,
+        expected_amount: input.expected_amount,
+        expected_probability: input.expected_probability,
       }),
     }),
     fetchCustomerNames(repId),
@@ -434,6 +440,8 @@ export async function updatePlan(
     activity_type_name: string;
     customer_name: string;
     product_name: string | null;
+    expected_amount: number;
+    expected_probability: number;
     memo: string | null;
   },
 ): Promise<void> {
@@ -448,6 +456,8 @@ export async function updatePlan(
       activity_type: updates.activity_type_name,
       title: updates.customer_name,
       product_name_override: updates.product_name,
+      expected_amount: updates.expected_amount,
+      expected_probability: updates.expected_probability,
       memo: updates.memo,
     }),
   });

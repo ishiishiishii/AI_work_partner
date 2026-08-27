@@ -22,9 +22,10 @@ function todayISODate(): string {
 const EDITABLE_ACTIVITY_TYPES = ["訪問", "電話", "メール", "Web会議", "資料作成", "新規開拓"];
 
 // ダッシュボードの予定詳細パネル(ActivityPlanList)の「作成」時と同じ項目構成。
-// 商品/成約確率/メモは元々のパネルでも新規作成時は入力できるが、
-// createManualPlanは受け取らない(バックエンドのPlanCreateに該当項目が無い)ため、
-// 元のパネル同様ここでも入力はできるが保存には反映されない。
+// メモはcreateManualPlanが受け取らない(バックエンドのPlanCreateに該当項目が無い)ため、
+// 元のパネル同様ここでも入力はできるが保存には反映されない。金額はこのクイック追加
+// フォームには入力欄が無いため0円で作成される(ActivityPlanListの「次回の予定を作成」
+// のように前回の金額を引き継ぐ導線ではないため)。
 function QuickPlanForm({
   repId,
   defaultPlanDate,
@@ -65,6 +66,9 @@ function QuickPlanForm({
         customer_id: company.customerId,
         deal_id: null,
         priority: 3,
+        product_name: productName.trim() || null,
+        expected_amount: 0,
+        expected_probability: expectedProbability,
       });
       onDone(created);
     } catch (err) {

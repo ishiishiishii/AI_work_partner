@@ -29,10 +29,14 @@ function wonAmount(plan: ActivityPlan, dealById: Map<number, Deal>): number {
 }
 
 // 成約(won)は実契約金額(未記録ならexpected_amount)、進行中(pending/postponed)は
-// 成約確度(expected_probability)で重み付けした期待値、失注(lost)は0円として合算する
+// 成約確度(expected_probability)で重み付けした期待値、失注(lost)は0円として合算する。
+// deal_idの無い予定(次回予定作成時に参考としてコピーされただけの商品・金額など)は
+// 実体の商談が存在せず成約しようがないため、expected_amountを入力していても見込みには
+// 一切加算しない
 export function calcForecastAmount(plans: ActivityPlan[], deals: Deal[]): number {
   const dealById = new Map(deals.map((deal) => [deal.deal_id, deal]));
   return uniqueByDeal(plans).reduce((sum, plan) => {
+    if (plan.deal_id === null) return sum;
     if (plan.result_status === "lost") return sum;
     if (plan.result_status === "won") return sum + wonAmount(plan, dealById);
     return sum + plan.expected_amount * (plan.expected_probability / 100);
