@@ -32,6 +32,16 @@ const LINKS = [
     ),
   },
   {
+    href: "/activity",
+    label: "活動計画",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <rect x="4" y="3.5" width="16" height="17" rx="1.8" />
+        <path d="M8 8.5h8M8 12.5h8M8 16.5h5" />
+      </svg>
+    ),
+  },
+  {
     href: "/customers",
     label: "顧客一覧",
     icon: (
@@ -153,12 +163,16 @@ export function AppNav() {
             </Link>
           ))}
         </nav>
+        <button
+          type="button"
+          className="app-sidebar__signout"
+          onClick={() => void signOut()}
+        >
+          ログアウト
+        </button>
         <div className="app-sidebar__footer">
           <span className="app-sidebar__status-dot" aria-hidden="true" />
           SYSTEM ONLINE
-          <button type="button" className="app-sidebar__signout" onClick={() => void signOut()}>
-            ログアウト
-          </button>
         </div>
       </aside>
 

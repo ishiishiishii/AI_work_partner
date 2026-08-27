@@ -662,19 +662,30 @@ def create_plan(
     expected_amount: Decimal,
     expected_probability: int,
     rationale: str | None,
+    product_name_override: str | None = None,
 ) -> dict:
     row = conn.execute(
         """
         insert into activity_plan (
           rep_id, plan_date, category, activity_type, start_time, end_time,
           title, customer_id, deal_id, priority, expected_amount, expected_probability,
-          plan_status, is_ai_generated, rationale
+          plan_status, is_ai_generated, rationale, product_name_override
         )
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', false, %s)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', false, %s, %s)
         returning plan_id, rep_id, plan_date, start_time, end_time, category, title,
                   customer_id, deal_id, activity_type, priority, expected_amount,
                   expected_probability, plan_status, is_ai_generated, rationale,
-                  null::int as product_id, null::text as product_name, progress_percent,
+                  (select d.product_id from deal d where d.deal_id = activity_plan.deal_id) as product_id,
+                  coalesce(
+                    activity_plan.product_name_override,
+                    (
+                      select p.product_name
+                      from deal d
+                      join product p on p.product_id = d.product_id
+                      where d.deal_id = activity_plan.deal_id
+                    )
+                  ) as product_name,
+                  progress_percent,
                   null::text as memo
         """,
         (
@@ -691,6 +702,7 @@ def create_plan(
             expected_amount,
             expected_probability,
             rationale,
+            product_name_override,
         ),
     ).fetchone()
     conn.commit()
@@ -728,6 +740,8 @@ def update_plan(
     activity_type: str,
     title: str | None,
     product_name_override: str | None,
+    expected_amount: Decimal,
+    expected_probability: int,
     memo: str | None,
 ) -> dict:
     row = conn.execute(
@@ -739,6 +753,8 @@ def update_plan(
             activity_type = %s,
             title = %s,
             product_name_override = %s,
+            expected_amount = %s,
+            expected_probability = %s,
             memo = %s
         where ap.plan_id = %s and ap.rep_id = %s
         returning ap.plan_id, ap.rep_id, ap.plan_date, ap.start_time, ap.end_time,
@@ -765,6 +781,8 @@ def update_plan(
             activity_type,
             title,
             product_name_override,
+            expected_amount,
+            expected_probability,
             memo,
             plan_id,
             rep_id,
@@ -1281,11 +1299,13 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
 
     # 1商談に複数のactivity_plan行(訪問+関連タスク等)が紐づき得るため、商談単位で
     # 1回だけ計上する。成約は実契約金額(未記録ならestimated_amount)、失注は0円、
-    # 進行中は見込み金額×確度/100。
+    # 進行中は見込み金額×確度/100。deal_idの無い予定(次回予定作成時に参考として
+    # コピーされただけの商品・金額など)は実体の商談が存在せず成約しようがないため、
+    # expected_amountを入力していても見込みには一切加算しない。
     stats = conn.execute(
         """
         with month_plans as (
-          select plan_id, deal_id, expected_amount, plan_status
+          select plan_id, deal_id, plan_status
           from activity_plan
           where rep_id = %(rep_id)s
             and plan_status != 'cancelled'
@@ -1304,9 +1324,7 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
           where d.deal_id in (select deal_id from month_plans where deal_id is not null)
         )
         select
-          coalesce((select sum(amount) from deal_amounts), 0)
-            + coalesce((select sum(expected_amount) from month_plans where deal_id is null), 0)
-            as expected_amount,
+          coalesce((select sum(amount) from deal_amounts), 0) as expected_amount,
           (select count(*) from month_plans where plan_status = 'scheduled')::int as open_plan_count
         """,
         {"rep_id": rep_id, "target_month": target_month},

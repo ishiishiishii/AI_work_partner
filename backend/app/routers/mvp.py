@@ -291,6 +291,7 @@ def post_plan(body: PlanCreate) -> PlanOut:
             expected_amount=body.expected_amount,
             expected_probability=body.expected_probability,
             rationale=body.rationale,
+            product_name_override=body.product_name_override,
         )
     return PlanOut.model_validate(row)
 
@@ -320,6 +321,8 @@ def patch_plan(plan_id: int, body: PlanUpdate, rep_id: int = Query(...)) -> Plan
                 activity_type=body.activity_type,
                 title=body.title,
                 product_name_override=body.product_name_override,
+                expected_amount=body.expected_amount,
+                expected_probability=body.expected_probability,
                 memo=body.memo,
             )
         except ValueError as exc:

@@ -256,6 +256,7 @@ class PlanCreate(BaseModel):
     expected_amount: Decimal = Field(default=Decimal("0"), ge=0)
     expected_probability: int = Field(default=0, ge=0, le=100)
     rationale: str | None = None
+    product_name_override: str | None = None
 
 
 class PlanUpdate(BaseModel):
@@ -265,6 +266,8 @@ class PlanUpdate(BaseModel):
     activity_type: str
     title: str | None = None
     product_name_override: str | None = None
+    expected_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    expected_probability: int = Field(default=0, ge=0, le=100)
     memo: str | None = None
 
 

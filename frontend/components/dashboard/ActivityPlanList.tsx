@@ -23,6 +23,7 @@ export type PlanEditFields = {
   customer_id: number | null;
   customer_name: string;
   product_name: string | null;
+  expected_amount: number;
   expected_probability: number;
   memo: string | null;
 };
@@ -651,6 +652,7 @@ export function ActivityPlanList({
       customer_id: plan.customer_id,
       customer_name: plan.customer_name,
       product_name: plan.product_name,
+      expected_amount: plan.expected_amount,
       expected_probability: plan.expected_probability,
       memo: plan.memo,
     });
@@ -705,6 +707,7 @@ export function ActivityPlanList({
       customer_id: draft.customer_id,
       customer_name: draft.customer_name,
       product_name: draft.product_name,
+      expected_amount: draft.expected_amount,
       expected_probability: draft.expected_probability,
       memo: draft.memo,
     });
@@ -740,6 +743,7 @@ export function ActivityPlanList({
       ...updates,
       customer_name: updates.customer_name.trim() || "(未設定)",
       product_name: updates.product_name?.trim() || null,
+      expected_amount: Math.max(0, updates.expected_amount),
       expected_probability: Math.min(100, Math.max(0, updates.expected_probability)),
       memo: updates.memo?.trim() || null,
     };
@@ -1114,6 +1118,29 @@ export function ActivityPlanList({
                         ) : (
                           (detailPlan.product_name ?? "(未設定)")
                         )}
+                      </dd>
+                    </>
+                  )}
+
+                  {effectiveCategory === "visit" && isEditing && (
+                    <>
+                      <dt>金額</dt>
+                      <dd>
+                        <span className="plan-modal__amount-input">
+                          <input
+                            type="number"
+                            min={0}
+                            step={10000}
+                            value={editDraft.expected_amount}
+                            onChange={(event) =>
+                              setEditDraft({
+                                ...editDraft,
+                                expected_amount: Number(event.target.value),
+                              })
+                            }
+                          />
+                          円
+                        </span>
                       </dd>
                     </>
                   )}

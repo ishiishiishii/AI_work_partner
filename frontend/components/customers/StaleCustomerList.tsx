@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { companySizeBadgeClass } from "@/lib/companySize";
 import type { StaleCustomer } from "@/types";
 
 type StaleCustomerListProps = {
@@ -28,7 +29,11 @@ export function StaleCustomerList({ customers }: StaleCustomerListProps) {
           <div className="customer-table__main">
             <div className="customer-table__name">
               <Link href={`/customers/${customer.customer_id}`}>{customer.customer_name}</Link>
-              <span className="badge customer-table__size">{customer.company_size_name}</span>
+              <span
+                className={`badge customer-table__size ${companySizeBadgeClass(customer.company_size_name)}`}
+              >
+                {customer.company_size_name}
+              </span>
             </div>
             <div className="customer-table__meta">
               {customer.industry_name}・{customer.location}

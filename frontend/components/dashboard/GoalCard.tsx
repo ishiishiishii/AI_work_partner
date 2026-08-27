@@ -96,7 +96,6 @@ export function GoalCard({
     <section className="panel goal-card">
       <div className="goal-card__header">
         <h2>{formatMonth(target.target_month)}の目標</h2>
-        <span className="goal-card__rep">{rep.rep_name}</span>
       </div>
 
       <div className="goal-card__body">
