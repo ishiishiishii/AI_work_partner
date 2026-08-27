@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
+import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { TARGET_MONTH, useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
 
@@ -25,6 +26,7 @@ export default function ActivityPage() {
     customers,
     territory,
     affinities,
+    replan,
     achievementRate,
     altPreview,
     handleResultChange,
@@ -76,6 +78,7 @@ export default function ActivityPage() {
       <h1>活動計画</h1>
       <div className="dashboard-layout">
         <div className="dashboard-layout__primary">
+          {replan && <ReplanBanner info={replan} />}
           <ActivityPlanList
             repId={selectedRep.rep_id}
             plans={plans}

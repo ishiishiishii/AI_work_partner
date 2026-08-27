@@ -25,6 +25,24 @@ if [[ -n "${ODPT_ACCESS_TOKEN:-}" ]]; then
     --data-urlencode "acl:consumerKey=${ODPT_ACCESS_TOKEN}" \
     "https://api.odpt.org/api/v4/files/TokyoMetro/data/TokyoMetro-Train-GTFS.zip" \
     -o "${OTP_DIR}/tokyo-metro-train-gtfs.zip"
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_ACCESS_TOKEN}" \
+    "https://api.odpt.org/api/v4/files/TWR/data/TWR-Train-GTFS.zip" \
+    -o "${OTP_DIR}/twr-rinkai-train-gtfs.zip"
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_ACCESS_TOKEN}" \
+    "https://api.odpt.org/api/v4/files/MIR/data/MIR-Train-GTFS.zip" \
+    -o "${OTP_DIR}/tsukuba-express-train-gtfs.zip"
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_ACCESS_TOKEN}" \
+    "https://api.odpt.org/api/v4/files/TamaMonorail/data/TamaMonorail-Train-GTFS.zip" \
+    -o "${OTP_DIR}/tama-monorail-train-gtfs.zip"
+  # ODPTは横浜市営地下鉄GTFSを日付版で公開しており「最新」の固定URLがない。
+  # 更新時は https://ckan.odpt.org/en/dataset/yokohama_municipal_train で最新日付を確認して置き換える。
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_ACCESS_TOKEN}" \
+    "https://api.odpt.org/api/v4/files/odpt/YokohamaMunicipal/Train.zip?date=20251226" \
+    -o "${OTP_DIR}/yokohama-municipal-train-gtfs.zip"
 fi
 
 if [[ -n "${ODPT_CHALLENGE_ACCESS_TOKEN:-}" ]]; then
@@ -32,6 +50,18 @@ if [[ -n "${ODPT_CHALLENGE_ACCESS_TOKEN:-}" ]]; then
     --data-urlencode "acl:consumerKey=${ODPT_CHALLENGE_ACCESS_TOKEN}" \
     "https://api-challenge.odpt.org/api/v4/files/JR-East/data/JR-East-Train-GTFS.zip" \
     -o "${OTP_DIR}/jr-east-train-gtfs.zip"
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_CHALLENGE_ACCESS_TOKEN}" \
+    "https://api-challenge.odpt.org/api/v4/files/Sotetsu/data/Sotetsu-Train-GTFS.zip" \
+    -o "${OTP_DIR}/sotetsu-train-gtfs.zip"
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_CHALLENGE_ACCESS_TOKEN}" \
+    "https://api-challenge.odpt.org/api/v4/files/Keio/data/Keio-Train-GTFS.zip" \
+    -o "${OTP_DIR}/keio-train-gtfs.zip"
+  curl -fL --retry 3 --get \
+    --data-urlencode "acl:consumerKey=${ODPT_CHALLENGE_ACCESS_TOKEN}" \
+    "https://api-challenge.odpt.org/api/v4/files/Tobu/data/Tobu-Train-GTFS.zip" \
+    -o "${OTP_DIR}/tobu-train-gtfs.zip"
 fi
 
 if [[ ! -f "${OTP_DIR}/kanto-latest.osm.pbf" ]]; then

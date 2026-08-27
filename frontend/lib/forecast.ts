@@ -8,13 +8,32 @@ function statusPriority(status: DealResultStatus): number {
   return 1; // pending, postponed
 }
 
+function isBetterDealRepresentative(candidate: ActivityPlan, current: ActivityPlan): boolean {
+  const candidatePriority = [
+    statusPriority(candidate.result_status),
+    candidate.category === "visit" ? 1 : 0,
+    candidate.expected_amount,
+  ];
+  const currentPriority = [
+    statusPriority(current.result_status),
+    current.category === "visit" ? 1 : 0,
+    current.expected_amount,
+  ];
+  for (let index = 0; index < candidatePriority.length; index += 1) {
+    if (candidatePriority[index] !== currentPriority[index]) {
+      return candidatePriority[index] > currentPriority[index];
+    }
+  }
+  return false;
+}
+
 function uniqueByDeal(plans: ActivityPlan[]): ActivityPlan[] {
   const dealless = plans.filter((plan) => plan.deal_id === null);
   const bestByDeal = new Map<number, ActivityPlan>();
   for (const plan of plans) {
     if (plan.deal_id === null) continue;
     const current = bestByDeal.get(plan.deal_id);
-    if (!current || statusPriority(plan.result_status) > statusPriority(current.result_status)) {
+    if (!current || isBetterDealRepresentative(plan, current)) {
       bestByDeal.set(plan.deal_id, plan);
     }
   }

@@ -76,6 +76,7 @@ def post_target(body: TargetCreate) -> TargetOut:
             target_month=body.target_month,
             target_amount=body.target_amount,
             target_deal_count=body.target_deal_count,
+            target_gross_profit=body.target_gross_profit,
         )
     return TargetOut.model_validate(row)
 
@@ -202,6 +203,8 @@ def post_deal(body: DealCreate) -> DealOut:
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 deal_start_date=body.deal_start_date or date.today(),
+                expected_close_date=body.expected_close_date,
+                next_action=body.next_action,
                 memo=body.memo,
             )
         except Exception as exc:  # noqa: BLE001
@@ -222,6 +225,8 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 estimated_amount=body.estimated_amount,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
+                expected_close_date=body.expected_close_date,
+                next_action=body.next_action,
                 actual_amount=body.actual_amount,
                 memo=body.memo,
             )

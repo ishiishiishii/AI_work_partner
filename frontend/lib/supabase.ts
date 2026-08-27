@@ -14,10 +14,27 @@ export function getSupabaseBrowserClient(): SupabaseClient | null {
     try {
       const parsed = new URL(url);
       const pageHost = window.location.hostname;
+      const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1";
+      const isPrivateIpv4 = (host: string) => {
+        const octets = host.split(".").map(Number);
+        if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+          return false;
+        }
+        return (
+          octets[0] === 10 ||
+          (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+          (octets[0] === 192 && octets[1] === 168)
+        );
+      };
+      // Same reasoning as getApiBaseUrl (lib/api.ts): only rewrite when
+      // either side is a bare loopback address that doesn't describe where
+      // this browser actually is. Leaves Codespaces-style per-port
+      // subdomains (both sides real, non-loopback hostnames) untouched. A
+      // configured private-LAN address follows the page host so authentication
+      // also works over Tailscale on Wi-Fi networks with client isolation.
       if (
-        pageHost !== "localhost" &&
-        pageHost !== "127.0.0.1" &&
-        (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
+        pageHost !== parsed.hostname &&
+        (isLoopback(pageHost) || isLoopback(parsed.hostname) || isPrivateIpv4(parsed.hostname))
       ) {
         parsed.hostname = pageHost;
         url = parsed.origin;

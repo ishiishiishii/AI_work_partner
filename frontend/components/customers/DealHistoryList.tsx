@@ -9,6 +9,8 @@ export type DealEditFields = {
   estimated_amount: number;
   expected_visit_count: number;
   expected_effort_hours: number;
+  expected_close_date: string | null;
+  next_action: string | null;
   // 成約(won)済みの商談でのみ送る。未成約の商談で送るとバックエンドのトリガーに拒否される
   actual_amount?: number | null;
   memo: string;
@@ -132,6 +134,8 @@ export function DealHistoryList({
       estimated_amount: deal.estimated_amount,
       expected_visit_count: deal.expected_visit_count,
       expected_effort_hours: deal.expected_effort_hours,
+      expected_close_date: deal.expected_close_date,
+      next_action: deal.next_action,
       actual_amount:
         deal.deal_result_status === "won" ? (deal.actual_amount ?? deal.estimated_amount) : null,
       memo: deal.memo ?? "",
@@ -405,6 +409,40 @@ export function DealHistoryList({
                       />
                     ) : (
                       `${detailDeal.expected_effort_hours}時間`
+                    )}
+                  </dd>
+
+                  <dt>受注予定日</dt>
+                  <dd>
+                    {isEditing ? (
+                      <input
+                        type="date"
+                        value={editDraft.expected_close_date ?? ""}
+                        onChange={(event) =>
+                          setEditDraft({
+                            ...editDraft,
+                            expected_close_date: event.target.value || null,
+                          })
+                        }
+                      />
+                    ) : (
+                      detailDeal.expected_close_date ? formatDate(detailDeal.expected_close_date) : "(未設定)"
+                    )}
+                  </dd>
+
+                  <dt>次のアクション</dt>
+                  <dd>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={editDraft.next_action ?? ""}
+                        onChange={(event) =>
+                          setEditDraft({ ...editDraft, next_action: event.target.value || null })
+                        }
+                        placeholder="例: 見積書を送付する"
+                      />
+                    ) : (
+                      detailDeal.next_action || "(未設定)"
                     )}
                   </dd>
 

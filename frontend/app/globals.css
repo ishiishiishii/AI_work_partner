@@ -1845,6 +1845,13 @@ a {
   font-size: 0.95rem;
 }
 
+.replan-banner__steps {
+  margin: 0 0 0.75rem;
+  padding-left: 1.4rem;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 .replan-banner__rates {
   display: flex;
   align-items: center;
@@ -3200,6 +3207,53 @@ a {
   font-weight: 700;
 }
 
+.route-plan__policy-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.route-plan__policy-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.route-plan__policy-option.is-selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.route-plan__policy-option input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.route-plan__policy-option strong {
+  color: var(--ink);
+}
+
+.route-plan__policy-option small {
+  grid-column: 2;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+@media (max-width: 700px) {
+  .route-plan__policy-options {
+    grid-template-columns: 1fr;
+  }
+}
+
 .route-plan__balance input[type="range"] {
   width: 100%;
   accent-color: var(--primary);
@@ -3261,6 +3315,307 @@ a {
   border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
   border-radius: 0.5rem;
   padding: 0.6rem 0.75rem;
+}
+
+.route-plan-batch__days {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.monthly-outlook {
+  --outlook-color: var(--accent);
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 2px solid color-mix(in srgb, var(--outlook-color) 72%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--outlook-color) 9%, var(--surface));
+}
+
+.monthly-outlook--good {
+  --outlook-color: var(--ok);
+}
+
+.monthly-outlook--watch {
+  --outlook-color: var(--accent);
+}
+
+.monthly-outlook--risk {
+  --outlook-color: #fb7185;
+}
+
+.monthly-outlook__heading,
+.monthly-outlook__metrics span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.monthly-outlook__heading > div:first-child {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.monthly-outlook__heading strong {
+  color: var(--outlook-color);
+  font-size: 1.25rem;
+}
+
+.monthly-outlook__heading small,
+.monthly-outlook__metrics small,
+.monthly-outlook__note {
+  color: var(--muted);
+}
+
+.monthly-outlook__probability {
+  display: grid;
+  justify-items: end;
+}
+
+.monthly-outlook__probability span {
+  color: var(--outlook-color);
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+  font-weight: 800;
+}
+
+.monthly-outlook p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.monthly-outlook__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.monthly-outlook__metrics > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.monthly-outlook__metrics progress {
+  width: 100%;
+  height: 0.65rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+}
+
+.monthly-outlook__metrics progress::-webkit-progress-bar {
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+}
+
+.monthly-outlook__metrics progress::-webkit-progress-value {
+  background: var(--outlook-color);
+  border-radius: 999px;
+}
+
+.monthly-outlook__metrics progress::-moz-progress-bar {
+  background: var(--outlook-color);
+  border-radius: 999px;
+}
+
+@media (max-width: 700px) {
+  .monthly-outlook__heading {
+    align-items: flex-start;
+  }
+
+  .monthly-outlook__metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+.route-plan-batch__flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.route-plan-batch__flow article,
+.route-plan-batch__customer-grid article {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent));
+}
+
+.route-plan-batch__flow small,
+.route-plan-batch__flow span,
+.route-plan-batch__customer-grid span,
+.route-plan-batch__customer-grid small {
+  color: var(--muted);
+}
+
+.route-plan-batch__flow strong {
+  font-size: 1.15rem;
+}
+
+.route-plan-batch__portfolio {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.route-plan-batch__portfolio h3,
+.route-plan-batch__portfolio p {
+  margin: 0;
+}
+
+.route-plan-batch__customer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem;
+}
+
+.route-plan-batch__weeks {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.route-plan-batch__week {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 95%, var(--accent));
+}
+
+.route-plan-batch__week-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.route-plan-batch__week-summary::-webkit-details-marker {
+  display: none;
+}
+
+.route-plan-batch__week-summary > span:first-child {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.route-plan-batch__week-summary > span:last-child {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.route-plan-batch__week-body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.route-plan-batch__day {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface);
+}
+
+.route-plan-batch__day-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.route-plan-batch__day-summary::-webkit-details-marker {
+  display: none;
+}
+
+.route-plan-batch__day-date {
+  font-weight: 700;
+  min-width: 6.5rem;
+}
+
+.route-plan-batch__badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.route-plan-batch__badge--detailed {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, var(--surface));
+}
+
+.route-plan-batch__badge--coarse {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--surface));
+}
+
+.route-plan-batch__risk-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.route-plan-batch__badge--risk-medium {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--surface));
+}
+
+.route-plan-batch__badge--risk-high {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 16%, var(--surface));
+}
+
+.route-plan-batch__progress-goals {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-plan-batch__progress-goals li {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface);
+}
+
+.route-plan-batch__progress-goals small {
+  color: var(--muted);
+}
+
+.route-plan-batch__day-figures {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.route-plan-batch__day-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.route-plan-batch__day-body {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .route-plan-batch__flow {
+    grid-template-columns: 1fr;
+  }
 }
 
 ::selection {

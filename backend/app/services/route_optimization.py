@@ -89,6 +89,13 @@ class VisitCandidate:
     deal_ids: list[int]
     phase_names: list[str]
     economics: list[DealEconomics]
+    # Parallel to deal_ids/phase_names (same index = same deal), used only by
+    # route_planning.create_batch_preview for per-deal risk (target_simulation.
+    # assess_deal_risk) and weekly phase-progression goals -- not read by any
+    # scoring/optimization code in this module.
+    deal_phase_sort_orders: list[int] = field(default_factory=list)
+    expected_close_dates: list[date | None] = field(default_factory=list)
+    next_actions: list[str | None] = field(default_factory=list)
     visit_duration_min: int = 60
     window_start: time | None = None
     window_end: time | None = None
@@ -98,35 +105,87 @@ class VisitCandidate:
     value_score: Decimal = Decimal("0")
     score_components: dict[str, Decimal] = field(default_factory=dict)
     affinity_evidence: list[AffinityEvidence] = field(default_factory=list)
+    customer_type: str = "ongoing"
+    required_visit_count: int = 1
+    completed_visit_count: int = 0
+    scheduled_visit_count: int = 0
+    remaining_visit_count: int = 1
+    visit_count_source: str = "deal"
+    visit_count_history_size: int = 0
+    planned_visit_count: int = 1
+    visit_sequence: int = 1
+    sales_credit_fraction: Decimal = Decimal("1")
+
+    def _credited_money(self, value: Decimal) -> Decimal:
+        rounded = value.quantize(YEN, rounding=ROUND_HALF_UP)
+        if self.sales_credit_fraction == Decimal("1") or self.planned_visit_count <= 1:
+            return rounded
+        # Revenue is realized only when the planned negotiation sequence
+        # reaches its final meeting. Intermediate meetings still retain the
+        # full opportunity value for prioritization (properties below), but
+        # contribute zero to that day's revenue forecast.
+        return rounded if self.visit_sequence == self.planned_visit_count else Decimal("0")
 
     @property
-    def planned_sales(self) -> Decimal:
-        return sum((item.estimated_amount for item in self.economics), Decimal("0")).quantize(YEN)
+    def opportunity_planned_sales(self) -> Decimal:
+        return sum(
+            (item.estimated_amount for item in self.economics), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
 
     @property
-    def planned_gross_profit(self) -> Decimal | None:
+    def opportunity_planned_gross_profit(self) -> Decimal | None:
         values = [item.planned_gross_profit for item in self.economics]
         if any(value is None for value in values):
             return None
-        return sum((value for value in values if value is not None), Decimal("0")).quantize(YEN)
+        return sum(
+            (value for value in values if value is not None), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
 
     @property
-    def expected_sales(self) -> Decimal:
-        return sum((item.expected_sales for item in self.economics), Decimal("0")).quantize(YEN)
+    def opportunity_expected_sales(self) -> Decimal:
+        return sum(
+            (item.expected_sales for item in self.economics), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
 
     @property
-    def expected_gross_profit(self) -> Decimal | None:
+    def opportunity_expected_gross_profit(self) -> Decimal | None:
         values = [item.expected_gross_profit for item in self.economics]
         if any(value is None for value in values):
             return None
-        return sum((value for value in values if value is not None), Decimal("0")).quantize(YEN)
+        return sum(
+            (value for value in values if value is not None), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
+
+    @property
+    def planned_sales(self) -> Decimal:
+        return self._credited_money(self.opportunity_planned_sales)
+
+    @property
+    def planned_gross_profit(self) -> Decimal | None:
+        total = self.opportunity_planned_gross_profit
+        if total is None:
+            return None
+        return self._credited_money(total)
+
+    @property
+    def expected_sales(self) -> Decimal:
+        return self._credited_money(self.opportunity_expected_sales)
+
+    @property
+    def expected_gross_profit(self) -> Decimal | None:
+        total = self.opportunity_expected_gross_profit
+        if total is None:
+            return None
+        return self._credited_money(total)
 
     @property
     def gross_profit_margin(self) -> Decimal | None:
-        profit = self.planned_gross_profit
-        if profit is None or self.planned_sales <= 0:
+        profit = self.opportunity_planned_gross_profit
+        if profit is None or self.opportunity_planned_sales <= 0:
             return None
-        return (profit / self.planned_sales * Decimal("100")).quantize(Decimal("0.01"))
+        return (
+            profit / self.opportunity_planned_sales * Decimal("100")
+        ).quantize(Decimal("0.01"))
 
     @property
     def best_affinity(self) -> AffinityEvidence | None:
@@ -195,9 +254,12 @@ def score_candidates(
     weights: dict[str, int],
     target_gap_ratio: Decimal = Decimal("0"),
 ) -> None:
-    sales_scores = _normalize([candidate.expected_sales for candidate in candidates])
+    sales_scores = _normalize([
+        candidate.opportunity_expected_sales for candidate in candidates
+    ])
     profit_scores = _normalize([
-        candidate.expected_gross_profit or Decimal("0") for candidate in candidates
+        candidate.opportunity_expected_gross_profit or Decimal("0")
+        for candidate in candidates
     ])
     phase_scores = _normalize([
         Decimal(max((_phase_value(name) for name in candidate.phase_names), default=0))
@@ -240,6 +302,7 @@ def score_candidates(
 
 def _phase_value(name: str) -> int:
     return {
+        "新規開拓": 10,
         "初回接触": 20,
         "ヒアリング": 40,
         "提案": 60,
@@ -252,6 +315,14 @@ def _money_int(value: Decimal | None) -> int:
     if value is None:
         return 0
     return int(value.quantize(YEN, rounding=ROUND_HALF_UP))
+
+
+# A must_visit candidate's score bonus (see _solve_portfolios) so that
+# excluding it always costs more objective value than including it, whenever
+# it's actually feasible to include -- comfortably larger than any realistic
+# sum of ordinary value_score-based scores (each capped at 10000).
+_MUST_VISIT_BASE_BONUS = 1_000_000
+_MUST_VISIT_RANK_STEP = 1_000
 
 
 def generate_portfolios(
@@ -267,6 +338,8 @@ def generate_portfolios(
     travel_penalty_weight: int = 0,
     end_node_index: int = 0,
     turnaround_buffer_min: int = 0,
+    travel_minutes_override: list[int] | None = None,
+    must_visit_rank: list[int] | None = None,
 ) -> list[Portfolio]:
     strict = _solve_portfolios(
         candidates,
@@ -281,6 +354,8 @@ def generate_portfolios(
         end_node_index=end_node_index,
         turnaround_buffer_min=turnaround_buffer_min,
         relaxed=False,
+        travel_minutes_override=travel_minutes_override,
+        must_visit_rank=must_visit_rank,
     )
     if strict or (min_expected_sales is None and min_expected_gross_profit is None):
         return strict
@@ -297,6 +372,8 @@ def generate_portfolios(
         end_node_index=end_node_index,
         turnaround_buffer_min=turnaround_buffer_min,
         relaxed=True,
+        travel_minutes_override=travel_minutes_override,
+        must_visit_rank=must_visit_rank,
     )
 
 
@@ -314,6 +391,8 @@ def _solve_portfolios(
     end_node_index: int,
     turnaround_buffer_min: int,
     relaxed: bool,
+    travel_minutes_override: list[int] | None = None,
+    must_visit_rank: list[int] | None = None,
 ) -> list[Portfolio]:
     if not candidates:
         return []
@@ -322,23 +401,31 @@ def _solve_portfolios(
     model.add(sum(selected) <= max_visits)
     model.add(sum(selected) >= 1)
 
-    for index, candidate in enumerate(candidates):
-        if candidate.must_visit:
-            model.add(selected[index] == 1)
-
-    # CP-SAT only needs a conservative order-free estimate; RoutingModel makes
-    # the final feasibility decision using the complete road matrix.
-    estimated_minutes = []
-    for index, candidate in enumerate(candidates):
-        endpoint_travel = (
-            matrix[0][index + 1].duration_sec
-            + matrix[index + 1][end_node_index].duration_sec
-        ) // 60
-        estimated_minutes.append(
-            candidate.visit_duration_min
-            + turnaround_buffer_min
-            + endpoint_travel
-        )
+    if travel_minutes_override is not None:
+        # Caller (a coarse batch day with no RoutingModel step to correct
+        # this later, unlike the single-day flow below) supplies a per-
+        # candidate travel estimate of its own -- see route_planning.
+        # _solve_coarse_day, which uses each candidate's nearest-neighbor
+        # link instead of its own round trip from the branch.
+        endpoint_minutes = travel_minutes_override
+    else:
+        # CP-SAT only needs a conservative order-free estimate here;
+        # RoutingModel makes the final feasibility decision afterward using
+        # the complete road matrix -- so summing each candidate's own round
+        # trip from the branch, though far pricier than any real shared
+        # tour, is a deliberately safe over-estimate for this pre-filter.
+        endpoint_minutes = [
+            (
+                matrix[0][index + 1].duration_sec
+                + matrix[index + 1][end_node_index].duration_sec
+            )
+            // 60
+            for index in range(len(candidates))
+        ]
+    estimated_minutes = [
+        candidates[index].visit_duration_min + turnaround_buffer_min + endpoint_minutes[index]
+        for index in range(len(candidates))
+    ]
     model.add(
         sum(selected[index] * estimated_minutes[index] for index in range(len(candidates)))
         <= available_min
@@ -368,6 +455,20 @@ def _solve_portfolios(
     max_distance = max(
         (candidate.distance_from_branch_m for candidate in candidates), default=1
     )
+    # must_visit no longer forces selected[index]==1 (see this function's
+    # docstring note below) -- instead it adds a bonus large enough that
+    # excluding any must_visit candidate always costs more objective value
+    # than including it, so CP-SAT still includes every must_visit candidate
+    # whenever max_visits/available_min allow it (preserving today's
+    # behavior in the common case), while gracefully dropping the
+    # lowest-priority ones -- by rank, or arbitrarily if no ranking was
+    # given -- instead of the whole day becoming infeasible when there
+    # simply isn't room for all of them.
+    must_visit_bonus = [
+        0 if not candidate.must_visit
+        else _MUST_VISIT_BASE_BONUS - (must_visit_rank[index] if must_visit_rank else 0) * _MUST_VISIT_RANK_STEP
+        for index, candidate in enumerate(candidates)
+    ]
     scores = [
         max(
             0,
@@ -379,7 +480,8 @@ def _solve_portfolios(
                 // max(1, max_distance)
             ),
         )
-        for candidate in candidates
+        + must_visit_bonus[index]
+        for index, candidate in enumerate(candidates)
     ]
     model.maximize(sum(selected[index] * scores[index] for index in range(len(candidates))))
 
@@ -414,7 +516,7 @@ def _solve_portfolios(
     return portfolios
 
 
-def _sum_totals(candidates: list[VisitCandidate], indexes: tuple[int, ...]) -> dict:
+def sum_totals(candidates: list[VisitCandidate], indexes: tuple[int, ...]) -> dict:
     chosen = [candidates[index] for index in indexes]
     known_profit = all(candidate.planned_gross_profit is not None for candidate in chosen)
     known_expected_profit = all(candidate.expected_gross_profit is not None for candidate in chosen)
@@ -446,7 +548,7 @@ def route_portfolio(
     turnaround_buffer_min: int = 0,
 ) -> RoutedOption:
     candidate_indexes = portfolio.candidate_indexes
-    totals = _sum_totals(candidates, candidate_indexes)
+    totals = sum_totals(candidates, candidate_indexes)
     if not candidate_indexes:
         return RoutedOption(portfolio, "routing_infeasible", [], 0, 0, 0, False, totals)
 
@@ -684,9 +786,22 @@ def candidate_economics_dict(candidate: VisitCandidate) -> dict:
         "gross_profit_margin": candidate.gross_profit_margin,
         "expected_sales": candidate.expected_sales,
         "expected_gross_profit": candidate.expected_gross_profit,
+        "opportunity_planned_sales": candidate.opportunity_planned_sales,
+        "opportunity_planned_gross_profit": candidate.opportunity_planned_gross_profit,
+        "opportunity_expected_sales": candidate.opportunity_expected_sales,
+        "opportunity_expected_gross_profit": candidate.opportunity_expected_gross_profit,
         "value_score": candidate.value_score,
         "gross_profit_available": candidate.planned_gross_profit is not None,
         "salesperson_fit_score": candidate.salesperson_fit_score,
+        "customer_type": candidate.customer_type,
+        "required_visit_count": candidate.required_visit_count,
+        "completed_visit_count": candidate.completed_visit_count,
+        "scheduled_visit_count": candidate.scheduled_visit_count,
+        "remaining_visit_count": candidate.remaining_visit_count,
+        "planned_visit_count": candidate.planned_visit_count,
+        "visit_sequence": candidate.visit_sequence,
+        "visit_count_source": candidate.visit_count_source,
+        "visit_count_history_size": candidate.visit_count_history_size,
         "affinity_matches": [
             {
                 "industry_name": evidence.industry_name,
@@ -706,7 +821,7 @@ def candidate_economics_dict(candidate: VisitCandidate) -> dict:
 
 
 def selection_reason(candidate: VisitCandidate) -> str:
-    profit = candidate.expected_gross_profit
+    profit = candidate.opportunity_expected_gross_profit
     profit_text = "粗利評価不可" if profit is None else f"期待粗利{profit:,.0f}円"
     best_affinity = candidate.best_affinity
     if best_affinity is None:
@@ -717,8 +832,26 @@ def selection_reason(candidate: VisitCandidate) -> str:
             f"過去{best_affinity.deal_count}件中{best_affinity.won_count}件成約"
             f"（成約率{best_affinity.win_rate * Decimal('100'):.0f}%）"
         )
+    if candidate.customer_type == "new":
+        visit_text = (
+            f"新規候補のため、同業・同規模などの過去"
+            f"{candidate.visit_count_history_size}件から必要商談"
+            f"{candidate.required_visit_count}回と推定"
+        )
+    else:
+        visit_text = (
+            f"商談中で必要{candidate.required_visit_count}回、"
+            f"完了{candidate.completed_visit_count}回、"
+            f"確定済み{candidate.scheduled_visit_count}回、"
+            f"未予定の残り{candidate.remaining_visit_count}回"
+        )
+    if candidate.planned_visit_count > 1:
+        visit_text += (
+            f"（この計画では{candidate.planned_visit_count}回中"
+            f"{candidate.visit_sequence}回目）"
+        )
     return (
-        f"期待売上{candidate.expected_sales:,.0f}円、{profit_text}、"
+        f"{visit_text}。案件期待売上{candidate.opportunity_expected_sales:,.0f}円、{profit_text}、"
         f"{affinity_text}、候補エリア内の移動効率を総合評価しました。"
     )
 

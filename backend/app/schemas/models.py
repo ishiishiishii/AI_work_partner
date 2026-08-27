@@ -47,6 +47,9 @@ class TargetCreate(BaseModel):
     target_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     target_amount: Decimal = Field(ge=0)
     target_deal_count: int = Field(default=0, ge=0)
+    # None = 粗利目標を設定しない(0円目標という意味ではない)。上流のUI/DBどちらでも
+    # NULLと0円を混同しないこと。
+    target_gross_profit: Decimal | None = Field(default=None, ge=0)
 
 
 class TargetOut(OrmModel):
@@ -54,6 +57,7 @@ class TargetOut(OrmModel):
     target_month: str
     target_amount: Decimal
     target_deal_count: int
+    target_gross_profit: Decimal | None = None
 
 
 class CustomerCreate(BaseModel):
@@ -123,6 +127,8 @@ class DealCreate(BaseModel):
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
     deal_start_date: date | None = None
+    expected_close_date: date | None = None
+    next_action: str | None = None
     memo: str | None = None
 
 
@@ -147,6 +153,8 @@ class DealOut(OrmModel):
     deal_phase_id: int
     cost: Decimal
     profit: Decimal
+    expected_close_date: date | None = None
+    next_action: str | None = None
     actual_amount: Decimal | None = None
     memo: str | None = None
 
@@ -157,6 +165,8 @@ class DealUpdate(BaseModel):
     estimated_amount: Decimal = Field(ge=0)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
+    expected_close_date: date | None = None
+    next_action: str | None = None
     # 成約(won)済みの商談のみ有効。未成約に送っても保存時のトリガーで拒否される
     actual_amount: Decimal | None = Field(default=None, ge=0)
     memo: str | None = None
@@ -336,6 +346,15 @@ class ForecastOut(BaseModel):
     expected_amount: Decimal
     attainment_ratio: float
     open_plan_count: int
+    # 粗利・達成確率まわりは目標に粗利設定が無ければNone(0%達成という意味ではない)。
+    target_gross_profit: Decimal | None = None
+    expected_gross_profit: Decimal = Decimal("0")
+    gross_profit_attainment_ratio: float | None = None
+    sales_achievement_probability: float = 0.0
+    profit_achievement_probability: float | None = None
+    joint_achievement_probability: float = 0.0
+    sales_gap_amount: Decimal = Decimal("0")
+    profit_gap_amount: Decimal | None = None
 
 class DeadlineCreate(BaseModel):
     rep_id: int

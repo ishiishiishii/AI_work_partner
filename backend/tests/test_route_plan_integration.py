@@ -1,4 +1,4 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -15,7 +15,12 @@ from app.services.route_optimization import (
     RouteMatrixPartialError,
     RoutePlanningError,
 )
-from app.services.route_planning import _candidate_rows, approve_plan, create_preview
+from app.services.route_planning import (
+    _candidate_rows,
+    _prospect_candidates,
+    approve_plan,
+    create_preview,
+)
 
 TOKYO = ZoneInfo("Asia/Tokyo")
 TEST_DATE = date(2099, 1, 15)
@@ -28,6 +33,122 @@ def test_route_preview_requires_bearer_authentication() -> None:
             json={"target_date": TEST_DATE.isoformat()},
         )
     assert response.status_code == 401
+
+
+def test_prospect_candidates_estimate_required_visits_from_completed_history() -> None:
+    with get_connection() as conn:
+        rep = conn.execute(
+            """
+            select sr.rep_id, sr.branch_id, b.latitude, b.longitude
+            from sales_rep sr
+            join branch b on b.branch_id = sr.branch_id
+            where exists (
+              select 1
+              from customer c
+              join prefecture_branch pb
+                on c.location like pb.prefecture_name || '%%'
+               and pb.branch_id = sr.branch_id
+              where c.primary_rep_id is null
+                and c.geocoding_status = 'success'
+                and c.geo_point is not null
+                and not exists (
+                  select 1 from deal d
+                  where d.customer_id = c.customer_id and d.rep_id = sr.rep_id
+                )
+            )
+            order by sr.rep_id
+            limit 1
+            """
+        ).fetchone()
+        assert rep
+        prospects = _prospect_candidates(
+            conn,
+            rep_id=rep["rep_id"],
+            branch_id=rep["branch_id"],
+            target_date=TEST_DATE,
+            radius_m=2_000_000,
+            limit=20,
+            origin_latitude=float(rep["latitude"]),
+            origin_longitude=float(rep["longitude"]),
+        )
+
+    assert prospects
+    assert all(candidate.customer_type == "new" for candidate in prospects)
+    assert all(not candidate.deal_ids for candidate in prospects)
+    assert all(candidate.required_visit_count >= 1 for candidate in prospects)
+    assert all(candidate.visit_count_history_size > 0 for candidate in prospects)
+
+
+def test_ongoing_candidate_remaining_visits_subtract_completed_results() -> None:
+    result_id: int | None = None
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                """
+                select d.rep_id, sr.branch_id, d.deal_id, d.customer_id,
+                       d.expected_visit_count, d.must_visit,
+                       c.latitude, c.longitude
+                from deal d
+                join sales_rep sr on sr.rep_id = d.rep_id
+                join deal_result_status s
+                  on s.deal_result_status_id = d.deal_result_status_id
+                 and s.status_code = 'ongoing'
+                join customer c on c.customer_id = d.customer_id
+                join prefecture_branch pb
+                  on c.location like pb.prefecture_name || '%%'
+                 and pb.branch_id = sr.branch_id
+                where d.expected_visit_count >= 2
+                  and c.geocoding_status = 'success'
+                  and c.geo_point is not null
+                order by d.deal_id
+                limit 1
+                """
+            ).fetchone()
+            assert row
+            result_id = conn.execute(
+                """
+                insert into activity_result (
+                  rep_id, result_date, customer_id, deal_id,
+                  activity_type, outcome, outcome_note
+                ) values (%s, %s, %s, %s, 'visit', 'progress', %s)
+                returning result_id
+                """,
+                (
+                    row["rep_id"], TEST_DATE - timedelta(days=1),
+                    row["customer_id"], row["deal_id"],
+                    "残り商談回数のテスト",
+                ),
+            ).fetchone()["result_id"]
+            candidate_rows = _candidate_rows(
+                conn,
+                rep_id=row["rep_id"],
+                branch_id=row["branch_id"],
+                target_date=TEST_DATE,
+                radius_m=1_000,
+                limit=20,
+                origin_latitude=float(row["latitude"]),
+                origin_longitude=float(row["longitude"]),
+                include_mandatory_anchors=False,
+            )
+            candidate = next(
+                item for item in candidate_rows if item["deal_id"] == row["deal_id"]
+            )
+            assert candidate["completed_visit_count"] >= 1
+            assert candidate["remaining_visit_count"] == max(
+                candidate["required_visit_count"]
+                - candidate["completed_visit_count"]
+                - candidate["scheduled_visit_count"],
+                1 if row["must_visit"] else 0,
+            )
+            conn.rollback()
+            result_id = None
+    finally:
+        if result_id is not None:
+            with get_connection() as conn:
+                conn.execute(
+                    "delete from activity_result where result_id = %s", (result_id,)
+                )
+                conn.commit()
 
 
 def test_candidate_area_also_expands_around_mandatory_appointments() -> None:
@@ -305,6 +426,51 @@ def test_approval_conflict_rolls_back_without_partial_activity(
         with get_connection() as conn:
             if blocker_id is not None:
                 conn.execute("delete from activity_plan where plan_id = %s", (blocker_id,))
+            if plan_id is not None:
+                conn.execute("delete from route_plan where route_plan_id = %s", (plan_id,))
+            conn.commit()
+
+
+def test_approval_rejects_second_visit_to_same_customer_on_same_day(
+    owned_deal: tuple[int, int, int],
+) -> None:
+    rep_id, customer_id, deal_id = owned_deal
+    plan_id: int | None = None
+    existing_visit_id: int | None = None
+    try:
+        with get_connection() as conn:
+            existing_visit_id = conn.execute(
+                """
+                insert into activity_plan (
+                  rep_id, plan_date, start_time, end_time, category, title,
+                  customer_id, deal_id, activity_type, plan_status, is_ai_generated
+                )
+                values (%s, %s, '15:00', '16:00', 'visit', '同日訪問テスト',
+                        %s, %s, 'visit', 'scheduled', false)
+                returning plan_id
+                """,
+                (rep_id, TEST_DATE, customer_id, deal_id),
+            ).fetchone()["plan_id"]
+            conn.commit()
+            plan_id = _create_proposal(
+                conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
+            )
+
+            with pytest.raises(RoutePlanningError) as error:
+                approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
+
+            assert error.value.code == "duplicate_customer_visit"
+            linked = conn.execute(
+                "select count(*)::int as count from route_plan_activity where route_plan_id = %s",
+                (plan_id,),
+            ).fetchone()["count"]
+            assert linked == 0
+    finally:
+        with get_connection() as conn:
+            if existing_visit_id is not None:
+                conn.execute(
+                    "delete from activity_plan where plan_id = %s", (existing_visit_id,)
+                )
             if plan_id is not None:
                 conn.execute("delete from route_plan where route_plan_id = %s", (plan_id,))
             conn.commit()

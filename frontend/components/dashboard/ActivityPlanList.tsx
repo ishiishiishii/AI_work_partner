@@ -369,17 +369,14 @@ export function ActivityPlanList({
   const filteredPlans = plans.filter(
     (plan) => plan.plan_date >= range.start && plan.plan_date <= range.end,
   );
-  // 資料作成・新規開拓などの顧客に紐づかない日次タスクは「日」表示でのみ、その日の分だけ
-  // 合わせて表示する。商談(deal_id)に紐づくタスク(見積書作成・提案資料準備など)は
-  // その企業への提案・契約に向けた準備という位置づけなので、週表示でも期間内の分を表示する。
+  // 資料作成・新規開拓などのタスクは「日」に加え「週」でも表示する。週次報告や
+  // 月前半の新規開拓を週単位で確認でき、訪問の空き時間が何に使われるか見えるようにする。
   // 「月」は日時を持たない商材別の一覧にするため、タスクは対象外
   const filteredTasks =
     viewMode === "day"
       ? dailyTasks.filter((task) => task.plan_date === selectedDate)
       : viewMode === "week"
-        ? dailyTasks.filter(
-            (task) => task.deal_id !== null && task.plan_date >= range.start && task.plan_date <= range.end,
-          )
+        ? dailyTasks.filter((task) => task.plan_date >= range.start && task.plan_date <= range.end)
         : [];
   const filtered = [...filteredPlans, ...filteredTasks].sort((a, b) => {
     if (viewMode === "day") {
@@ -662,8 +659,8 @@ export function ActivityPlanList({
               {isOverlapping && <span className="activity-plan-list__warning">⚠ 時間が重複しています</span>}
             </div>
           </div>
-          {plan.expected_amount > 0 && (
-            <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
+          {plan.category === "visit" && plan.expected_amount > 0 && (
+            <div className="activity-plan-list__amount">商談見込 {formatYen(plan.expected_amount)}</div>
           )}
           {plan.category === "task" && !plan.is_ai_generated && (
             <div className="activity-plan-list__progress">
@@ -1065,8 +1062,8 @@ export function ActivityPlanList({
                         成約確率{detailPlan.expected_probability.toFixed(0)}%
                       </span>
                     )}
-                    {detailPlan.expected_amount > 0 && (
-                      <span className="plan-modal__stat-amount">{formatYen(detailPlan.expected_amount)}</span>
+                    {detailPlan.category === "visit" && detailPlan.expected_amount > 0 && (
+                      <span className="plan-modal__stat-amount">商談見込 {formatYen(detailPlan.expected_amount)}</span>
                     )}
                   </div>
                 )}

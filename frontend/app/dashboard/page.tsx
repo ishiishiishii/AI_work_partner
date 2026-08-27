@@ -1,12 +1,20 @@
 "use client";
 
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
+import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
-import { RoutePlanPanel } from "@/components/dashboard/RoutePlanPanel";
-import { useDashboardData } from "@/lib/useDashboardData";
+import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel";
+import { TARGET_MONTH, useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
+import dynamic from "next/dynamic";
+
+// leafletはブラウザのwindow/documentに直接依存しておりSSR不可なため、
+// Next.jsのサーバー描画パスに乗らないよう動的import(ssr:false)にする。
+const MapPanel = dynamic(() => import("@/components/dashboard/MapPanel").then((m) => m.MapPanel), {
+  ssr: false,
+});
 
 export default function DashboardPage() {
   const { selectedRep, isAuthLoading } = useRep();
@@ -18,19 +26,25 @@ export default function DashboardPage() {
     plans,
     dailyTasks,
     deals,
+    customers,
+    territory,
+    affinities,
     replan,
     altNotice,
     altPreview,
-    isRegenerating,
     needsInitialPlan,
     isGeneratingInitialPlan,
     forecastAmount,
+    achievementRate,
     forecastProfitAmount,
+    salesAchievementProbability,
+    profitAchievementProbability,
+    jointAchievementProbability,
     actualAchievedAmount,
     actualAchievementRate,
+    routeRefreshRevision,
     handleTargetSave,
     handleRouteApproved,
-    handleRegenerate,
     handleResultChange,
     handlePostpone,
     handleEditPlan,
@@ -87,28 +101,21 @@ export default function DashboardPage() {
             forecastProfitAmount={forecastProfitAmount}
             actualAchievedAmount={actualAchievedAmount}
             actualAchievementRate={actualAchievementRate}
+            salesAchievementProbability={salesAchievementProbability}
+            profitAchievementProbability={profitAchievementProbability}
+            jointAchievementProbability={jointAchievementProbability}
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
+          <RouteBatchPlanPanel onApproved={handleRouteApproved} refreshSignal={routeRefreshRevision} />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
-          {needsInitialPlan ? (
+          {needsInitialPlan && (
             <p className="activity-plan-list__empty">
               {isGeneratingInitialPlan
                 ? "AIが今月の活動計画を作成しています(数分かかる場合があります)..."
                 : "目標を保存すると、AIが今月の活動計画を作成します。"}
             </p>
-          ) : (
-            <div className="regenerate-bar">
-              <button
-                type="button"
-                className="regenerate-button"
-                onClick={handleRegenerate}
-                disabled={isRegenerating}
-              >
-                {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
-              </button>
-            </div>
           )}
           <ActivityPlanList
             repId={selectedRep.rep_id}
@@ -129,7 +136,8 @@ export default function DashboardPage() {
           />
         </div>
         <div className="dashboard-layout__sidebar">
-          <RoutePlanPanel onSaved={handleRouteApproved} />
+          <AiChatPanel target={target} achievementRate={achievementRate} plans={plans} affinities={affinities} />
+          <MapPanel customers={customers} territory={territory} plans={plans} targetMonth={TARGET_MONTH} />
           <AiReasoningPanel plans={plans} />
         </div>
       </div>
