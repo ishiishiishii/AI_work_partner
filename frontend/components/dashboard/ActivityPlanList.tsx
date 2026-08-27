@@ -125,12 +125,34 @@ function addDays(date: Date, amount: number): Date {
   return next;
 }
 
-function getWeekRange(dateStr: string): { start: string; end: string } {
-  const date = parseISODate(dateStr);
+function getMonday(date: Date): Date {
   const weekday = date.getUTCDay(); // 0(日)〜6(土)
   const diffToMonday = weekday === 0 ? -6 : 1 - weekday;
-  const monday = addDays(date, diffToMonday);
+  return addDays(date, diffToMonday);
+}
+
+function getWeekRange(dateStr: string): { start: string; end: string } {
+  const monday = getMonday(parseISODate(dateStr));
   return { start: formatISODate(monday), end: formatISODate(addDays(monday, 6)) };
+}
+
+// バックエンド(PlanOut.week_number)と同じ「月内の月曜始まり週をその月の最初の営業日
+// から連番で数える」定義のフォールバック計算。楽観的更新で作った予定(APIから
+// week_number がまだ返っていない)の表示用に使う。
+function getBusinessWeekNumber(dateStr: string): number {
+  const date = parseISODate(dateStr);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  let firstBusinessDay = new Date(Date.UTC(year, month, 1));
+  while (firstBusinessDay.getUTCDay() === 0 || firstBusinessDay.getUTCDay() === 6) {
+    firstBusinessDay = addDays(firstBusinessDay, 1);
+  }
+  const diffDays = Math.round(
+    (getMonday(date).getTime() - getMonday(firstBusinessDay).getTime()) / (24 * 60 * 60 * 1000),
+  );
+  // 月初が土日の場合、その週末日は最初の営業日より前のMondayに属するため、
+  // 第1週として扱う(第0週・マイナスは表示上不自然なため切り上げる)
+  return Math.max(1, Math.floor(diffDays / 7) + 1);
 }
 
 function getMonthRange(dateStr: string): { start: string; end: string } {
@@ -192,8 +214,9 @@ function groupVisitsByDate(items: ActivityPlan[]): Map<string, string[]> {
 }
 
 function formatRangeLabel(viewMode: ViewMode, range: { start: string; end: string }): string {
-  if (viewMode === "day") return `${formatDate(range.start)}の活動計画`;
-  if (viewMode === "week") return `${formatDate(range.start)}〜${formatDate(range.end)}の活動計画`;
+  const weekNumber = getBusinessWeekNumber(range.start);
+  if (viewMode === "day") return `${formatDate(range.start)}(第${weekNumber}週)の活動計画`;
+  if (viewMode === "week") return `第${weekNumber}週 ${formatDate(range.start)}〜${formatDate(range.end)}の活動計画`;
   const [year, month] = range.start.split("-");
   return `${year}年${Number(month)}月に狙うべき企業`;
 }
@@ -481,6 +504,7 @@ export function ActivityPlanList({
       result_status: "pending",
       memo: null,
       progress_percent: 0,
+      is_draft: false,
     });
     closeGapPicker();
   }
@@ -637,6 +661,7 @@ export function ActivityPlanList({
                 <div className="activity-plan-list__customer">
                   {plan.customer_name}
                   {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
+                  {plan.is_draft && <span className="badge badge--draft">下書き(未採用)</span>}
                 </div>
                 {plan.category === "visit" && plan.product_name && (
                   <div className="activity-plan-list__product">商品: {plan.product_name}</div>
@@ -683,8 +708,16 @@ export function ActivityPlanList({
         </div>
         {plan.category === "visit" && (
           <div className="activity-plan-list__result-buttons">
-            {renderResultControls(plan)}
-            {plan.result_status === "pending" && renderAlternativeControl(plan.plan_id, "対応が難しい")}
+            {plan.is_draft ? (
+              <span className="activity-plan-list__empty">
+                月間営業スケジュールで「採用」すると対応を記録できます
+              </span>
+            ) : (
+              <>
+                {renderResultControls(plan)}
+                {plan.result_status === "pending" && renderAlternativeControl(plan.plan_id, "対応が難しい")}
+              </>
+            )}
           </div>
         )}
       </>
@@ -737,6 +770,7 @@ export function ActivityPlanList({
           result_status: "pending",
           memo: null,
           progress_percent: 0,
+          is_draft: false,
         }
       : {
           plan_id: -Date.now(),
@@ -758,6 +792,7 @@ export function ActivityPlanList({
           result_status: "pending",
           memo: null,
           progress_percent: 0,
+          is_draft: false,
         };
     setNewPlanDraft(draft);
     setDetailPlanId(draft.plan_id);

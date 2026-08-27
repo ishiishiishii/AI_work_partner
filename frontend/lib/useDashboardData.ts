@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PlanEditFields } from "@/components/dashboard/ActivityPlanList";
 import {
   cancelPlan,
@@ -29,6 +29,7 @@ import {
   calcForecastAmount,
   calcForecastProfit,
 } from "@/lib/forecast";
+import { useInitialPlanGeneration } from "@/lib/initialPlanGenerationContext";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import type {
   ActivityPlan,
@@ -90,7 +91,13 @@ export function useDashboardData(repId: number | null) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
   const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
-  const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
+  // 生成中フラグはルートレイアウトのProviderで持つ(このフックはページ遷移のたびに
+  // 作り直されるため、ローカルstateだと生成中に別ページへ移動して戻った際に「未生成」
+  // 状態へ巻き戻って見えてしまい、目標の再保存で生成が二重に走る不具合があった)
+  const initialPlanGeneration = useInitialPlanGeneration();
+  const initialPlanGenerationKey = repId !== null ? `${repId}:${TARGET_MONTH}` : null;
+  const isGeneratingInitialPlan =
+    initialPlanGenerationKey !== null && initialPlanGeneration.isGenerating(initialPlanGenerationKey);
   // 商談結果がDBへ保存され、その結果に基づく活動再計画まで完了した時だけ更新する。
   // ダッシュボードの月間ルートが、保存前の古い商談状態で先走って再計算するのを防ぐ。
   const [routeRefreshRevision, setRouteRefreshRevision] = useState(0);
@@ -132,7 +139,11 @@ export function useDashboardData(repId: number | null) {
 
         // 顧客に紐づかない日次タスクは generate の対象外なので、件数判定には含めない
         const initialVisitPlans = fetchedPlans.filter((plan) => plan.category === "visit");
-        setNeedsInitialPlan(initialVisitPlans.length === 0);
+        // 生成が既に(別ページにいた間も含めて)裏側で走っている場合は、まだ結果が
+        // DBに反映されていないだけなので「未生成」扱いに巻き戻さない
+        const alreadyGenerating =
+          initialPlanGenerationKey !== null && initialPlanGeneration.isGenerating(initialPlanGenerationKey);
+        setNeedsInitialPlan(initialVisitPlans.length === 0 && !alreadyGenerating);
 
         // 自己分析スコアは計算済みのキャッシュなので、表示前に最新の結果を反映させておく
         await recalculateRepAffinity(rid);
@@ -175,6 +186,25 @@ export function useDashboardData(repId: number | null) {
     };
   }, [repId]);
 
+  // 初回AI生成は「目標保存→別ページへ移動→生成完了を待たずに/activityへ戻る」のように
+  // 元のフックインスタンスとは別のマウントで完了を迎えることがある。生成中フラグが
+  // true→falseに変わったタイミングで、今見えているインスタンス側でも最新の計画を
+  // 取り直す(自分自身が生成した場合はgenerateInitialPlan内で既にsetPlans済みだが、
+  // 二重取得しても実害はない)。
+  const wasGeneratingInitialPlanRef = useRef(isGeneratingInitialPlan);
+  useEffect(() => {
+    const wasGenerating = wasGeneratingInitialPlanRef.current;
+    wasGeneratingInitialPlanRef.current = isGeneratingInitialPlan;
+    if (!wasGenerating || isGeneratingInitialPlan || repId === null) return;
+    const rid = repId;
+    (async () => {
+      const fresh = await fetchActivityPlans(rid);
+      setPlans(fresh.filter((plan) => plan.category === "visit"));
+      setDailyTasks(fresh.filter((plan) => plan.category === "task"));
+      await refreshForecast(rid);
+    })();
+  }, [isGeneratingInitialPlan, repId]);
+
   async function handleTargetSave(input: {
     target_amount: number;
     target_deal_count: number;
@@ -187,14 +217,18 @@ export function useDashboardData(repId: number | null) {
     await refreshForecast(rid);
 
     // 目標保存はここで完了させ(GoalCard側の「保存中...」を即座に終える)、
-    // まだ計画が無い月の初回AI生成は裏側で別途走らせる(数分かかり得るため)
-    if (needsInitialPlan) {
+    // まだ計画が無い月の初回AI生成は裏側で別途走らせる(数分かかり得るため)。
+    // ページ遷移をまたいでも生成中フラグが残るので、既に走っている生成に対して
+    // 二重に発火することはない(isGeneratingInitialPlanがtrueならneedsInitialPlanは
+    // falseになっている)。
+    if (needsInitialPlan && !isGeneratingInitialPlan) {
       void generateInitialPlan(rid);
     }
   }
 
   async function generateInitialPlan(rid: number) {
-    setIsGeneratingInitialPlan(true);
+    const key = `${rid}:${TARGET_MONTH}`;
+    initialPlanGeneration.setGenerating(key, true);
     try {
       const generated = await generateActivityPlans(rid, TARGET_MONTH);
       setPlans(generated.filter((plan) => plan.category === "visit"));
@@ -204,7 +238,7 @@ export function useDashboardData(repId: number | null) {
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
     } finally {
-      setIsGeneratingInitialPlan(false);
+      initialPlanGeneration.setGenerating(key, false);
     }
   }
 
@@ -588,6 +622,7 @@ export function useDashboardData(repId: number | null) {
           result_status: "pending",
           memo: null,
           progress_percent: 0,
+          is_draft: false,
         };
 
         if (foundInPlans) {
@@ -647,6 +682,7 @@ export function useDashboardData(repId: number | null) {
         result_status: "pending",
         memo: null,
         progress_percent: 0,
+        is_draft: false,
       };
 
       const before = calcAchievementRate(plans, target.target_amount, deals);

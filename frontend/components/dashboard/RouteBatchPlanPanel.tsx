@@ -10,14 +10,13 @@ import {
   TRAVEL_MODE_LABELS,
   TransitItineraryDetails,
   clock,
-  tomorrowInTokyo,
   yen,
 } from "@/components/dashboard/RoutePlanPanel";
 import {
   ROUTE_ECONOMIC_POLICIES,
   routeEconomicPolicyConfig,
-  type RouteEconomicPolicy,
 } from "@/lib/routeEconomicPolicy";
+import { useRouteBatchPlan } from "@/lib/routeBatchPlanContext";
 import type { RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeek } from "@/types";
 
 type Props = {
@@ -111,14 +110,23 @@ function MonthlyPlanOutlook({ batch }: { batch: RoutePlanBatchPreview }) {
 }
 
 export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
-  const [selectedMonth, setSelectedMonth] = useState(() => tomorrowInTokyo().slice(0, 7));
-  const [policy, setPolicy] = useState<RouteEconomicPolicy>("balanced");
-  const [maxVisits, setMaxVisits] = useState(4);
-  const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>("driving");
-  const [batch, setBatch] = useState<RoutePlanBatchPreview | null>(null);
-  const [weekBatches, setWeekBatches] = useState<Record<number, RoutePlanBatchPreview>>({});
+  const {
+    selectedMonth,
+    setSelectedMonth,
+    policy,
+    setPolicy,
+    maxVisits,
+    setMaxVisits,
+    travelMode,
+    setTravelMode,
+    batch,
+    setBatch,
+    weekBatches,
+    setWeekBatches,
+    decisions,
+    setDecisions,
+  } = useRouteBatchPlan();
   const [calculatingWeek, setCalculatingWeek] = useState<number | null>(null);
-  const [decisions, setDecisions] = useState<Record<number, "approved" | "rejected">>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const economicPolicy = routeEconomicPolicyConfig(policy);
