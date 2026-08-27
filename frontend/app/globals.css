@@ -1027,29 +1027,51 @@ a {
 
 .affinity-summary__ratio-bar {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  flex-direction: row;
+  gap: 0;
+  height: 0.6rem;
   margin-top: 0.5rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line);
 }
 
 .affinity-summary__ratio-segment {
+  width: var(--ratio-width);
+  min-width: 0;
+}
+
+.affinity-summary__ratio-segment--new {
+  background: var(--ai);
+}
+
+.affinity-summary__ratio-segment--existing {
+  background: var(--line);
+}
+
+.affinity-summary__ratio-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+  margin: 0.6rem 0 0;
+}
+
+.affinity-summary__ratio-legend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.affinity-summary__ratio-legend-item dt {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  min-width: 0;
-  width: auto;
-  padding: 0;
-  color: var(--muted);
-  font-size: 0.8rem;
   font-weight: 400;
 }
 
-.affinity-summary__ratio-segment strong {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.affinity-summary__ratio-segment::before {
+.affinity-summary__ratio-legend-item dt::before {
   content: "";
   width: 0.6rem;
   height: 0.6rem;
@@ -1057,12 +1079,22 @@ a {
   flex-shrink: 0;
 }
 
-.affinity-summary__ratio-segment--new::before {
+.affinity-summary__ratio-legend-item--new dt::before {
   background: var(--ai);
 }
 
-.affinity-summary__ratio-segment--existing::before {
+.affinity-summary__ratio-legend-item--existing dt::before {
   background: var(--line);
+}
+
+.affinity-summary__ratio-legend-item dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.affinity-summary__ratio-legend-item dd strong {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .affinity-summary__top-list {
@@ -2880,6 +2912,10 @@ a {
     max-width: 1180px;
   }
 
+  .app-header__inner {
+    max-width: 1180px;
+  }
+
   .dashboard-layout {
     grid-template-columns: minmax(0, 1fr) 380px;
     gap: 2rem;
@@ -2944,44 +2980,20 @@ a {
     font-size: 2rem;
     font-family: var(--font-display);
   }
+}
 
-  .affinity-summary__ratio-bar {
-    flex-direction: row;
-    gap: 0;
-    height: 2.25rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
+@media (min-width: 1600px) {
+  main.dashboard-main,
+  main.wide-main {
+    max-width: 1520px;
   }
 
-  .affinity-summary__ratio-segment {
-    width: var(--ratio-width);
-    justify-content: center;
-    padding: 0 0.5rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .app-header__inner {
+    max-width: 1520px;
   }
 
-  .affinity-summary__ratio-segment::before {
-    display: none;
-  }
-
-  .affinity-summary__ratio-segment strong {
-    color: inherit;
-    font-weight: 600;
-  }
-
-  .affinity-summary__ratio-segment--new {
-    background: var(--ai);
-    color: var(--accent-ink);
-  }
-
-  .affinity-summary__ratio-segment--existing {
-    background: var(--line);
-    color: var(--ink);
+  .dashboard-layout {
+    grid-template-columns: minmax(0, 1fr) 440px;
   }
 
   .affinity-summary__top-list {
@@ -3000,10 +3012,6 @@ a {
 
   .affinity-ranking {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .app-header__inner {
-    max-width: 1180px;
   }
 
   /* 横長(デスクトップ幅)ではハンバーガー+ドロワーをやめ、

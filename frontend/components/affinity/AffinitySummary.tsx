@@ -56,19 +56,29 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
           <div
             className="affinity-summary__ratio-segment affinity-summary__ratio-segment--new"
             style={{ "--ratio-width": `${newRatioPercent}%` } as React.CSSProperties}
-          >
-            新規開拓 <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
-          </div>
+          />
         )}
         {existingRatioPercent > 0 && (
           <div
             className="affinity-summary__ratio-segment affinity-summary__ratio-segment--existing"
             style={{ "--ratio-width": `${existingRatioPercent}%` } as React.CSSProperties}
-          >
-            既存深耕 <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
-          </div>
+          />
         )}
       </div>
+      <dl className="affinity-summary__ratio-legend">
+        <div className="affinity-summary__ratio-legend-item affinity-summary__ratio-legend-item--new">
+          <dt>新規開拓</dt>
+          <dd>
+            <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
+          </dd>
+        </div>
+        <div className="affinity-summary__ratio-legend-item affinity-summary__ratio-legend-item--existing">
+          <dt>既存深耕</dt>
+          <dd>
+            <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
+          </dd>
+        </div>
+      </dl>
 
       <h3 className="affinity-summary__subheading">自己分析TOP{TOP_COUNT}</h3>
       {topAffinities.length === 0 ? (
