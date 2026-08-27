@@ -105,6 +105,9 @@ export default function DashboardPage() {
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
+  // 延期元のplan_id -> 延期先に作った新しい予定の日付。延期を取り消した時、元の予定は
+  // 復活する一方この新しい予定は消えず残るので、重複に気づけるよう警告を出すために使う
+  const [postponedToByPlan, setPostponedToByPlan] = useState<Record<number, string>>({});
 
   // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
   // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
@@ -262,6 +265,20 @@ export default function DashboardPage() {
           await recalculateRepAffinity(REP_ID);
           setAffinities(await fetchRepAffinity(REP_ID));
         }
+        // 延期の取り消しは元の予定を復活させるだけで、延期先に作った予定は消さない
+        // (自動で消すと、そちらを既に別日に調整済みだった場合に壊してしまうため)。
+        // 重複したまま気づかないのを防ぐため、警告だけ出す
+        const postponedTo = postponedToByPlan[planId];
+        if (postponedTo) {
+          setAltNotice(
+            `延期を取り消しました。延期先(${postponedTo})に作成した予定は残っています。不要であれば手動で削除してください。`,
+          );
+          setPostponedToByPlan((prev) => {
+            const next = { ...prev };
+            delete next[planId];
+            return next;
+          });
+        }
         await refreshForecast(REP_ID);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "結果の取り消しに失敗しました");
@@ -339,6 +356,7 @@ export default function DashboardPage() {
         progress_percent: 0,
       };
       setPlans((prev) => prev.concat(rescheduled));
+      setPostponedToByPlan((prev) => ({ ...prev, [planId]: newDate }));
       await refreshForecast(REP_ID);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "延期の処理に失敗しました");
