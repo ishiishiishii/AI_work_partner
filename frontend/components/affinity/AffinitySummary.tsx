@@ -51,20 +51,31 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
       </dl>
 
       <h3 className="affinity-summary__subheading">新規開拓・既存深耕の割合(商談数ベース)</h3>
-      <div className="affinity-summary__ratio-bar">
+      {/* バー自体は色の比率だけを示す(文字は入れない)。比率が偏ると文字が
+          セグメント幅に収まらず省略されてしまうため、件数・成約率は下の
+          凡例に分離し、バーの幅に関係なく常に全文表示する */}
+      <div className="affinity-summary__ratio-track">
         {newRatioPercent > 0 && (
-          <div
-            className="affinity-summary__ratio-segment affinity-summary__ratio-segment--new"
+          <span
+            className="affinity-summary__ratio-fill affinity-summary__ratio-fill--new"
             style={{ "--ratio-width": `${newRatioPercent}%` } as React.CSSProperties}
-          >
+          />
+        )}
+        {existingRatioPercent > 0 && (
+          <span
+            className="affinity-summary__ratio-fill affinity-summary__ratio-fill--existing"
+            style={{ "--ratio-width": `${existingRatioPercent}%` } as React.CSSProperties}
+          />
+        )}
+      </div>
+      <div className="affinity-summary__ratio-legend">
+        {newRatioPercent > 0 && (
+          <div className="affinity-summary__ratio-segment affinity-summary__ratio-segment--new">
             新規開拓 <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
           </div>
         )}
         {existingRatioPercent > 0 && (
-          <div
-            className="affinity-summary__ratio-segment affinity-summary__ratio-segment--existing"
-            style={{ "--ratio-width": `${existingRatioPercent}%` } as React.CSSProperties}
-          >
+          <div className="affinity-summary__ratio-segment affinity-summary__ratio-segment--existing">
             既存深耕 <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
           </div>
         )}

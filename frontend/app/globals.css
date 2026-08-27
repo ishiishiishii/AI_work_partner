@@ -207,24 +207,40 @@ a {
 }
 
 .goal-card__amount-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font: inherit;
   color: inherit;
   background: none;
   border: none;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
   border-bottom: 1px dashed var(--line);
+  padding: 0.1rem 0.15rem 0.1rem 0;
+  margin: 0 0 0 -0.15rem;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .goal-card__amount-button:hover {
   color: var(--accent);
   border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .goal-card__amount-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.goal-card__amount-edit-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.goal-card__amount-button:hover .goal-card__amount-edit-icon {
+  color: var(--accent);
 }
 
 .goal-card__actual {
@@ -236,26 +252,6 @@ a {
   min-width: 200px;
 }
 
-.goal-card__edit-button {
-  margin-top: 0.75rem;
-  border: 1px solid var(--line);
-  background: var(--card);
-  color: var(--accent);
-  border-radius: 8px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.goal-card__edit-button:hover {
-  border-color: var(--accent);
-}
-
-.goal-card__edit-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .goal-card__amount-form {
   display: flex;
   align-items: center;
@@ -263,20 +259,39 @@ a {
   gap: 0.5rem;
 }
 
-.goal-card__amount-form input {
-  width: 11ch;
-  font-size: 1.1rem;
-  font-weight: 600;
-  font-family: inherit;
-  color: var(--ink);
-  padding: 0.2rem 0.5rem;
+.goal-card__amount-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
   border: 1px solid var(--line);
   border-radius: 6px;
 }
 
-.goal-card__amount-form input:focus {
+.goal-card__amount-input-wrap:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.goal-card__amount-form input {
+  width: 9ch;
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--ink);
+  border: none;
+  padding: 0;
+  background: none;
+  text-align: right;
+}
+
+.goal-card__amount-form input:focus {
+  outline: none;
+}
+
+.goal-card__amount-suffix {
+  font-size: 0.9rem;
+  color: var(--muted);
 }
 
 .goal-card__amount-form button {
@@ -1007,11 +1022,33 @@ a {
   margin-top: 0;
 }
 
-.affinity-summary__ratio-bar {
+.affinity-summary__ratio-track {
+  display: flex;
+  height: 0.6rem;
+  margin-top: 0.5rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+
+.affinity-summary__ratio-fill {
+  width: var(--ratio-width);
+  height: 100%;
+}
+
+.affinity-summary__ratio-fill--new {
+  background: var(--ai);
+}
+
+.affinity-summary__ratio-fill--existing {
+  background: var(--line);
+}
+
+.affinity-summary__ratio-legend {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin-top: 0.5rem;
+  margin-top: 0.6rem;
 }
 
 .affinity-summary__ratio-segment {
@@ -2900,43 +2937,10 @@ a {
     font-family: var(--font-display);
   }
 
-  .affinity-summary__ratio-bar {
+  .affinity-summary__ratio-legend {
     flex-direction: row;
-    gap: 0;
-    height: 2.25rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .affinity-summary__ratio-segment {
-    width: var(--ratio-width);
-    justify-content: center;
-    padding: 0 0.5rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .affinity-summary__ratio-segment::before {
-    display: none;
-  }
-
-  .affinity-summary__ratio-segment strong {
-    color: inherit;
-    font-weight: 600;
-  }
-
-  .affinity-summary__ratio-segment--new {
-    background: var(--ai);
-    color: var(--accent-ink);
-  }
-
-  .affinity-summary__ratio-segment--existing {
-    background: var(--line);
-    color: var(--ink);
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
   }
 
   .affinity-summary__top-list {
