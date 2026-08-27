@@ -6,7 +6,7 @@ import { fetchProducts } from "@/lib/api";
 import { calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
-import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
+import type { ActivityPlan, ActivityPlanCategory, Deal, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
   plan_date: string;
@@ -29,6 +29,7 @@ type ActivityPlanListProps = {
   repId: number;
   plans: ActivityPlan[];
   dailyTasks: ActivityPlan[];
+  deals: Deal[];
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
   onEditPlan: (planId: number, updates: PlanEditFields) => void;
@@ -208,7 +209,7 @@ function formatDurationMinutes(minutes: number): string {
 // 企業(customer_id)ごとにグルーピングし、グループ内は見込み金額×成約確率の高い順に並べる
 type CompanyGroup = { customerName: string; customerId: number | null; items: ActivityPlan[]; totalValue: number };
 
-function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
+function groupPlansByCompany(items: ActivityPlan[], deals: Deal[]): CompanyGroup[] {
   const groups = new Map<string, { customerName: string; customerId: number | null; items: ActivityPlan[] }>();
   for (const item of items) {
     const key = item.customer_id !== null ? String(item.customer_id) : item.customer_name;
@@ -224,7 +225,7 @@ function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
       const sorted = [...list].sort(
         (a, b) => b.expected_amount * b.expected_probability - a.expected_amount * a.expected_probability,
       );
-      const totalValue = calcForecastAmount(sorted);
+      const totalValue = calcForecastAmount(sorted, deals);
       return { customerName, customerId, items: sorted, totalValue };
     })
     .sort((a, b) => b.totalValue - a.totalValue);
@@ -305,6 +306,7 @@ export function ActivityPlanList({
   repId,
   plans,
   dailyTasks,
+  deals,
   onResultChange,
   onRequestAlternative,
   onEditPlan,
@@ -364,7 +366,7 @@ export function ActivityPlanList({
     }
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
-  const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans) : [];
+  const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans, deals) : [];
 
   // 週・月表示の上に出す簡易カレンダー。訪問予定は plans に日付を問わず全期間分入っているので、
   // 月表示ではみ出す前後月の日付にも訪問があれば表示できる

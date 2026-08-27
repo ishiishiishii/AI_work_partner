@@ -9,6 +9,8 @@ export type DealEditFields = {
   estimated_amount: number;
   expected_visit_count: number;
   expected_effort_hours: number;
+  // 成約(won)済みの商談でのみ送る。未成約の商談で送るとバックエンドのトリガーに拒否される
+  actual_amount?: number | null;
 };
 
 type DealHistoryListProps = {
@@ -58,6 +60,8 @@ export function DealHistoryList({
       estimated_amount: deal.estimated_amount,
       expected_visit_count: deal.expected_visit_count,
       expected_effort_hours: deal.expected_effort_hours,
+      actual_amount:
+        deal.deal_result_status === "won" ? (deal.actual_amount ?? deal.estimated_amount) : null,
     });
   }
 
@@ -140,6 +144,19 @@ export function DealHistoryList({
                       }
                     />
                   </label>
+                  {deal.deal_result_status === "won" && (
+                    <label>
+                      実際の契約金額
+                      <input
+                        type="number"
+                        min={0}
+                        value={editDraft.actual_amount ?? editDraft.estimated_amount}
+                        onChange={(event) =>
+                          setEditDraft({ ...editDraft, actual_amount: Number(event.target.value) })
+                        }
+                      />
+                    </label>
+                  )}
                   <label>
                     想定訪問回数
                     <input
@@ -201,6 +218,9 @@ export function DealHistoryList({
             </div>
             <div className="deal-history__amount">
               {formatYen(deal.estimated_amount)}
+              {deal.deal_result_status === "won" && deal.actual_amount != null && (
+                <span className="deal-history__profit">実際 {formatYen(deal.actual_amount)}</span>
+              )}
               {deal.profit != null && (
                 <span className="deal-history__profit">粗利 {formatYen(deal.profit)}</span>
               )}

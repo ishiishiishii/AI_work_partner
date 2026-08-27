@@ -144,6 +144,7 @@ class DealOut(OrmModel):
     deal_phase_id: int
     cost: Decimal
     profit: Decimal
+    actual_amount: Decimal | None = None
 
 
 class DealUpdate(BaseModel):
@@ -152,6 +153,8 @@ class DealUpdate(BaseModel):
     estimated_amount: Decimal = Field(ge=0)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
+    # 成約(won)済みの商談のみ有効。未成約に送っても保存時のトリガーで拒否される
+    actual_amount: Decimal | None = Field(default=None, ge=0)
 
 
 class CustomerWinRateOut(OrmModel):

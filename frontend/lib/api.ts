@@ -589,6 +589,7 @@ type ApiDeal = {
   deal_phase_id: number;
   cost: string | number;
   profit: string | number;
+  actual_amount: string | number | null;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -614,6 +615,7 @@ function mapDeal(row: ApiDeal): Deal {
     contract_date: row.contract_date,
     cost: Number(row.cost),
     profit: Number(row.profit),
+    actual_amount: row.actual_amount === null ? null : Number(row.actual_amount),
   };
 }
 

@@ -228,7 +228,7 @@ MVPのコア体験を優先するため後回しにしてきた機能群。Must 
 | `customer` | 顧客企業（主担当 `primary_rep_id`） |
 | `customer_contact` | 先方キーパーソン。`(contact_id, customer_id)` UNIQUE |
 | `product` / `deal_line` | 商材と商談明細 |
-| `deal` | 商談。`(deal_id, customer_id)` UNIQUE。複合 FK で contact / plan / result の整合を担保 |
+| `deal` | 商談。`(deal_id, customer_id)` UNIQUE。複合 FK で contact / plan / result の整合を担保。`estimated_amount`（見込み金額）と `actual_amount`（実際の契約金額、成約時のみ・トリガーで自動補完/検証）は別カラムで、成約後に見積もり精度を追える |
 | `sales_target` | 月次目標 `(rep_id, target_month)` |
 | `rep_affinity` | 自己分析スコア `(rep_id, category_id, pattern_id)` |
 | `activity_plan` | AI 生成を含む活動計画（`is_ai_generated`） |

@@ -343,7 +343,7 @@ _AI_DEAL_COLUMNS = """
     deal_phase_name, deal_result_status, product_name, subcategory_name,
     category_name, estimated_amount, win_probability, expected_visit_count,
     expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id,
-    cost, profit
+    cost, profit, actual_amount
 """
 
 
@@ -514,6 +514,7 @@ def update_deal(
     estimated_amount: Decimal,
     expected_visit_count: int,
     expected_effort_hours: Decimal,
+    actual_amount: Decimal | None = None,
 ) -> dict:
     existing = conn.execute(
         "select customer_id from deal where deal_id = %s and rep_id = %s",
@@ -541,7 +542,8 @@ def update_deal(
             estimated_amount = %s,
             win_probability = %s,
             expected_visit_count = %s,
-            expected_effort_hours = %s
+            expected_effort_hours = %s,
+            actual_amount = coalesce(%s, actual_amount)
         where deal_id = %s and rep_id = %s
         returning deal_id
         """,
@@ -552,6 +554,7 @@ def update_deal(
             win_probability,
             expected_visit_count,
             expected_effort_hours,
+            actual_amount,
             deal_id,
             rep_id,
         ),
@@ -1226,7 +1229,8 @@ def delete_result(conn: Connection, *, result_id: int, rep_id: int) -> dict:
                   from deal_result_status
                   where status_code = 'ongoing'
                 ),
-                contract_date = null
+                contract_date = null,
+                actual_amount = null
             where deal_id = %s and rep_id = %s
             """,
             (result["deal_id"], rep_id),
@@ -1262,7 +1266,8 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
         raise ValueError("target not found")
 
     # 1商談に複数のactivity_plan行(訪問+関連タスク等)が紐づき得るため、商談単位で
-    # 1回だけ計上する。成約は満額、失注は0円、進行中は見込み金額×確度/100。
+    # 1回だけ計上する。成約は実契約金額(未記録ならestimated_amount)、失注は0円、
+    # 進行中は見込み金額×確度/100。
     stats = conn.execute(
         """
         with month_plans as (
@@ -1276,7 +1281,7 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
           select
             d.deal_id,
             case
-              when drs.status_code = 'won' then d.estimated_amount
+              when drs.status_code = 'won' then coalesce(d.actual_amount, d.estimated_amount)
               when drs.status_code = 'lost' then 0
               else d.estimated_amount * d.win_probability / 100
             end as amount
