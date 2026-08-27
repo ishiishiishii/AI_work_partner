@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchMasters, fetchProducts } from "@/lib/api";
-import type { DealPhase, Product } from "@/types";
+import { ProductPickerField, type ProductFieldValue } from "@/components/ProductPickerField";
+import { fetchMasters } from "@/lib/api";
+import type { DealPhase } from "@/types";
 
 type NewDealFormProps = {
   onCreate: (input: {
@@ -12,32 +13,28 @@ type NewDealFormProps = {
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
+    memo?: string;
   }) => Promise<void>;
+  showTitle?: boolean;
 };
 
 const initialDraft = {
-  product_id: "",
   deal_phase_id: "",
   estimated_amount: "",
   expected_visit_count: "",
   expected_effort_hours: "",
   deal_start_date: "",
+  memo: "",
 };
 
-export function NewDealForm({ onCreate }: NewDealFormProps) {
-  const [products, setProducts] = useState<Product[]>([]);
+export function NewDealForm({ onCreate, showTitle = true }: NewDealFormProps) {
+  const [product, setProduct] = useState<ProductFieldValue>({ productId: null, productName: "" });
   const [dealPhases, setDealPhases] = useState<DealPhase[]>([]);
   const [draft, setDraft] = useState(initialDraft);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchProducts()
-      .then((fetched) => {
-        setProducts(fetched);
-        setDraft((prev) => ({ ...prev, product_id: prev.product_id || String(fetched[0]?.product_id ?? "") }));
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "商品一覧の取得に失敗しました"));
     fetchMasters()
       .then((masters) => {
         setDealPhases(masters.deal_phases);
@@ -50,7 +47,7 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
   }, []);
 
   const isValid =
-    draft.product_id !== "" &&
+    product.productId !== null &&
     draft.deal_phase_id !== "" &&
     draft.estimated_amount !== "" &&
     draft.expected_visit_count !== "" &&
@@ -58,20 +55,22 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (!isValid) return;
+    if (!isValid || product.productId === null) return;
 
     setIsSaving(true);
     setError(null);
     try {
       await onCreate({
-        product_id: Number(draft.product_id),
+        product_id: product.productId,
         deal_phase_id: Number(draft.deal_phase_id),
         estimated_amount: Number(draft.estimated_amount),
         expected_visit_count: Number(draft.expected_visit_count),
         expected_effort_hours: Number(draft.expected_effort_hours),
         deal_start_date: draft.deal_start_date || undefined,
+        memo: draft.memo || undefined,
       });
-      setDraft({ ...initialDraft, product_id: draft.product_id, deal_phase_id: draft.deal_phase_id });
+      setProduct({ productId: null, productName: "" });
+      setDraft({ ...initialDraft, deal_phase_id: draft.deal_phase_id });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
     } finally {
@@ -81,20 +80,11 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
 
   return (
     <form className="panel new-customer-form" onSubmit={handleSubmit}>
-      <h2>商談を追加</h2>
+      {showTitle && <h2>商談を追加</h2>}
       <div className="new-customer-form__grid">
         <label className="goal-card__field">
           <span>商品</span>
-          <select
-            value={draft.product_id}
-            onChange={(event) => setDraft({ ...draft, product_id: event.target.value })}
-          >
-            {products.map((product) => (
-              <option key={product.product_id} value={product.product_id}>
-                {product.product_name}
-              </option>
-            ))}
-          </select>
+          <ProductPickerField value={product} onChange={setProduct} placeholder="例: AI画像解析カメラ" />
         </label>
         <label className="goal-card__field">
           <span>商談フェーズ</span>
@@ -146,6 +136,16 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
             type="date"
             value={draft.deal_start_date}
             onChange={(event) => setDraft({ ...draft, deal_start_date: event.target.value })}
+          />
+        </label>
+        <label className="goal-card__field">
+          <span>メモ</span>
+          <textarea
+            className="plan-modal__memo-input"
+            value={draft.memo}
+            onChange={(event) => setDraft({ ...draft, memo: event.target.value })}
+            rows={3}
+            placeholder="任意"
           />
         </label>
       </div>

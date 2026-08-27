@@ -148,7 +148,7 @@ export default function DashboardPage() {
         await recalculateRepAffinity(repId);
         const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
           fetchRepAffinity(repId),
-          fetchDeals(repId),
+          fetchDeals({ repId }),
           fetchCustomers(repId),
           fetchRepTerritory(repId),
         ]);
@@ -689,7 +689,6 @@ export default function DashboardPage() {
             plans={plans}
             dailyTasks={dailyTasks}
             deals={deals}
-            customers={customers}
             onResultChange={handleResultChange}
             onPostpone={handlePostpone}
             onRequestAlternative={handleRequestAlternative}

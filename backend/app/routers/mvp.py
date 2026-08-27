@@ -182,9 +182,9 @@ def post_deadline(body: DeadlineCreate) -> DeadlineOut:
 
 
 @router.get("/deals", response_model=list[DealOut])
-def get_deals(rep_id: int | None = None) -> list[DealOut]:
+def get_deals(rep_id: int | None = None, customer_id: int | None = None) -> list[DealOut]:
     with get_connection() as conn:
-        rows = planning.list_deals(conn, rep_id)
+        rows = planning.list_deals(conn, rep_id, customer_id)
     return [DealOut.model_validate(row) for row in rows]
 
 
@@ -202,6 +202,7 @@ def post_deal(body: DealCreate) -> DealOut:
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 deal_start_date=body.deal_start_date or date.today(),
+                memo=body.memo,
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -222,6 +223,7 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 actual_amount=body.actual_amount,
+                memo=body.memo,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

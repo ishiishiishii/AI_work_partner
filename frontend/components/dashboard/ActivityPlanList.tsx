@@ -2,11 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
-import { fetchProducts } from "@/lib/api";
+import { CompanyAutocompleteField } from "@/components/CompanyAutocompleteField";
+import { ProductAutocompleteField } from "@/components/ProductAutocompleteField";
+import { NewCustomerForm } from "@/components/customers/NewCustomerForm";
+import { QuickDealForm } from "@/components/QuickDealForm";
+import { QuickDeadlineForm } from "@/components/QuickDeadlineForm";
+import { createCustomer, fetchProducts } from "@/lib/api";
 import { calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
-import type { ActivityPlan, ActivityPlanCategory, Customer, Deal, DealResultStatus } from "@/types";
+import { ADD_TYPE_LABELS, type AddType } from "@/lib/quickAddTypes";
+import type { ActivityPlan, ActivityPlanCategory, Deal, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
   plan_date: string;
@@ -14,10 +20,8 @@ export type PlanEditFields = {
   end_time: string | null;
   category: ActivityPlanCategory;
   activity_type_name: string;
+  customer_id: number | null;
   customer_name: string;
-  // customer_nameが既存顧客と完全一致した時だけ入る(手軽に選べるオートコンプリート用)。
-  // 新規作成時のみ使われ、既存予定の編集ではバックエンドに送られない(lib/api.ts updatePlan参照)
-  customer_id?: number | null;
   product_name: string | null;
   expected_probability: number;
   memo: string | null;
@@ -33,7 +37,6 @@ type ActivityPlanListProps = {
   plans: ActivityPlan[];
   dailyTasks: ActivityPlan[];
   deals: Deal[];
-  customers: Customer[];
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
   onPostpone: (planId: number, newDate: string, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
@@ -315,7 +318,6 @@ export function ActivityPlanList({
   plans,
   dailyTasks,
   deals,
-  customers,
   onResultChange,
   onPostpone,
   onRequestAlternative,
@@ -335,6 +337,10 @@ export function ActivityPlanList({
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
   const [newPlanDraft, setNewPlanDraft] = useState<ActivityPlan | null>(null);
   const [editDraft, setEditDraft] = useState<(PlanEditFields & { planId: number }) | null>(null);
+  // 新規作成パネルの追加種別。全ページ共通のQuickAddFabと同じ選択肢(予定/新規
+  // 顧客/期限/商談)をこのパネルの見出しにも出し、予定以外もここから作れるように
+  // する。作成パネルを開き直すたびに「予定」に戻す。
+  const [addType, setAddType] = useState<AddType>("plan");
   const [gapPicker, setGapPicker] = useState<{ start: string; maxEnd: string; end: string } | null>(null);
   // 「延期」ボタンを押した予定について、その場で延期先の日付を選ぶための状態
   const [postponingPlanId, setPostponingPlanId] = useState<number | null>(null);
@@ -659,6 +665,24 @@ export function ActivityPlanList({
           {plan.expected_amount > 0 && (
             <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
           )}
+          {plan.category === "task" && !plan.is_ai_generated && (
+            <div className="activity-plan-list__progress">
+              <svg className="plan-modal__progress-ring" viewBox="0 0 80 80" width="40" height="40">
+                <circle cx="40" cy="40" r={PROGRESS_RING_RADIUS} className="plan-modal__progress-ring-track" />
+                <circle
+                  cx="40"
+                  cy="40"
+                  r={PROGRESS_RING_RADIUS}
+                  className="plan-modal__progress-ring-value"
+                  strokeDasharray={PROGRESS_RING_CIRCUMFERENCE}
+                  strokeDashoffset={PROGRESS_RING_CIRCUMFERENCE * (1 - plan.progress_percent / 100)}
+                />
+                <text x="40" y="45" textAnchor="middle" className="plan-modal__progress-ring-label">
+                  {plan.progress_percent}%
+                </text>
+              </svg>
+            </div>
+          )}
         </div>
         {plan.category === "visit" && (
           <div className="activity-plan-list__result-buttons">
@@ -680,6 +704,7 @@ export function ActivityPlanList({
     setDetailPlanId(null);
     setNewPlanDraft(null);
     setEditDraft(null);
+    setAddType("plan");
   }
 
   function startEdit(plan: ActivityPlan) {
@@ -691,8 +716,8 @@ export function ActivityPlanList({
       end_time: plan.end_time,
       category: plan.category,
       activity_type_name: plan.activity_type_name,
-      customer_name: plan.customer_name,
       customer_id: plan.customer_id,
+      customer_name: plan.customer_name,
       product_name: plan.product_name,
       expected_probability: plan.expected_probability,
       memo: plan.memo,
@@ -701,6 +726,7 @@ export function ActivityPlanList({
 
   // 引数無しなら空の新規予定、引数ありなら会社・商品などを引き継いだ「次回の予定」を作る
   function startCreate(base?: ActivityPlan) {
+    setAddType("plan");
     const draft: ActivityPlan = base
       ? {
           ...base,
@@ -744,8 +770,8 @@ export function ActivityPlanList({
       end_time: draft.end_time,
       category: draft.category,
       activity_type_name: draft.activity_type_name,
-      customer_name: draft.customer_name,
       customer_id: draft.customer_id,
+      customer_name: draft.customer_name,
       product_name: draft.product_name,
       expected_probability: draft.expected_probability,
       memo: draft.memo,
@@ -770,6 +796,7 @@ export function ActivityPlanList({
     if (newPlanDraft) {
       setNewPlanDraft(null);
       setDetailPlanId(null);
+      setAddType("plan");
     }
     setEditDraft(null);
   }
@@ -973,14 +1000,46 @@ export function ActivityPlanList({
               <span className="plan-modal__eyebrow">
                 {isCreating ? "新規作成" : CATEGORY_LABELS[detailPlan.category]}
               </span>
-              <h3>{isCreating ? "予定を追加" : detailPlan.customer_name || "予定の詳細"}</h3>
+              {isCreating ? (
+                <h3 className="quick-add-fab__title">
+                  <select
+                    className="quick-add-fab__type-select"
+                    value={addType}
+                    onChange={(event) => setAddType(event.target.value as AddType)}
+                    aria-label="追加する種類"
+                  >
+                    {Object.entries(ADD_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  を追加
+                </h3>
+              ) : (
+                <h3>{detailPlan.customer_name || "予定の詳細"}</h3>
+              )}
             </div>
             <button type="button" className="plan-modal__close" onClick={closeDetail} aria-label="閉じる">
               ×
             </button>
           </div>
 
-          {(() => {
+          {isCreating && addType !== "plan" ? (
+            <div className="plan-modal__detail">
+              {addType === "customer" && (
+                <NewCustomerForm
+                  onCreate={async (input) => {
+                    await createCustomer(repId, input);
+                    closeDetail();
+                  }}
+                />
+              )}
+              {addType === "deadline" && <QuickDeadlineForm repId={repId} onDone={closeDetail} />}
+              {addType === "deal" && <QuickDealForm repId={repId} onDone={closeDetail} />}
+            </div>
+          ) : (
+            (() => {
             const isEditing = editDraft !== null && editDraft.planId === detailPlan.plan_id;
             const effectiveCategory = isEditing ? editDraft.category : detailPlan.category;
             return (
@@ -1087,24 +1146,23 @@ export function ActivityPlanList({
 
                       <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
                       <dd>
-                        <input
-                          type="text"
-                          value={editDraft.customer_name}
-                          // 既存顧客と完全一致すればcustomer_idも紐づける(新規作成時のみ有効。
-                          // lib/api.ts updatePlanは既存予定の編集ではこのフィールドを送らない)
-                          list={effectiveCategory === "visit" ? "activity-plan-list__customer-options" : undefined}
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            const matched = customers.find((customer) => customer.customer_name === value);
-                            setEditDraft({ ...editDraft, customer_name: value, customer_id: matched?.customer_id ?? null });
-                          }}
-                        />
-                        {effectiveCategory === "visit" && (
-                          <datalist id="activity-plan-list__customer-options">
-                            {customers.map((customer) => (
-                              <option key={customer.customer_id} value={customer.customer_name} />
-                            ))}
-                          </datalist>
+                        {effectiveCategory === "visit" && isCreating ? (
+                          <CompanyAutocompleteField
+                            repId={repId}
+                            value={{ customerId: editDraft.customer_id, customerName: editDraft.customer_name }}
+                            onChange={({ customerId, customerName }) =>
+                              setEditDraft({ ...editDraft, customer_id: customerId, customer_name: customerName })
+                            }
+                            placeholder="例: D工業株式会社"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={editDraft.customer_name}
+                            onChange={(event) =>
+                              setEditDraft({ ...editDraft, customer_name: event.target.value })
+                            }
+                          />
                         )}
                       </dd>
                     </>
@@ -1115,11 +1173,10 @@ export function ActivityPlanList({
                       <dt>商品</dt>
                       <dd>
                         {isEditing ? (
-                          <input
-                            type="text"
+                          <ProductAutocompleteField
                             value={editDraft.product_name ?? ""}
-                            onChange={(event) =>
-                              setEditDraft({ ...editDraft, product_name: event.target.value })
+                            onChange={(productName) =>
+                              setEditDraft({ ...editDraft, product_name: productName })
                             }
                           />
                         ) : (
@@ -1173,7 +1230,7 @@ export function ActivityPlanList({
                       <dd className="plan-modal__status-controls">{renderResultControls(detailPlan)}</dd>
                     </>
                   )}
-                  {effectiveCategory === "task" && !detailPlan.is_ai_generated && (
+                  {effectiveCategory === "task" && !detailPlan.is_ai_generated && !isCreating && (
                     <>
                       <dt>進捗</dt>
                       <dd>
@@ -1272,7 +1329,8 @@ export function ActivityPlanList({
                 </div>
               </div>
             );
-          })()}
+            })()
+          )}
         </div>
       </div>
     )}
