@@ -41,26 +41,32 @@ export function AffinityRankingList({ affinities }: AffinityRankingListProps) {
                   <span className="affinity-ranking__pattern">({affinity.pattern_name})</span>
                 </span>
                 <span className="affinity-ranking__value">
-                  成約 {affinity.won_count}/{affinity.deal_count}件
+                  {affinity.won_count}/{affinity.deal_count}件
                 </span>
               </div>
-              <div className="affinity-ranking__stats">
-                <span className="affinity-ranking__stat">
-                  成約率 <strong>{Math.round(affinity.win_rate * 100)}%</strong>
-                </span>
-                {affinity.won_count > 0 ? (
-                  <>
-                    <span className="affinity-ranking__stat">
-                      平均成約額 <strong>{formatYen(affinity.avg_won_amount)}</strong>
-                    </span>
-                    <span className="affinity-ranking__stat">
-                      スコア <strong>{formatYen(affinity.affinity_score)}</strong>
-                    </span>
-                  </>
-                ) : (
-                  <span className="affinity-ranking__stat">まだ成約実績なし</span>
-                )}
+              <div className="affinity-ranking__rate-row">
+                <div className="affinity-ranking__rate-track">
+                  <div
+                    className="affinity-ranking__rate-fill"
+                    style={{ width: `${Math.round(affinity.win_rate * 100)}%` }}
+                  />
+                </div>
+                <strong className="affinity-ranking__rate-value">
+                  {Math.round(affinity.win_rate * 100)}%
+                </strong>
               </div>
+              {affinity.won_count > 0 ? (
+                <div className="affinity-ranking__stats">
+                  <span className="affinity-ranking__stat">
+                    平均成約額 <strong>{formatYen(affinity.avg_won_amount)}</strong>
+                  </span>
+                  <span className="affinity-ranking__stat">
+                    スコア <strong>{formatYen(affinity.affinity_score)}</strong>
+                  </span>
+                </div>
+              ) : (
+                <span className="affinity-ranking__stat">まだ成約実績なし</span>
+              )}
             </div>
           </li>
         ))}
