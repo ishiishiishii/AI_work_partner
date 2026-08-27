@@ -6,6 +6,12 @@ import {
   previewSalesRoutePlan,
   rejectSalesRoutePlan,
 } from "@/lib/api";
+import {
+  ROUTE_ECONOMIC_POLICIES,
+  routeEconomicPolicyConfig,
+  routeEconomicPolicyLabel,
+  type RouteEconomicPolicy,
+} from "@/lib/routeEconomicPolicy";
 import type { RoutePlanPreview, TransitItinerary } from "@/types";
 
 type Props = {
@@ -112,20 +118,9 @@ export function TransitItineraryDetails({ title, itinerary }: { title: string; i
 
 export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
   const [targetDate, setTargetDate] = useState(tomorrowInTokyo);
-  const [policy, setPolicy] = useState<RoutePlanPreview["policy"]>("balanced");
-  const [salesWeightPercent, setSalesWeightPercent] = useState(50);
+  const [policy, setPolicy] = useState<RouteEconomicPolicy>("balanced");
   const [maxVisits, setMaxVisits] = useState(4);
   const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>("driving");
-  const [startKind, setStartKind] = useState<"branch" | "custom">("branch");
-  const [startAddress, setStartAddress] = useState("");
-  const [endKind, setEndKind] = useState<"branch" | "custom">("branch");
-  const [endAddress, setEndAddress] = useState("");
-  const [areaKind, setAreaKind] = useState<"auto" | "custom">("auto");
-  const [areaQuery, setAreaQuery] = useState("");
-  const [areaRadiusKm, setAreaRadiusKm] = useState(5);
-  const [breakEnabled, setBreakEnabled] = useState(true);
-  const [breakStart, setBreakStart] = useState("12:00");
-  const [breakEnd, setBreakEnd] = useState("13:00");
   const [turnaroundBuffer, setTurnaroundBuffer] = useState(20);
   const [travelBufferPercent, setTravelBufferPercent] = useState(20);
   const [accessBuffer, setAccessBuffer] = useState(10);
@@ -135,35 +130,11 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
   const [busy, setBusy] = useState(false);
   const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const economicPolicy = routeEconomicPolicyConfig(policy);
+  const salesWeightPercent = economicPolicy.salesWeightPercent;
   const grossProfitWeightPercent = 100 - salesWeightPercent;
-  const resultEconomicWeight = plan
-    ? plan.weights.sales + plan.weights.gross_profit
-    : 0;
-
-  function changePolicy(nextPolicy: RoutePlanPreview["policy"]) {
-    setPolicy(nextPolicy);
-    if (nextPolicy === "sales") setSalesWeightPercent(70);
-    else if (nextPolicy === "gross_profit") setSalesWeightPercent(30);
-    else setSalesWeightPercent(50);
-  }
 
   async function createPreview() {
-    if (startKind === "custom" && !startAddress.trim()) {
-      setError("スタート住所を入力してください");
-      return;
-    }
-    if (endKind === "custom" && !endAddress.trim()) {
-      setError("ゴール住所を入力してください");
-      return;
-    }
-    if (areaKind === "custom" && !areaQuery.trim()) {
-      setError("訪問エリアの区名または駅名を入力してください");
-      return;
-    }
-    if (breakEnabled && breakStart >= breakEnd) {
-      setError("休憩終了は休憩開始より後に設定してください");
-      return;
-    }
     setBusy(true);
     setError(null);
     setDecision(null);
@@ -176,23 +147,12 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
           gross_profit_weight_percent: grossProfitWeightPercent,
           max_visits: maxVisits,
           travel_mode: travelMode,
-          start_location: {
-            kind: startKind,
-            ...(startKind === "custom" ? { address: startAddress } : {}),
-          },
-          end_location: {
-            kind: endKind,
-            ...(endKind === "custom" ? { address: endAddress } : {}),
-          },
-          search_area: {
-            kind: areaKind,
-            ...(areaKind === "custom"
-              ? { query: areaQuery, radius_km: areaRadiusKm }
-              : {}),
-          },
-          break_enabled: breakEnabled,
-          break_start: breakStart,
-          break_end: breakEnd,
+          start_location: { kind: "branch" },
+          end_location: { kind: "branch" },
+          search_area: { kind: "auto" },
+          break_enabled: true,
+          break_start: "12:00",
+          break_end: "13:00",
           turnaround_buffer_min: turnaroundBuffer,
           travel_time_buffer_percent: travelBufferPercent,
           access_buffer_min: accessBuffer,
@@ -246,15 +206,6 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
           <input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
         </label>
         <label>
-          方針
-          <select value={policy} onChange={(event) => changePolicy(event.target.value as RoutePlanPreview["policy"])}>
-            <option value="balanced">売上・粗利のバランス</option>
-            <option value="sales">売上重視</option>
-            <option value="gross_profit">粗利重視</option>
-            <option value="short_travel">移動時間重視</option>
-          </select>
-        </label>
-        <label>
           移動手段
           <select value={travelMode} onChange={(event) => setTravelMode(event.target.value as RoutePlanPreview["travel_mode"])}>
             <option value="driving">車</option>
@@ -277,118 +228,33 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
         </label>
       </div>
 
-      <fieldset className="route-plan__group route-plan__balance">
-        <legend>売上・粗利の重み</legend>
-        <div className="route-plan__balance-values">
-          <strong>売上 {salesWeightPercent}%</strong>
-          <strong>粗利 {grossProfitWeightPercent}%</strong>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={salesWeightPercent}
-          aria-label="売上を重視する割合"
-          onChange={(event) => setSalesWeightPercent(Number(event.target.value))}
-        />
-        <div className="route-plan__balance-scale" aria-hidden="true">
-          <span>粗利重視</span>
-          <span>バランス</span>
-          <span>売上重視</span>
+      <fieldset className="route-plan__group">
+        <legend>売上・粗利の考え方</legend>
+        <div className="route-plan__policy-options">
+          {ROUTE_ECONOMIC_POLICIES.map((option) => (
+            <label
+              key={option.value}
+              className={`route-plan__policy-option${policy === option.value ? " is-selected" : ""}`}
+            >
+              <input
+                type="radio"
+                name="daily-economic-policy"
+                value={option.value}
+                checked={policy === option.value}
+                onChange={() => setPolicy(option.value)}
+              />
+              <strong>{option.label}</strong>
+              <small>{option.description}</small>
+            </label>
+          ))}
         </div>
         <small>
-          この比率に加えて、担当者の業種×商品カテゴリ別の成約実績、期限、商談フェーズ、移動時間も評価します。
+          選択した方針に加えて、担当者適合度・期限・商談フェーズ・移動時間も評価します。
         </small>
       </fieldset>
 
       <fieldset className="route-plan__group">
-        <legend>出発・帰着地点</legend>
-        <div className="route-plan__controls">
-          <label>
-            スタート位置
-            <select value={startKind} onChange={(event) => setStartKind(event.target.value as "branch" | "custom")}>
-              <option value="branch">所属営業所（デフォルト）</option>
-              <option value="custom">任意の住所</option>
-            </select>
-          </label>
-          {startKind === "custom" && (
-            <label>
-              スタート住所
-              <input value={startAddress} onChange={(event) => setStartAddress(event.target.value)} placeholder="例：東京都千代田区丸の内1丁目" required />
-            </label>
-          )}
-          <label>
-            ゴール位置
-            <select value={endKind} onChange={(event) => setEndKind(event.target.value as "branch" | "custom")}>
-              <option value="branch">所属営業所（デフォルト）</option>
-              <option value="custom">任意の住所</option>
-            </select>
-          </label>
-          {endKind === "custom" && (
-            <label>
-              ゴール住所
-              <input value={endAddress} onChange={(event) => setEndAddress(event.target.value)} placeholder="例：東京都新宿区西新宿2丁目" required />
-            </label>
-          )}
-        </div>
-      </fieldset>
-
-      <fieldset className="route-plan__group">
-        <legend>訪問エリアの絞り込み</legend>
-        <div className="route-plan__controls">
-          <label>
-            エリア指定
-            <select value={areaKind} onChange={(event) => setAreaKind(event.target.value as "auto" | "custom")}>
-              <option value="auto">出発地点周辺から自動探索</option>
-              <option value="custom">区名・駅名を入力</option>
-            </select>
-          </label>
-          {areaKind === "custom" && (
-            <>
-              <label>
-                区名・駅名
-                <input
-                  value={areaQuery}
-                  onChange={(event) => setAreaQuery(event.target.value)}
-                  placeholder="例：新宿区、東京駅"
-                  required
-                />
-              </label>
-              <label>
-                中心からの半径（km）
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={areaRadiusKm}
-                  onChange={(event) => setAreaRadiusKm(Number(event.target.value))}
-                />
-              </label>
-            </>
-          )}
-        </div>
-        <small>任意の訪問候補をこの範囲に絞ります。その日の必須商談は範囲外でも残します。</small>
-      </fieldset>
-
-      <fieldset className="route-plan__group">
-        <legend>休憩・時間の余裕</legend>
-        <label className="route-plan__check">
-          <input type="checkbox" checked={breakEnabled} onChange={(event) => setBreakEnabled(event.target.checked)} />
-          休憩時間を確保する
-        </label>
-        {breakEnabled && (
-          <div className="route-plan__controls">
-            <label>
-              休憩開始
-              <input type="time" value={breakStart} onChange={(event) => setBreakStart(event.target.value)} />
-            </label>
-            <label>
-              休憩終了
-              <input type="time" value={breakEnd} onChange={(event) => setBreakEnd(event.target.value)} />
-            </label>
-          </div>
-        )}
+        <legend>時間の余裕</legend>
         <details className="route-plan__details">
           <summary>余裕時間の詳細設定</summary>
           <div className="route-plan__controls">
@@ -455,13 +321,9 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
             <span>期待粗利 {yen(plan.totals.expected_gross_profit)}</span>
             <span>移動 {plan.totals.total_travel_min}分 / {(plan.totals.total_distance_m / 1000).toFixed(1)}km</span>
           </div>
-          {resultEconomicWeight > 0 && (
-            <p className="route-plan__evaluation-summary">
-              収益評価の配分：売上 {Math.round(plan.weights.sales / resultEconomicWeight * 100)}%・
-              粗利 {Math.round(plan.weights.gross_profit / resultEconomicWeight * 100)}%／
-              担当者適合度も評価済み
-            </p>
-          )}
+          <p className="route-plan__evaluation-summary">
+            収益方針：{routeEconomicPolicyLabel(plan.policy)}／担当者適合度も評価済み
+          </p>
           {!plan.target_met && (
             <p className="route-plan__warning">
               最低条件未達: 期待売上 {yen(plan.shortfalls.expected_sales)}、

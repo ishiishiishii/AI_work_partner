@@ -9,7 +9,6 @@ import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel"
 import { TARGET_MONTH, useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
 
 // leafletはブラウザのwindow/documentに直接依存しておりSSR不可なため、
 // Next.jsのサーバー描画パスに乗らないよう動的import(ssr:false)にする。
@@ -33,7 +32,6 @@ export default function DashboardPage() {
     replan,
     altNotice,
     altPreview,
-    isRegenerating,
     needsInitialPlan,
     isGeneratingInitialPlan,
     forecastAmount,
@@ -44,9 +42,9 @@ export default function DashboardPage() {
     jointAchievementProbability,
     actualAchievedAmount,
     actualAchievementRate,
+    routeRefreshRevision,
     handleTargetSave,
     handleRouteApproved,
-    handleRegenerate,
     handleResultChange,
     handlePostpone,
     handleEditPlan,
@@ -58,13 +56,6 @@ export default function DashboardPage() {
     confirmAlternative,
     cancelAlternativePreview,
   } = useDashboardData(REP_ID);
-
-  // 商談結果や予定が変化するたびインクリメントし、月間バッチプラン(RouteBatchPlanPanel)を
-  // 自動で再計算させるためのシグナル(値そのものに意味はない)
-  const [planRefreshTick, setPlanRefreshTick] = useState(0);
-  useEffect(() => {
-    setPlanRefreshTick((tick) => tick + 1);
-  }, [plans]);
 
   if (isAuthLoading || (selectedRep && isLoading)) {
     return (
@@ -116,26 +107,15 @@ export default function DashboardPage() {
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
-          <RouteBatchPlanPanel onApproved={handleRouteApproved} refreshSignal={planRefreshTick} />
+          <RouteBatchPlanPanel onApproved={handleRouteApproved} refreshSignal={routeRefreshRevision} />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
-          {needsInitialPlan ? (
+          {needsInitialPlan && (
             <p className="activity-plan-list__empty">
               {isGeneratingInitialPlan
                 ? "AIが今月の活動計画を作成しています(数分かかる場合があります)..."
                 : "目標を保存すると、AIが今月の活動計画を作成します。"}
             </p>
-          ) : (
-            <div className="regenerate-bar">
-              <button
-                type="button"
-                className="regenerate-button"
-                onClick={handleRegenerate}
-                disabled={isRegenerating}
-              >
-                {isRegenerating ? "生成中..." : "AIに計画を作り直してもらう"}
-              </button>
-            </div>
           )}
           <ActivityPlanList
             repId={selectedRep.rep_id}

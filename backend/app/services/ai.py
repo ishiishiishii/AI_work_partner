@@ -122,6 +122,147 @@ def _parse_plan_items(content: str) -> list[Any]:
     return parsed
 
 
+def suggest_monthly_customer_portfolio(
+    conn: Connection,
+    *,
+    rep_id: int,
+    period: dict[str, Any],
+    objective: dict[str, Any],
+    weeks: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    selection_limit: int,
+) -> list[dict[str, Any]]:
+    """Ask Qwen to propose the month-level customer portfolio and week bias.
+
+    The candidates are already scored and partially selected by the
+    deterministic planner.  Qwen may only choose IDs and weeks included in
+    this payload.  The route planner subsequently rebuilds the portfolio and
+    checks mandatory visits, meeting capacity, customer-type diversity, and
+    sales/profit coverage before accepting any part of the proposal.
+    """
+    if not candidates or not weeks or selection_limit <= 0:
+        raise AiPlanningError("月間選定に利用できる顧客候補または週がありません。")
+
+    user_payload = {
+        "period": period,
+        "objective": objective,
+        "rules": {
+            "selection_limit": selection_limit,
+            "keep_must_visit": True,
+            "daily_targets_are_soft": True,
+            "period_end_targets_have_priority": True,
+        },
+        "weeks": weeks,
+        "customer_candidates": candidates,
+    }
+    system_prompt = (
+        "あなたはAI Work Partnerの月間顧客ポートフォリオ選定担当です。"
+        "ルールベースが算出した評価値と基準案(currently_selected)を土台に、月末の"
+        "期待売上・期待粗利を最大化しやすい顧客と、その顧客を重点的に訪問する週を"
+        "提案してください。\n"
+        "従うべきルール:\n"
+        "- customer_idはcustomer_candidatesにある実在IDだけを使い、新しいIDを作らないこと\n"
+        "- must_visit=trueの顧客は必ず含めること\n"
+        "- 売上だけでなく期待粗利、担当者適合度、商談フェーズ、受注予定日、次アクション、"
+        "必要訪問回数と移動負担を総合して選ぶこと\n"
+        "- objective.policyはユーザーが選んだ収益方針であること。balancedは売上と粗利を"
+        "同程度に、salesは売上を、gross_profitは粗利をより重く評価すること\n"
+        "- objectiveのsales_weightとgross_profit_weightを反映し、日目標の均等達成より"
+        "periodの残目標達成と月全体の成果最大化を優先すること\n"
+        "- preferred_weekはweeksに存在するweek_numberから選ぶこと。期限・受注予定日・"
+        "次アクションを踏まえ、特に根拠がなければ前半へ偏らせすぎないこと\n"
+        "- 最大selection_limit社まで、優先度順に返すこと\n"
+        "- reasonは、期待売上・期待粗利・確度・商談状況など、この顧客を月間候補に"
+        "選ぶ具体的根拠を日本語で簡潔に書くこと\n"
+        "- 出力は次のJSON配列のみとし、説明文やコードブロック記法を含めないこと:\n"
+        '[{"customer_id": <int>, "preferred_week": <int>, "reason": "<text>"}]'
+    )
+
+    prompt_json = json.dumps(user_payload, ensure_ascii=False, default=str)
+    try:
+        response = httpx.post(
+            f"{settings.ai_base_url.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.ai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.ai_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt_json},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 5000,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        content = _extract_content(response)
+        raw_items = _parse_plan_items(content)
+    except AiPlanningError:
+        log_response(
+            conn,
+            context="batch_monthly_customer_selection",
+            prompt=prompt_json,
+            response="(parse error)",
+            rep_id=rep_id,
+        )
+        raise
+    except Exception as error:
+        log_response(
+            conn,
+            context="batch_monthly_customer_selection",
+            prompt=prompt_json,
+            response=f"(error) {error}",
+            rep_id=rep_id,
+        )
+        raise AiPlanningError(f"Qwenへの接続に失敗しました: {error}") from error
+
+    valid_customer_ids = {int(candidate["customer_id"]) for candidate in candidates}
+    valid_week_numbers = {int(week["week_number"]) for week in weeks}
+    seen_customer_ids: set[int] = set()
+    selections: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            customer_id = int(item["customer_id"])
+            preferred_week = int(item["preferred_week"])
+            reason = str(item["reason"]).strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            customer_id not in valid_customer_ids
+            or preferred_week not in valid_week_numbers
+            or customer_id in seen_customer_ids
+            or not reason
+        ):
+            continue
+        seen_customer_ids.add(customer_id)
+        selections.append(
+            {
+                "customer_id": customer_id,
+                "preferred_week": preferred_week,
+                "reason": reason,
+            }
+        )
+        if len(selections) >= selection_limit:
+            break
+
+    log_response(
+        conn,
+        context="batch_monthly_customer_selection",
+        prompt=prompt_json,
+        response=content,
+        rep_id=rep_id,
+    )
+    if not selections:
+        raise AiPlanningError("Qwenから有効な月間顧客選定案を取得できませんでした。")
+    return selections
+
+
 # Fixed activity_type vocabulary, matching frontend/components/dashboard/
 # ActivityPlanList.tsx's EDITABLE_ACTIVITY_TYPES -- the AI must pick from
 # this list rather than invent free text, so the UI's type styling/labels
@@ -221,6 +362,13 @@ def generate_plan_selection(
         "見込み金額の大きい本案件を優先」のように説明する)\n"
         "- 訪問だけに偏らせず、商談前の資料作成、停滞している商談への電話・メール、"
         "新規開拓の時間なども適度に配置すること\n"
+        "- 商談に紐づく準備・フォロー(category='task', deal_idあり)を月内で15件程度作り、"
+        "提案資料の最終確認・アポイント確認を訪問直前、フォローアップメール・次回Web会議の"
+        "日程調整を訪問直後に置くこと。titleには顧客名と具体的な作業を書くこと\n"
+        "- deal_id=nullの新規開拓を月前半に集中して繰り返し配置すること。内容は新規開拓リスト更新、"
+        "業界動向リサーチ、来月向け顧客リスト作成と架電、新規見込み先への電話を使い分けること\n"
+        "- deal_id=nullの定型事務として『週次報告書の作成』『提案資料テンプレートの整備』を"
+        "ほぼ毎週繰り返すこと\n"
         "- 稼働日に1件だけ予定を置いて残りを空けたままにしないこと。"
         "訪問の前後の空き時間には、関連する資料作成・電話・メールや新規開拓を追加で配置し、"
         "1日の稼働時間(9:00〜18:00、12:00〜13:00は昼休み)をできるだけ埋めること\n"
@@ -489,6 +637,8 @@ def revise_unreachable_day(
         "期待粗利が最大になるように、再計算へ渡す訪問候補を優先順で選んでください。\n"
         "従うべきルール:\n"
         "- hard_constraintsは絶対に緩和しないこと。時刻や最大訪問数を変更する提案はしないこと\n"
+        "- objective.policyはユーザーが選んだ収益方針であること。balancedは売上と粗利を"
+        "同程度に、salesは売上を、gross_profitは粗利をより重く評価すること\n"
         "- objectiveのsales_weightとgross_profit_weightを使い、期待売上と期待粗利の"
         "両方を評価すること。粗利がnullの候補は粗利を確認できないため、同程度なら"
         "粗利が確認できる候補を優先すること\n"
@@ -592,7 +742,7 @@ def suggest_target_gap_fill(
     candidates: list[dict[str, Any]],
     assignment_limit: int,
 ) -> list[dict[str, Any]]:
-    """Ask Qwen to fill a remaining period-end sales/profit gap.
+    """Ask Qwen to fill a period-end gap or repair an infeasible day.
 
     Daily target amounts are intentionally descriptive rather than hard
     constraints.  Qwen assigns only caller-provided reserve candidates to
@@ -614,13 +764,19 @@ def suggest_target_gap_fill(
         "reserve_candidates": candidates,
     }
     system_prompt = (
-        "あなたはAI Work Partnerの月末目標補填担当です。既存システムが作った日別計画を"
-        "変更の土台とし、期間末の期待売上・期待粗利の不足を埋める訪問候補と日付を"
+        "あなたはAI Work Partnerの月末目標補填・営業日程再構築担当です。"
+        "既存システムが作った日別計画を変更の土台とし、期間末の期待売上・期待粗利の"
+        "不足を埋めるか、実行不能になった訪問を実行可能な別日へ移す候補と日付を"
         "提案してください。\n"
         "従うべきルール:\n"
+        "- period.schedule_recovery_required=trueの場合、sales_shortfallと"
+        "gross_profit_shortfallが0でも再計画を止めないこと。reserve_candidatesの"
+        "recovery_required=trueを優先し、failed_dates以外のeligible_datesへ再配置すること\n"
         "- 日目標はソフト目標なので、日ごとの未達は許容すること。日目標を均等に"
         "達成させることより、periodのsales_shortfallとgross_profit_shortfallを"
         "期間末までに両方0へ近づけることを優先すること\n"
+        "- objective.policyはユーザーが選んだ収益方針であること。balancedは売上と粗利を"
+        "同程度に、salesは売上を、gross_profitは粗利をより重く評価すること\n"
         "- objectiveの売上・粗利ウェイトを使うこと。両方不足している場合は、片方だけ"
         "大きくしてもう片方を放置せず、両目標を満たす組合せを選ぶこと\n"
         "- target_dateは候補自身のeligible_datesからだけ選ぶこと。customer_idを新しく"

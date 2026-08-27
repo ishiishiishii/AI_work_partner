@@ -8,6 +8,7 @@ from app.config import settings
 from app.db import get_connection
 from app.main import app
 from app.schemas.route_plans import RoutePlanBatchPreviewOut, RoutePlanBatchPreviewRequest
+from app.services import ai
 from app.services.route_optimization import (
     DealEconomics,
     MatrixCell,
@@ -18,6 +19,7 @@ from app.services.route_planning import (
     DEFAULT_MIN_REVISIT_GAP_BUSINESS_DAYS,
     _allocate_target_amounts,
     _apply_unreachable_day_revision,
+    _period_deferred_day_result,
     _apply_target_gap_fill_assignments,
     _apply_schedule_adjustments,
     _assign_target_customers_to_days,
@@ -25,11 +27,14 @@ from app.services.route_planning import (
     _business_weeks,
     _cluster_candidates_by_region,
     _expand_visit_occurrences,
+    _apply_monthly_ai_selection,
+    _monthly_ai_candidate_options,
     _monthly_target_context,
     _round_trip_matrix,
     _schedule_adjustment_context,
     _select_target_customers,
     _target_gap_fill_options,
+    _target_gap_fill_ai_payload,
     _target_gap_improved,
     _target_gap_shortfalls,
     _unreachable_day_ai_payload,
@@ -110,6 +115,7 @@ def test_monthly_target_context_counts_only_contracts_before_plan_start() -> Non
     context = _monthly_target_context(conn, rep_id=10, target_date=month_start)
 
     assert "d.contract_date < %s::date" in conn.query
+    assert "coalesce(d.actual_amount, d.estimated_amount)" in conn.query
     assert conn.params == (month_start, 10, month_start)
     assert context["achieved_amount"] == Decimal("0")
     assert context["achieved_gross_profit"] == Decimal("0")
@@ -172,6 +178,65 @@ def test_month_customer_selection_mixes_new_and_ongoing_and_consumes_visit_capac
 
     assert {candidate.customer_type for candidate in selected} == {"new", "ongoing"}
     assert sum(candidate.planned_visit_count for candidate in selected) == 5
+
+
+def test_monthly_ai_selection_can_improve_baseline_but_keeps_safety_seeds() -> None:
+    mandatory = _candidate(1, 1000, 100)
+    mandatory.must_visit = True
+    new = _candidate(2, 500, 60)
+    new.customer_type = "new"
+    baseline_optional = _candidate(3, 700, 70)
+    ai_replacement = _candidate(4, 900, 90)
+    baseline = [mandatory, new, baseline_optional]
+
+    options = _monthly_ai_candidate_options(
+        [mandatory, new, baseline_optional, ai_replacement], baseline, limit=4
+    )
+    selected, reasons, preferred_weeks, applied = _apply_monthly_ai_selection(
+        options,
+        baseline,
+        [
+            {"customer_id": 1, "preferred_week": 1, "reason": "期限が近い"},
+            {"customer_id": 4, "preferred_week": 2, "reason": "売上と粗利が高い"},
+        ],
+        capacity=3,
+        planning_target=Decimal("2000"),
+        planning_target_gross_profit=Decimal("1500"),
+        max_visits_per_customer=5,
+    )
+
+    assert {candidate.customer_id for candidate in selected} == {1, 2, 4}
+    assert mandatory in selected
+    assert new in selected
+    assert sum(candidate.expected_sales for candidate in selected) == Decimal("2400")
+    assert reasons == {1: "期限が近い", 4: "売上と粗利が高い"}
+    assert preferred_weeks == {1: 1, 4: 2}
+    assert applied is True
+
+
+def test_monthly_ai_selection_falls_back_when_monthly_coverage_drops() -> None:
+    mandatory = _candidate(1, 1000, 100)
+    mandatory.must_visit = True
+    new = _candidate(2, 500, 60)
+    new.customer_type = "new"
+    high_value = _candidate(3, 2000, 90)
+    low_value = _candidate(4, 100, 20)
+    baseline = [mandatory, new, high_value]
+
+    selected, reasons, preferred_weeks, applied = _apply_monthly_ai_selection(
+        [mandatory, new, high_value, low_value],
+        baseline,
+        [{"customer_id": 4, "preferred_week": 1, "reason": "根拠が弱い提案"}],
+        capacity=3,
+        planning_target=Decimal("3000"),
+        planning_target_gross_profit=Decimal("2500"),
+        max_visits_per_customer=5,
+    )
+
+    assert selected == baseline
+    assert reasons == {}
+    assert preferred_weeks == {}
+    assert applied is False
 
 
 def test_required_meetings_expand_to_distinct_days_without_double_counting_sales() -> None:
@@ -252,6 +317,29 @@ def test_required_meetings_relax_the_gap_rather_than_drop_a_visit_when_horizon_i
     ]
     assert len(assigned_dates) == 4
     assert len(set(assigned_dates)) == 4
+
+
+def test_monthly_ai_preferred_week_is_reflected_in_day_assignment() -> None:
+    candidate = _candidate(1, 1000, 100)
+    business_days = _business_days(date(2026, 9, 1), "month")
+    business_weeks = _business_weeks(business_days)
+    week_number_by_day = {
+        day: week_number
+        for week_number, week_days in enumerate(business_weeks, start=1)
+        for day in week_days
+    }
+
+    assigned = _assign_target_customers_to_days(
+        [candidate],
+        business_days=business_days,
+        day_targets={day: Decimal("200") for day in business_days},
+        max_visits=2,
+        week_number_by_day=week_number_by_day,
+        preferred_week_by_customer={candidate.customer_id: 2},
+    )
+
+    assigned_day = next(day for day, values in assigned.items() if candidate in values)
+    assert week_number_by_day[assigned_day] == 2
 
 
 def test_apply_schedule_adjustments_moves_only_validated_suggestions() -> None:
@@ -402,6 +490,21 @@ def test_period_end_shortfall_is_independent_of_each_daily_target() -> None:
     }
 
 
+def test_routing_infeasible_day_is_deferred_without_raw_error() -> None:
+    result = _period_deferred_day_result(
+        date(2026, 8, 28), "detailed", error_code="routing_infeasible"
+    )
+
+    assert result["status"] == "proposed"
+    assert result["plan_id"] is None
+    assert result["solver"] == {
+        "fallback": "deferred_to_period_gap_fill",
+        "original_error": "routing_infeasible",
+    }
+    assert "routing_infeasible" not in result["warnings"][0]
+    assert "週内または月内の別日で補填" in result["warnings"][0]
+
+
 def test_target_gap_fill_options_use_unscheduled_single_visit_candidates() -> None:
     scheduled = _candidate(1, 5_000, 100)
     multi_visit = _candidate(2, 4_000, 90)
@@ -427,6 +530,25 @@ def test_target_gap_fill_options_use_unscheduled_single_visit_candidates() -> No
     assert [candidate.customer_id for candidate in options] == [reserve.customer_id]
     assert options[0].planned_visit_count == 1
     assert options[0].expected_sales == Decimal("3000")
+
+
+def test_recovery_payload_excludes_the_failed_day_and_marks_priority() -> None:
+    candidate = _candidate(3, 3_000, 80)
+    payload = _target_gap_fill_ai_payload(
+        [candidate],
+        eligible_dates=[date(2026, 8, 27), date(2026, 8, 28)],
+        recovery_context_by_customer={
+            candidate.customer_id: {
+                "failed_dates": {date(2026, 8, 28)},
+                "failure_codes": {"routing_infeasible"},
+            }
+        },
+    )
+
+    assert payload[0]["recovery_required"] is True
+    assert payload[0]["eligible_dates"] == ["2026-08-27"]
+    assert payload[0]["failed_dates"] == ["2026-08-28"]
+    assert payload[0]["failure_codes"] == ["routing_infeasible"]
 
 
 def test_target_gap_fill_assignments_and_improvement_are_revalidated() -> None:
@@ -545,7 +667,13 @@ class _AlwaysSucceedsMatrixProvider:
 def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> None:
     monkeypatch.setattr(settings, "route_portfolio_limit", 2)
     monkeypatch.setattr(settings, "route_solver_time_limit_sec", 1)
+    monkeypatch.setattr(
+        ai,
+        "suggest_monthly_customer_portfolio",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ai.AiPlanningError("offline")),
+    )
     batch_id: int | None = None
+    outline_batch_id: int | None = None
     activity_ids: list[int] = []
     originals: list[dict] = []
     rep_id: int | None = None
@@ -633,13 +761,61 @@ def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> 
                 )
             conn.commit()
 
+            outline = create_batch_preview(
+                conn,
+                rep_id=rep_id,
+                request=RoutePlanBatchPreviewRequest(
+                    start_date=date(2099, 3, 1),
+                    horizon="month",
+                    outline_only=True,
+                    detailed_days=0,
+                    policy="balanced",
+                    max_visits=2,
+                ),
+            )
+            outline_batch_id = outline["batch_id"]
+            RoutePlanBatchPreviewOut.model_validate(outline)
+            assert outline["detailed_days"] == 0
+            assert len(outline["weeks"]) == 5
+            assert all(day["plan_id"] is None for day in outline["days"])
+            assert all(day["detail_level"] == "coarse" for day in outline["days"])
+            assert conn.execute(
+                "select count(*)::int as count from route_plan where batch_id = %s",
+                (outline_batch_id,),
+            ).fetchone()["count"] == 0
+            first_outline_week = outline["weeks"][0]
+            weekly_assignments = [
+                {
+                    "customer_id": customer["customer_id"],
+                    "visit_count": sum(
+                        first_outline_week["start_date"]
+                        <= assigned_date
+                        <= first_outline_week["end_date"]
+                        for assigned_date in customer["assigned_dates"]
+                    ),
+                }
+                for customer in outline["selected_customers"]
+            ]
+            weekly_assignments = [
+                assignment
+                for assignment in weekly_assignments
+                if assignment["visit_count"] > 0
+            ]
+            assert weekly_assignments
+
             preview = create_batch_preview(
                 conn,
                 rep_id=rep_id,
                 request=RoutePlanBatchPreviewRequest(
                     start_date=BATCH_START_DATE,
+                    end_date=first_outline_week["end_date"],
                     horizon="week",
                     detailed_days=1,
+                    portfolio_assignments=weekly_assignments,
+                    target_amount_override=first_outline_week["target_amount"],
+                    target_gross_profit_override=first_outline_week[
+                        "target_gross_profit"
+                    ],
                     policy="balanced",
                     max_visits=2,
                     work_start=time(9, 0),
@@ -668,6 +844,11 @@ def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> 
                 Decimal("0"),
             ) == preview["planning_target_amount"]
             assert preview["detailed_days"] == 1
+            assert {
+                customer["customer_id"] for customer in preview["selected_customers"]
+            } == {
+                assignment["customer_id"] for assignment in weekly_assignments
+            }
 
             assert preview["selected_customers"], "expected at least one selected customer"
             ongoing_customers = [
@@ -752,6 +933,11 @@ def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> 
             if batch_id is not None:
                 conn.execute(
                     "delete from route_plan_batch where batch_id = %s", (batch_id,)
+                )
+            if outline_batch_id is not None:
+                conn.execute(
+                    "delete from route_plan_batch where batch_id = %s",
+                    (outline_batch_id,),
                 )
             if target_created and rep_id is not None:
                 conn.execute(

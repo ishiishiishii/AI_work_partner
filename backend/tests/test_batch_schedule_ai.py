@@ -58,6 +58,107 @@ def _occurrence(customer_id: int = 1, visit_sequence: int = 1) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# suggest_monthly_customer_portfolio
+# ---------------------------------------------------------------------------
+
+
+def _monthly_candidate(customer_id: int) -> dict:
+    return {
+        "customer_id": customer_id,
+        "customer_name": f"月間候補{customer_id}",
+        "customer_type": "ongoing",
+        "currently_selected": customer_id == 1,
+        "must_visit": customer_id == 1,
+        "remaining_visit_count": 1,
+        "expected_sales": 1_000_000,
+        "expected_gross_profit": 300_000,
+    }
+
+
+def test_suggest_monthly_customer_portfolio_validates_ids_weeks_and_duplicates(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ai.httpx,
+        "post",
+        lambda *a, **k: FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                [
+                                    {
+                                        "customer_id": 1,
+                                        "preferred_week": 1,
+                                        "reason": "必須訪問かつ月間売上への貢献が高い",
+                                    },
+                                    {
+                                        "customer_id": 999,
+                                        "preferred_week": 1,
+                                        "reason": "存在しない候補",
+                                    },
+                                    {
+                                        "customer_id": 2,
+                                        "preferred_week": 99,
+                                        "reason": "存在しない週",
+                                    },
+                                    {
+                                        "customer_id": 1,
+                                        "preferred_week": 2,
+                                        "reason": "重複",
+                                    },
+                                    {
+                                        "customer_id": 2,
+                                        "preferred_week": 2,
+                                        "reason": "第2週の粗利を補う",
+                                    },
+                                ],
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            }
+        ),
+    )
+
+    result = ai.suggest_monthly_customer_portfolio(
+        FakeConn(),
+        rep_id=10,
+        period={"start_date": "2026-09-01", "end_date": "2026-09-30"},
+        objective={"sales_weight": 25, "gross_profit_weight": 25},
+        weeks=[
+            {"week_number": 1, "start_date": "2026-09-01", "end_date": "2026-09-04"},
+            {"week_number": 2, "start_date": "2026-09-07", "end_date": "2026-09-11"},
+        ],
+        candidates=[_monthly_candidate(1), _monthly_candidate(2)],
+        selection_limit=10,
+    )
+
+    assert result == [
+        {
+            "customer_id": 1,
+            "preferred_week": 1,
+            "reason": "必須訪問かつ月間売上への貢献が高い",
+        },
+        {
+            "customer_id": 2,
+            "preferred_week": 2,
+            "reason": "第2週の粗利を補う",
+        },
+    ]
+
+
+def test_suggest_monthly_customer_portfolio_requires_candidates() -> None:
+    with pytest.raises(ai.AiPlanningError):
+        ai.suggest_monthly_customer_portfolio(
+            FakeConn(), rep_id=10, period={}, objective={}, weeks=[],
+            candidates=[], selection_limit=0,
+        )
+
+
+# ---------------------------------------------------------------------------
 # suggest_schedule_adjustments
 # ---------------------------------------------------------------------------
 

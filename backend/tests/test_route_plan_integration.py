@@ -431,6 +431,51 @@ def test_approval_conflict_rolls_back_without_partial_activity(
             conn.commit()
 
 
+def test_approval_rejects_second_visit_to_same_customer_on_same_day(
+    owned_deal: tuple[int, int, int],
+) -> None:
+    rep_id, customer_id, deal_id = owned_deal
+    plan_id: int | None = None
+    existing_visit_id: int | None = None
+    try:
+        with get_connection() as conn:
+            existing_visit_id = conn.execute(
+                """
+                insert into activity_plan (
+                  rep_id, plan_date, start_time, end_time, category, title,
+                  customer_id, deal_id, activity_type, plan_status, is_ai_generated
+                )
+                values (%s, %s, '15:00', '16:00', 'visit', '同日訪問テスト',
+                        %s, %s, 'visit', 'scheduled', false)
+                returning plan_id
+                """,
+                (rep_id, TEST_DATE, customer_id, deal_id),
+            ).fetchone()["plan_id"]
+            conn.commit()
+            plan_id = _create_proposal(
+                conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
+            )
+
+            with pytest.raises(RoutePlanningError) as error:
+                approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
+
+            assert error.value.code == "duplicate_customer_visit"
+            linked = conn.execute(
+                "select count(*)::int as count from route_plan_activity where route_plan_id = %s",
+                (plan_id,),
+            ).fetchone()["count"]
+            assert linked == 0
+    finally:
+        with get_connection() as conn:
+            if existing_visit_id is not None:
+                conn.execute(
+                    "delete from activity_plan where plan_id = %s", (existing_visit_id,)
+                )
+            if plan_id is not None:
+                conn.execute("delete from route_plan where route_plan_id = %s", (plan_id,))
+            conn.commit()
+
+
 
 class DeterministicMatrixProvider:
     def __init__(self) -> None:

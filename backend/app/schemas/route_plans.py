@@ -86,6 +86,13 @@ class RoutePlanPreviewRequest(BaseModel):
         return self
 
 
+class RoutePlanPortfolioAssignmentInput(BaseModel):
+    """One month-outline customer allocation carried into a weekly solve."""
+
+    customer_id: int
+    visit_count: int = Field(ge=1, le=31)
+
+
 class RoutePlanBatchPreviewRequest(BaseModel):
     """Month-to-week-to-day integrated planning request.
 
@@ -97,7 +104,17 @@ class RoutePlanBatchPreviewRequest(BaseModel):
 
     start_date: date
     horizon: Literal["week", "month"] = "week"
-    detailed_days: int | None = Field(default=None, ge=1, le=31)
+    # outline_only creates the month portfolio/week allocation without running
+    # any daily CP-SAT/routing solver. The UI then sends each week's portfolio
+    # back in portfolio_assignments for a bounded detailed solve.
+    outline_only: bool = False
+    end_date: date | None = None
+    detailed_days: int | None = Field(default=None, ge=0, le=31)
+    portfolio_assignments: list[RoutePlanPortfolioAssignmentInput] = Field(
+        default_factory=list
+    )
+    target_amount_override: Decimal | None = Field(default=None, ge=0)
+    target_gross_profit_override: Decimal | None = Field(default=None, ge=0)
     policy: Literal["balanced", "sales", "gross_profit", "short_travel"] = "balanced"
     sales_weight_percent: int | None = Field(default=None, ge=0, le=100)
     gross_profit_weight_percent: int | None = Field(default=None, ge=0, le=100)
@@ -121,6 +138,10 @@ class RoutePlanBatchPreviewRequest(BaseModel):
     @model_validator(mode="after")
     def validate_time_range(self) -> "RoutePlanBatchPreviewRequest":
         _validate_common_route_settings(self)
+        if self.end_date is not None and self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        if self.outline_only and self.horizon != "month":
+            raise ValueError("outline_only requires horizon=month")
         return self
 
 

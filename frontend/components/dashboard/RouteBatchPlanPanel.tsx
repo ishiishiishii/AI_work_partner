@@ -13,7 +13,12 @@ import {
   tomorrowInTokyo,
   yen,
 } from "@/components/dashboard/RoutePlanPanel";
-import type { RoutePlanBatchPreview, RoutePlanPreview } from "@/types";
+import {
+  ROUTE_ECONOMIC_POLICIES,
+  routeEconomicPolicyConfig,
+  type RouteEconomicPolicy,
+} from "@/lib/routeEconomicPolicy";
+import type { RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeek } from "@/types";
 
 type Props = {
   onApproved: () => Promise<void>;
@@ -23,8 +28,6 @@ type Props = {
   // generate button again.
   refreshSignal?: number;
 };
-
-const RISK_LABEL: Record<"medium" | "high", string> = { medium: "中", high: "高" };
 
 function dayLabel(dateStr: string): string {
   const date = new Date(`${dateStr}T00:00:00+09:00`);
@@ -36,26 +39,90 @@ function dayLabel(dateStr: string): string {
   }).format(date);
 }
 
+function MonthlyPlanOutlook({ batch }: { batch: RoutePlanBatchPreview }) {
+  const salesTarget = batch.monthly_target_amount ?? 0;
+  const projectedSales = batch.achieved_amount + batch.portfolio_expected_sales;
+  const salesRate = salesTarget > 0 ? (projectedSales / salesTarget) * 100 : null;
+  const salesGap = Math.max(0, salesTarget - projectedSales);
+
+  const profitTarget = batch.monthly_target_gross_profit;
+  const projectedProfit = batch.achieved_gross_profit + (batch.totals.expected_gross_profit ?? 0);
+  const profitRate =
+    profitTarget !== null && profitTarget > 0 ? (projectedProfit / profitTarget) * 100 : null;
+  const profitGap = Math.max(0, (profitTarget ?? 0) - projectedProfit);
+  const expectedTargetsMet =
+    salesRate !== null && salesRate >= 100 && (profitRate === null || profitRate >= 100);
+  const jointProbability =
+    batch.joint_achievement_probability <= 1
+      ? batch.joint_achievement_probability * 100
+      : batch.joint_achievement_probability;
+
+  const outlook = expectedTargetsMet
+    ? jointProbability >= 60
+      ? {
+          level: "good",
+          label: "達成見込みは良好",
+          message: "期待値と商談確度の両面で、月末目標の達成圏内です。",
+        }
+      : {
+          level: "watch",
+          label: "金額は達成圏内・確度に注意",
+          message: "期待着地は目標以上ですが、成約確度を踏まえると継続フォローが必要です。",
+        }
+    : {
+        level: "risk",
+        label: "追加の補填が必要",
+        message: `期待値では${[
+          salesGap > 0 ? `売上${yen(salesGap)}` : null,
+          profitGap > 0 ? `粗利${yen(profitGap)}` : null,
+        ].filter(Boolean).join("・")}が不足する見込みです。`,
+      };
+
+  return (
+    <section className={`monthly-outlook monthly-outlook--${outlook.level}`}>
+      <div className="monthly-outlook__heading">
+        <div>
+          <small>この月間計画の総合判定</small>
+          <strong>{outlook.label}</strong>
+        </div>
+        <div className="monthly-outlook__probability">
+          <span>{jointProbability.toFixed(0)}%</span>
+          <small>売上・粗利の同時達成確率</small>
+        </div>
+      </div>
+      <p>{outlook.message}</p>
+      <div className="monthly-outlook__metrics">
+        <div>
+          <span><strong>売上 {salesRate?.toFixed(0) ?? "—"}%</strong><small>{yen(projectedSales)} / {yen(salesTarget)}</small></span>
+          <progress max={100} value={Math.min(salesRate ?? 0, 100)} />
+        </div>
+        {profitTarget !== null && (
+          <div>
+            <span><strong>粗利 {profitRate?.toFixed(0) ?? "—"}%</strong><small>{yen(projectedProfit)} / {yen(profitTarget)}</small></span>
+            <progress max={100} value={Math.min(profitRate ?? 0, 100)} />
+          </div>
+        )}
+      </div>
+      <small className="monthly-outlook__note">
+        期待着地は、成約済み実績と今回の計画に含まれる顧客の期待値を合算しています。
+      </small>
+    </section>
+  );
+}
+
 export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
-  const [startDate, setStartDate] = useState(tomorrowInTokyo);
-  const [policy, setPolicy] = useState<RoutePlanBatchPreview["policy"]>("balanced");
-  const [salesWeightPercent, setSalesWeightPercent] = useState(50);
+  const [selectedMonth, setSelectedMonth] = useState(() => tomorrowInTokyo().slice(0, 7));
+  const [policy, setPolicy] = useState<RouteEconomicPolicy>("balanced");
   const [maxVisits, setMaxVisits] = useState(4);
   const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>("driving");
-  const [startKind, setStartKind] = useState<"branch" | "custom">("branch");
-  const [startAddress, setStartAddress] = useState("");
-  const [endKind, setEndKind] = useState<"branch" | "custom">("branch");
-  const [endAddress, setEndAddress] = useState("");
-  const [areaKind, setAreaKind] = useState<"auto" | "custom">("auto");
-  const [areaQuery, setAreaQuery] = useState("");
-  const [areaRadiusKm, setAreaRadiusKm] = useState(5);
-  const [breakEnabled, setBreakEnabled] = useState(true);
-  const [breakStart, setBreakStart] = useState("12:00");
-  const [breakEnd, setBreakEnd] = useState("13:00");
   const [batch, setBatch] = useState<RoutePlanBatchPreview | null>(null);
+  const [weekBatches, setWeekBatches] = useState<Record<number, RoutePlanBatchPreview>>({});
+  const [calculatingWeek, setCalculatingWeek] = useState<number | null>(null);
   const [decisions, setDecisions] = useState<Record<number, "approved" | "rejected">>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const economicPolicy = routeEconomicPolicyConfig(policy);
+  const salesWeightPercent = economicPolicy.salesWeightPercent;
   const grossProfitWeightPercent = 100 - salesWeightPercent;
   const isFirstRefreshSignal = useRef(true);
 
@@ -67,70 +134,38 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
     // Only re-run if a preview already exists -- a deal-result change
     // shouldn't trigger the first, unrequested API call for this panel.
     if (batch) {
-      void createBatchPreview();
+      void createMonthOutline();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshSignal]);
 
-  function changePolicy(nextPolicy: RoutePlanBatchPreview["policy"]) {
-    setPolicy(nextPolicy);
-    if (nextPolicy === "sales") setSalesWeightPercent(70);
-    else if (nextPolicy === "gross_profit") setSalesWeightPercent(30);
-    else setSalesWeightPercent(50);
-  }
-
-  async function createBatchPreview() {
-    if (startKind === "custom" && !startAddress.trim()) {
-      setError("スタート住所を入力してください");
-      return;
-    }
-    if (endKind === "custom" && !endAddress.trim()) {
-      setError("ゴール住所を入力してください");
-      return;
-    }
-    if (areaKind === "custom" && !areaQuery.trim()) {
-      setError("訪問エリアの区名または駅名を入力してください");
-      return;
-    }
-    if (breakEnabled && breakStart >= breakEnd) {
-      setError("休憩終了は休憩開始より後に設定してください");
+  async function createMonthOutline() {
+    if (!/^\d{4}-\d{2}$/.test(selectedMonth)) {
+      setError("計画対象月を選択してください");
       return;
     }
     setBusy(true);
     setError(null);
     setDecisions({});
+    setWeekBatches({});
     try {
       setBatch(
         await previewSalesRouteBatch({
-          start_date: startDate,
+          start_date: `${selectedMonth}-01`,
           horizon: "month",
-          // Keep the optimization objective monthly, but calculate expensive
-          // travel-aware routes only for the next business week. Later days
-          // stay as coarse plans and are recalculated in detail the following
-          // week from the then-current results and remaining monthly target.
-          detailed_days: 5,
+          outline_only: true,
+          detailed_days: 0,
           policy,
           sales_weight_percent: salesWeightPercent,
           gross_profit_weight_percent: grossProfitWeightPercent,
           max_visits: maxVisits,
           travel_mode: travelMode,
-          start_location: {
-            kind: startKind,
-            ...(startKind === "custom" ? { address: startAddress } : {}),
-          },
-          end_location: {
-            kind: endKind,
-            ...(endKind === "custom" ? { address: endAddress } : {}),
-          },
-          search_area: {
-            kind: areaKind,
-            ...(areaKind === "custom"
-              ? { query: areaQuery, radius_km: areaRadiusKm }
-              : {}),
-          },
-          break_enabled: breakEnabled,
-          break_start: breakStart,
-          break_end: breakEnd,
+          start_location: { kind: "branch" },
+          end_location: { kind: "branch" },
+          search_area: { kind: "auto" },
+          break_enabled: true,
+          break_start: "12:00",
+          break_end: "13:00",
           turnaround_buffer_min: 20,
           travel_time_buffer_percent: 20,
           access_buffer_min: 10,
@@ -141,6 +176,65 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
       setError(requestError instanceof Error ? requestError.message : "月間営業スケジュールの作成に失敗しました");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function calculateWeek(week: RoutePlanWeek) {
+    if (!batch) return;
+    const portfolioAssignments = batch.selected_customers
+      .map((customer) => ({
+        customer_id: customer.customer_id,
+        visit_count: customer.assigned_dates.filter(
+          (assignedDate) => assignedDate >= week.start_date && assignedDate <= week.end_date,
+        ).length,
+      }))
+      .filter((assignment) => assignment.visit_count > 0);
+    if (portfolioAssignments.length === 0) {
+      setError(`第${week.week_number}週には月間最適化で割り当てられた訪問候補がありません。`);
+      return;
+    }
+
+    setCalculatingWeek(week.week_number);
+    setError(null);
+    try {
+      const economicsWeightTotal = batch.weights.sales + batch.weights.gross_profit;
+      const monthlySalesWeightPercent =
+        economicsWeightTotal > 0
+          ? Math.round((batch.weights.sales / economicsWeightTotal) * 100)
+          : salesWeightPercent;
+      const result = await previewSalesRouteBatch({
+        start_date: week.start_date,
+        end_date: week.end_date,
+        horizon: "week",
+        detailed_days: week.days.length,
+        portfolio_assignments: portfolioAssignments,
+        target_amount_override: week.target_amount,
+        target_gross_profit_override: week.target_gross_profit,
+        policy: batch.policy,
+        sales_weight_percent: monthlySalesWeightPercent,
+        gross_profit_weight_percent: 100 - monthlySalesWeightPercent,
+        max_visits: maxVisits,
+        travel_mode: travelMode,
+        start_location: { kind: "branch" },
+        end_location: { kind: "branch" },
+        search_area: { kind: "auto" },
+        break_enabled: true,
+        break_start: "12:00",
+        break_end: "13:00",
+        turnaround_buffer_min: 20,
+        travel_time_buffer_percent: 20,
+        access_buffer_min: 10,
+        return_buffer_min: 30,
+      });
+      setWeekBatches((current) => ({ ...current, [week.week_number]: result }));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : `第${week.week_number}週の計算に失敗しました`,
+      );
+    } finally {
+      setCalculatingWeek(null);
     }
   }
 
@@ -175,22 +269,18 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
     <section className="panel route-plan">
       <h2>月間営業スケジュール</h2>
       <p>
-        月の残目標から新規客と商談中の顧客を一緒に選び、必要な商談回数を
-        週目標・日目標へ割り当てたうえで、各営業日の訪問順と時間を作成します。
+        先に対象月の週数と月間顧客ポートフォリオを確定し、その月全体の売上・粗利を
+        最大化する方針を保ったまま、必要な週だけ詳細ルートを計算します。
       </p>
       <div className="route-plan__controls">
         <label>
-          計画開始日
-          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-        </label>
-        <label>
-          方針
-          <select value={policy} onChange={(event) => changePolicy(event.target.value as RoutePlanBatchPreview["policy"])}>
-            <option value="balanced">売上・粗利のバランス</option>
-            <option value="sales">売上重視</option>
-            <option value="gross_profit">粗利重視</option>
-            <option value="short_travel">移動時間重視</option>
-          </select>
+          計画対象月
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => setSelectedMonth(event.target.value)}
+            required
+          />
         </label>
         <label>
           移動手段
@@ -207,121 +297,36 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
         </label>
       </div>
       <small>
-        開始日から当月末までの営業日を対象にします。日ごとの期待売上条件は月目標から自動で配分されます。
+        月を設計する段階では移動ルートを計算しません。月間候補と週配分を確認してから、各週を個別に計算できます。
       </small>
 
-      <fieldset className="route-plan__group route-plan__balance">
-        <legend>売上・粗利の重み</legend>
-        <div className="route-plan__balance-values">
-          <strong>売上 {salesWeightPercent}%</strong>
-          <strong>粗利 {grossProfitWeightPercent}%</strong>
-        </div>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={salesWeightPercent}
-          aria-label="売上を重視する割合"
-          onChange={(event) => setSalesWeightPercent(Number(event.target.value))}
-        />
-        <div className="route-plan__balance-scale" aria-hidden="true">
-          <span>粗利重視</span>
-          <span>バランス</span>
-          <span>売上重視</span>
-        </div>
-      </fieldset>
-
       <fieldset className="route-plan__group">
-        <legend>出発・帰着地点</legend>
-        <div className="route-plan__controls">
-          <label>
-            スタート位置
-            <select value={startKind} onChange={(event) => setStartKind(event.target.value as "branch" | "custom")}>
-              <option value="branch">所属営業所（デフォルト）</option>
-              <option value="custom">任意の住所</option>
-            </select>
-          </label>
-          {startKind === "custom" && (
-            <label>
-              スタート住所
-              <input value={startAddress} onChange={(event) => setStartAddress(event.target.value)} placeholder="例：東京都千代田区丸の内1丁目" required />
+        <legend>売上・粗利の考え方</legend>
+        <div className="route-plan__policy-options">
+          {ROUTE_ECONOMIC_POLICIES.map((option) => (
+            <label
+              key={option.value}
+              className={`route-plan__policy-option${policy === option.value ? " is-selected" : ""}`}
+            >
+              <input
+                type="radio"
+                name="batch-economic-policy"
+                value={option.value}
+                checked={policy === option.value}
+                onChange={() => setPolicy(option.value)}
+              />
+              <strong>{option.label}</strong>
+              <small>{option.description}</small>
             </label>
-          )}
-          <label>
-            ゴール位置
-            <select value={endKind} onChange={(event) => setEndKind(event.target.value as "branch" | "custom")}>
-              <option value="branch">所属営業所（デフォルト）</option>
-              <option value="custom">任意の住所</option>
-            </select>
-          </label>
-          {endKind === "custom" && (
-            <label>
-              ゴール住所
-              <input value={endAddress} onChange={(event) => setEndAddress(event.target.value)} placeholder="例：東京都新宿区西新宿2丁目" required />
-            </label>
-          )}
+          ))}
         </div>
+        <small>
+          選択した方針を月間顧客選定・週計算・エラー発生後のLLM再計画まで引き継ぎます。
+        </small>
       </fieldset>
 
-      <fieldset className="route-plan__group">
-        <legend>訪問エリアの絞り込み</legend>
-        <div className="route-plan__controls">
-          <label>
-            エリア指定
-            <select value={areaKind} onChange={(event) => setAreaKind(event.target.value as "auto" | "custom")}>
-              <option value="auto">出発地点周辺から自動探索</option>
-              <option value="custom">区名・駅名を入力</option>
-            </select>
-          </label>
-          {areaKind === "custom" && (
-            <>
-              <label>
-                区名・駅名
-                <input
-                  value={areaQuery}
-                  onChange={(event) => setAreaQuery(event.target.value)}
-                  placeholder="例：新宿区、東京駅"
-                  required
-                />
-              </label>
-              <label>
-                中心からの半径（km）
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={areaRadiusKm}
-                  onChange={(event) => setAreaRadiusKm(Number(event.target.value))}
-                />
-              </label>
-            </>
-          )}
-        </div>
-      </fieldset>
-
-      <fieldset className="route-plan__group">
-        <legend>休憩時間</legend>
-        <label className="route-plan__check">
-          <input type="checkbox" checked={breakEnabled} onChange={(event) => setBreakEnabled(event.target.checked)} />
-          休憩時間を確保する
-        </label>
-        {breakEnabled && (
-          <div className="route-plan__controls">
-            <label>
-              休憩開始
-              <input type="time" value={breakStart} onChange={(event) => setBreakStart(event.target.value)} />
-            </label>
-            <label>
-              休憩終了
-              <input type="time" value={breakEnd} onChange={(event) => setBreakEnd(event.target.value)} />
-            </label>
-          </div>
-        )}
-      </fieldset>
-
-      <button type="button" className="regenerate-button" onClick={createBatchPreview} disabled={busy}>
-        {busy ? "月→週→日の計画を計算中…" : batch ? "月間計画を作り直す" : "月間スケジュールを作る"}
+      <button type="button" className="regenerate-button" onClick={createMonthOutline} disabled={busy || calculatingWeek !== null}>
+        {busy ? "月の顧客・週配分を計算中…" : batch ? "月の設計を作り直す" : "月の設計を作る"}
       </button>
 
       {error && <p className="new-customer-form__error">{error}</p>}
@@ -331,6 +336,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
           <p>
             {batch.start_date}〜{batch.end_date}・{batch.rep_name}・{batch.branch.branch_name}営業所
           </p>
+          <MonthlyPlanOutlook batch={batch} />
           <div className="route-plan-batch__flow" aria-label="月、週、日の計画フロー">
             <article>
               <small>1. 月の逆算</small>
@@ -340,7 +346,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
               </span>
             </article>
             <article>
-              <small>2. 顧客選択</small>
+              <small>2. 顧客選択（ルール＋LLM）</small>
               <strong>{batch.selected_customers.length}社</strong>
               <span>
                 新規{batch.selected_customers.filter((customer) => customer.customer_type === "new").length}社・
@@ -350,87 +356,67 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
               </span>
             </article>
             <article>
-              <small>3. 週・日へ展開</small>
+              <small>3. 週ごとに詳細計算</small>
               <strong>{batch.weeks.length}週・{batch.days.length}営業日</strong>
-              <span>日別ルート {batch.detailed_days}日分を詳細計算</span>
+              <span>計算済み {Object.keys(weekBatches).length}/{batch.weeks.length}週</span>
             </article>
           </div>
 
           <div className="route-plan__totals">
             <span>期間目標 {yen(batch.planning_target_amount)}</span>
-            <span>ルート期待売上 {yen(batch.totals.expected_sales)}</span>
-            <span>予定粗利 {yen(batch.totals.expected_gross_profit)}</span>
-            <span>訪問 {batch.totals.visit_count}件</span>
-            <span>移動 {batch.totals.total_travel_min}分</span>
+            <span>月間ポートフォリオ期待売上 {yen(batch.totals.expected_sales)}</span>
+            <span>月間ポートフォリオ期待粗利 {yen(batch.totals.expected_gross_profit)}</span>
+            <span>月間割当 {batch.totals.visit_count}訪問</span>
           </div>
-          {batch.warnings.map((warning) => (
-            <p className="route-plan__warning" key={warning}>{warning}</p>
-          ))}
-
-          <section className="route-plan-batch__portfolio">
-            <h3>月の顧客候補</h3>
-            <p>
-              残目標に対して約10%の余裕を持たせ、新規・商談中を混ぜて、期待売上・粗利・
-              担当者適合度・必要商談回数から選びます。
-            </p>
-            <div className="route-plan-batch__customer-grid">
-              {batch.selected_customers.map((customer) => (
-                <article key={customer.customer_id}>
-                  <strong>
-                    {customer.customer_type === "new" ? "新規" : "商談中"}・{customer.customer_name}
-                  </strong>
-                  {(customer.loss_risk !== "low" || customer.delay_risk !== "low") && (
-                    <span className="route-plan-batch__risk-badges">
-                      {customer.loss_risk !== "low" && (
-                        <span
-                          className={`route-plan-batch__badge route-plan-batch__badge--risk-${customer.loss_risk}`}
-                        >
-                          失注リスク{RISK_LABEL[customer.loss_risk]}
-                        </span>
-                      )}
-                      {customer.delay_risk !== "low" && (
-                        <span
-                          className={`route-plan-batch__badge route-plan-batch__badge--risk-${customer.delay_risk}`}
-                        >
-                          延期リスク{RISK_LABEL[customer.delay_risk]}
-                        </span>
-                      )}
-                    </span>
-                  )}
-                  <span>{customer.assigned_dates.map(dayLabel).join("、")}に割当</span>
-                  <span>
-                    必要{customer.required_visit_count}回・完了{customer.completed_visit_count}回・
-                    確定済み{customer.scheduled_visit_count}回・今回{customer.planned_visit_count}回
-                  </span>
-                  <span>期待売上 {yen(customer.expected_sales)}</span>
-                  <small>{customer.selection_reason}</small>
-                  {customer.risk_reasons.length > 0 && (
-                    <small>{customer.risk_reasons.join("、")}</small>
-                  )}
-                </article>
-              ))}
-              {batch.selected_customers.length === 0 && (
-                <p className="route-plan-batch__day-empty">追加の訪問候補はありません。</p>
-              )}
-            </div>
-          </section>
-
           <div className="route-plan-batch__weeks">
-            {batch.weeks.map((week) => (
+            {batch.weeks.map((outlineWeek) => {
+              const calculatedBatch = weekBatches[outlineWeek.week_number];
+              const week = calculatedBatch?.weeks[0] ?? outlineWeek;
+              const isCalculated = calculatedBatch !== undefined;
+              const activeWarnings = calculatedBatch?.warnings ?? batch.warnings;
+              const assignedVisitCount = batch.selected_customers.reduce(
+                (count, customer) => count + customer.assigned_dates.filter(
+                  (assignedDate) =>
+                    assignedDate >= outlineWeek.start_date && assignedDate <= outlineWeek.end_date,
+                ).length,
+                0,
+              );
+              return (
               <details
-                key={`${week.start_date}-${week.end_date}`}
+                key={`${outlineWeek.start_date}-${outlineWeek.end_date}`}
                 className="route-plan-batch__week"
-                open={week.week_number === 1}
+                open={outlineWeek.week_number === 1}
               >
                 <summary className="route-plan-batch__week-summary">
-                  <span>第{week.week_number}週</span>
-                  <strong>週目標 {yen(week.target_amount)}</strong>
+                  <span>第{outlineWeek.week_number}週</span>
+                  <strong>週目標 {yen(outlineWeek.target_amount)}</strong>
                   <span>
                     期待売上 {yen(week.expected_sales)}・訪問{week.visit_count}件・
                     達成見込み{Math.round(week.attainment_rate * 100)}%
                   </span>
                 </summary>
                 <div className="route-plan-batch__week-body">
+                  <div className="route-plan__actions">
+                    <button
+                      type="button"
+                      className="goal-card__save"
+                      onClick={() => calculateWeek(outlineWeek)}
+                      disabled={busy || calculatingWeek !== null || assignedVisitCount === 0}
+                    >
+                      {calculatingWeek === outlineWeek.week_number
+                        ? `第${outlineWeek.week_number}週を計算中…`
+                        : isCalculated
+                          ? `第${outlineWeek.week_number}週を再計算`
+                          : `第${outlineWeek.week_number}週を計算`}
+                    </button>
+                    <span>
+                      {isCalculated
+                        ? "月間ポートフォリオを使った詳細ルート計算済み"
+                        : assignedVisitCount > 0
+                          ? `月間設計から${assignedVisitCount}訪問を引き継ぎます`
+                          : "この週の訪問割り当てはありません"}
+                    </span>
+                  </div>
                   <p>
                     {week.focus_is_ai_generated && (
                       <span className="route-plan-batch__badge route-plan-batch__badge--detailed">
@@ -461,7 +447,11 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                         <summary className="route-plan-batch__day-summary">
                           <span className="route-plan-batch__day-date">{dayLabel(day.target_date)}</span>
                           <span className={`route-plan-batch__badge route-plan-batch__badge--${day.detail_level}`}>
-                            {day.detail_level === "detailed" ? "詳細ルート" : "概算"}
+                            {!isCalculated
+                              ? "月間配分"
+                              : day.detail_level === "detailed"
+                                ? "詳細ルート"
+                                : "概算"}
                           </span>
                           <span className="route-plan-batch__day-figures">
                             日目標{yen(day.target_amount)}・期待売上{yen(day.totals.expected_sales)}・
@@ -503,7 +493,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                                 </p>
                               )}
                               {day.warnings
-                                .filter((warning) => !batch.warnings.includes(warning))
+                                .filter((warning) => !activeWarnings.includes(warning))
                                 .map((warning) => (
                                   <p className="route-plan__warning" key={warning}>{warning}</p>
                                 ))}
@@ -515,7 +505,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                                     type="button"
                                     className="goal-card__save"
                                     onClick={() => approveDay(day.plan_id as number)}
-                                    disabled={busy}
+                                    disabled={busy || calculatingWeek !== null}
                                   >
                                     この日の予定を採用
                                   </button>
@@ -523,7 +513,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                                     type="button"
                                     className="goal-card__cancel"
                                     onClick={() => rejectDay(day.plan_id as number)}
-                                    disabled={busy}
+                                    disabled={busy || calculatingWeek !== null}
                                   >
                                     却下
                                   </button>
@@ -543,7 +533,8 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                   </div>
                 </div>
               </details>
-            ))}
+              );
+            })}
           </div>
 
           <small>

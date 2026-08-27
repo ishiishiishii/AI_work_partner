@@ -17,6 +17,7 @@ import {
   generateActivityPlans,
   postActivityResult,
   recalculateRepAffinity,
+  replanActivityPlans,
   saveSalesTarget,
   updatePlan,
   updatePlanProgress,
@@ -90,6 +91,9 @@ export function useDashboardData(repId: number | null) {
   // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
   const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
+  // 商談結果がDBへ保存され、その結果に基づく活動再計画まで完了した時だけ更新する。
+  // ダッシュボードの月間ルートが、保存前の古い商談状態で先走って再計算するのを防ぐ。
+  const [routeRefreshRevision, setRouteRefreshRevision] = useState(0);
   // plan_id -> バックエンドに登録済みの result_id(取り消し時にどれを消すか特定するため)
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
 
@@ -193,7 +197,8 @@ export function useDashboardData(repId: number | null) {
     setIsGeneratingInitialPlan(true);
     try {
       const generated = await generateActivityPlans(rid, TARGET_MONTH);
-      setPlans(generated);
+      setPlans(generated.filter((plan) => plan.category === "visit"));
+      setDailyTasks(generated.filter((plan) => plan.category === "task"));
       setNeedsInitialPlan(false);
       await refreshForecast(rid);
     } catch (error) {
@@ -210,8 +215,10 @@ export function useDashboardData(repId: number | null) {
     try {
       const before = calcAchievementRate(plans, target.target_amount, deals);
       const fresh = await generateActivityPlans(rid, TARGET_MONTH);
-      const after = calcAchievementRate(fresh, target.target_amount, deals);
-      setPlans(fresh);
+      const freshVisits = fresh.filter((plan) => plan.category === "visit");
+      const after = calcAchievementRate(freshVisits, target.target_amount, deals);
+      setPlans(freshVisits);
+      setDailyTasks(fresh.filter((plan) => plan.category === "task"));
       setReplan({
         before_achievement_rate: before,
         after_achievement_rate: after,
@@ -254,6 +261,7 @@ export function useDashboardData(repId: number | null) {
           setAffinities(await fetchRepAffinity(repId));
         }
         await refreshForecast(repId);
+        setRouteRefreshRevision((revision) => revision + 1);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "結果の取り消しに失敗しました");
       }
@@ -265,14 +273,15 @@ export function useDashboardData(repId: number | null) {
         ? { ...plan, result_status: status, activity_type_name: activityTypeName }
         : plan,
     );
-    setPlans(updatedPlans);
 
     // 「対応が難しい」で差し替えたローカル専用の計画には実在する deal_id が無いため、
     // バックエンドへは送信せず表示のみ更新する
     if (!changedPlan.deal_id) {
+      setPlans(updatedPlans);
       return;
     }
 
+    const beforeReplanRate = calcAchievementRate(updatedPlans, target.target_amount, deals);
     try {
       const result = await postActivityResult(
         repId,
@@ -281,11 +290,83 @@ export function useDashboardData(repId: number | null) {
         activityTypeName,
       );
       setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
-      await refreshForecast(repId);
+      // DBへの結果保存後に表示へ反映する。これにより月間ルートの再計算も、失注前の
+      // 古いdeal状態ではなく保存済みの状態を必ず参照する。
+      setPlans(updatedPlans);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
-      setPlans(plans); // ロールバック
       return;
+    }
+
+    if (status !== "won" && status !== "lost") {
+      await refreshForecast(repId);
+      setRouteRefreshRevision((revision) => revision + 1);
+      return;
+    }
+
+    setIsRegenerating(true);
+    try {
+      // create_resultでwon/lostになった商談は候補SQLから除外される。再計画は未来の
+      // AI予定だけを削除して、残った進行中案件と事務作業から組み直す。
+      await replanActivityPlans(repId, TARGET_MONTH);
+      const [fetchedPlans, fetchedDeals, fetchedAffinities] = await Promise.all([
+        fetchActivityPlans(repId),
+        fetchDeals({ repId }),
+        fetchRepAffinity(repId),
+      ]);
+      // fetchActivityPlansのresult_statusはDBビュー上pending固定なので、この画面で
+      // 既に確定している結果をplan_id単位で戻してから表示を差し替える。
+      const resultStatusByPlanId = new Map(
+        updatedPlans.map((plan) => [plan.plan_id, plan.result_status]),
+      );
+      const replanned = fetchedPlans.map((plan) => ({
+        ...plan,
+        result_status: resultStatusByPlanId.get(plan.plan_id) ?? plan.result_status,
+      }));
+      const replannedVisits = replanned.filter((plan) => plan.category === "visit");
+      setPlans(replannedVisits);
+      setDailyTasks(replanned.filter((plan) => plan.category === "task"));
+      setDeals(fetchedDeals);
+      setAffinities(fetchedAffinities);
+
+      const customerName = changedPlan.customer_name;
+      const isLost = status === "lost";
+      setReplan({
+        before_achievement_rate: beforeReplanRate,
+        after_achievement_rate: calcAchievementRate(
+          replannedVisits,
+          target.target_amount,
+          fetchedDeals,
+        ),
+        outcome: status,
+        reason: isLost
+          ? `${customerName}の失注を反映し、月末目標の不足分を補うようAIが計画を組み直しました。`
+          : `${customerName}の成約を反映し、減った残目標に合わせて将来計画を整理しました。`,
+        steps: isLost
+          ? [
+              "失注案件の期待売上・期待粗利を0円として残目標を再計算",
+              "失注案件に紐づく将来のAI訪問・フォロー予定を除外",
+              "不足分を補える別案件を売上・粗利・成約確度から再選定",
+              "空いた時間へ代替案件の訪問や事務作業を配置",
+            ]
+          : [
+              "成約金額・粗利を実績に反映して残目標を減額",
+              "目標に対して余分になった将来のAI訪問を整理",
+              "空いた時間へ別案件のフォローや事務作業を配置",
+            ],
+      });
+    } catch (error) {
+      // 結果登録は既に成功しているのでロールバックしない。月間ルート側はこの後の
+      // refresh revisionで、保存済み結果を使った既存ルール＋LLM再計画を試行できる。
+      setLoadError(
+        error instanceof Error
+          ? `結果は登録しましたが、活動計画の自動再生成に失敗しました: ${error.message}`
+          : "結果は登録しましたが、活動計画の自動再生成に失敗しました",
+      );
+    } finally {
+      setIsRegenerating(false);
+      await refreshForecast(repId);
+      setRouteRefreshRevision((revision) => revision + 1);
     }
   }
 
@@ -632,6 +713,7 @@ export function useDashboardData(repId: number | null) {
     jointAchievementProbability,
     actualAchievedAmount,
     actualAchievementRate,
+    routeRefreshRevision,
     handleTargetSave,
     handleRouteApproved,
     handleRegenerate,

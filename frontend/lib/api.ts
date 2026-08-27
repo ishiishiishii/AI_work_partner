@@ -406,6 +406,19 @@ export async function generateActivityPlans(
   return body.plans.map((row) => mapPlan(row, customerNames));
 }
 
+// 成約・失注などの実績確定後に、当日以降のAI生成予定だけを残目標から組み直す。
+// 手動予定はバックエンド側で保持されるため、結果入力による自動再計画専用として
+// /plans/generate と呼び分ける。
+export async function replanActivityPlans(repId: number, targetMonth: string): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/plans/replan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rep_id: repId, target_month: targetMonth }),
+  });
+  if (!res.ok) throw new Error(`自動再計画に失敗しました (HTTP ${res.status})`);
+}
+
 // 予定の手動追加の保存。title/customer_id/deal_id の扱いは updatePlan と同じ考え方
 // (title があれば表示上そちらを優先するが、customer_id/deal_id が分かっていれば
 // 商談への紐付けとして残す)。createPlan(差し替え提案の永続化用。plan_id しか返らない)
@@ -1004,8 +1017,13 @@ export async function rejectSalesRoutePlan(planId: number): Promise<void> {
 
 export async function previewSalesRouteBatch(input: {
   start_date: string;
+  end_date?: string;
   horizon: RoutePlanBatchPreview["horizon"];
+  outline_only?: boolean;
   detailed_days?: number;
+  portfolio_assignments?: Array<{ customer_id: number; visit_count: number }>;
+  target_amount_override?: number;
+  target_gross_profit_override?: number;
   policy: RoutePlanBatchPreview["policy"];
   sales_weight_percent?: number;
   gross_profit_weight_percent?: number;

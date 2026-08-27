@@ -452,6 +452,8 @@ export type RoutePlanWeek = {
   expected_sales: number;
   shortfall_amount: number;
   attainment_rate: number;
+  target_gross_profit: number;
+  expected_gross_profit: number;
   visit_count: number;
   customer_names: string[];
   focus: string;
@@ -516,6 +518,11 @@ export type RoutePlanBatchPreview = {
   planning_target_amount: number | null;
   portfolio_expected_sales: number;
   portfolio_coverage_rate: number;
+  monthly_target_gross_profit: number | null;
+  achieved_gross_profit: number;
+  sales_achievement_probability: number;
+  profit_achievement_probability: number | null;
+  joint_achievement_probability: number;
   warnings: string[];
 };
 
@@ -535,4 +542,6 @@ export type ReplanInfo = {
   before_achievement_rate: number;
   after_achievement_rate: number;
   reason: string;
+  outcome?: "won" | "lost" | "manual";
+  steps?: string[];
 };
