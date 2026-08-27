@@ -2,7 +2,8 @@
 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { useEffect } from "react";
+import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { boundsForPositions, boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
 import type { ActivityPlan, Customer, Territory } from "@/types";
 
@@ -37,6 +38,17 @@ const JAPAN_BOUNDS: [[number, number], [number, number]] = [
 // 今月の計画にある顧客だけに絞り込んだ後は数件に収まることが多く、低すぎると
 // (以前は11)県レベルの引きになって見づらいため、街区レベルまで寄れる値にしている。
 const FIT_BOUNDS_OPTIONS = { padding: [32, 32] as [number, number], maxZoom: 14 };
+
+// MapContainerのboundsは初回マウント時にしか効かないため、計画が増減してピンの
+// 範囲が変わるたびに手動でfitBoundsし直す
+function FitBounds({ bounds }: { bounds: [[number, number], [number, number]] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.fitBounds(bounds, FIT_BOUNDS_OPTIONS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, bounds.flat().join(",")]);
+  return null;
+}
 
 export function MapPanel({ customers, territory, plans, targetMonth }: MapPanelProps) {
   // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
@@ -87,6 +99,7 @@ export function MapPanel({ customers, territory, plans, targetMonth }: MapPanelP
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          <FitBounds bounds={bounds} />
           {pins.map(({ customer, position }) => (
             <Marker key={customer.customer_id} position={position}>
               <Popup>

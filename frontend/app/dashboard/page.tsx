@@ -96,8 +96,7 @@ export default function DashboardPage() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
-  // 「対応が難しい」の差し替え候補。押した直後はここに提案を溜めるだけで、
-  // ユーザーが確定するまでバックエンドには何も送らない
+  // 「対応が難しい」の差し替え候補。確定するまでバックエンドには送らない
   const [altPreview, setAltPreview] = useState<AltPreview | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
@@ -105,9 +104,6 @@ export default function DashboardPage() {
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
-  // 延期元のplan_id -> 延期先に作った新しい予定の日付。延期を取り消した時、元の予定は
-  // 復活する一方この新しい予定は消えず残るので、重複に気づけるよう警告を出すために使う
-  const [postponedToByPlan, setPostponedToByPlan] = useState<Record<number, string>>({});
 
   // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
   // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
@@ -265,20 +261,6 @@ export default function DashboardPage() {
           await recalculateRepAffinity(REP_ID);
           setAffinities(await fetchRepAffinity(REP_ID));
         }
-        // 延期の取り消しは元の予定を復活させるだけで、延期先に作った予定は消さない
-        // (自動で消すと、そちらを既に別日に調整済みだった場合に壊してしまうため)。
-        // 重複したまま気づかないのを防ぐため、警告だけ出す
-        const postponedTo = postponedToByPlan[planId];
-        if (postponedTo) {
-          setAltNotice(
-            `延期を取り消しました。延期先(${postponedTo})に作成した予定は残っています。不要であれば手動で削除してください。`,
-          );
-          setPostponedToByPlan((prev) => {
-            const next = { ...prev };
-            delete next[planId];
-            return next;
-          });
-        }
         await refreshForecast(REP_ID);
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : "結果の取り消しに失敗しました");
@@ -315,28 +297,19 @@ export default function DashboardPage() {
     }
   }
 
-  // 「延期」は結果を記録するだけでなく、その場で選んだ日付に予定を移す。
-  // 以前は失注/延期のたびに月の残り全体をAIが自動で組み直しており、「急に予定が変わる」
-  // 原因になっていた。今は結果の記録と再計画を分離し、延期先はユーザーが直接指定する
-  // (再計画したい場合は「AIに計画を作り直してもらう」ボタンを任意のタイミングで使う)。
+  // 「対応が難しい」と同じパターン(新しい予定を作って元をキャンセル)。結果として
+  // 記録すると「取り消す」操作が生え、取り消すと延期先と重複してしまうため避けている。
   async function handlePostpone(planId: number, newDate: string, activityTypeName: string) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId);
     if (!changedPlan || REP_ID === null) return;
 
-    setPlans((prev) =>
-      prev.map((plan) => (plan.plan_id === planId ? { ...plan, result_status: "postponed", activity_type_name: activityTypeName } : plan)),
-    );
-
     try {
-      const result = await postActivityResult(REP_ID, changedPlan, "postponed", activityTypeName);
-      setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
-
       const created = await createPlan(REP_ID, {
         plan_date: newDate,
         start_time: changedPlan.start_time,
         end_time: changedPlan.end_time,
         category: changedPlan.category,
-        activity_type: changedPlan.activity_type_name,
+        activity_type: activityTypeName,
         customer_id: changedPlan.customer_id,
         deal_id: changedPlan.deal_id,
         priority: changedPlan.priority,
@@ -344,23 +317,23 @@ export default function DashboardPage() {
         expected_probability: changedPlan.expected_probability,
         rationale: `${changedPlan.plan_date}の予定を延期`,
       });
+      await cancelPlan(REP_ID, planId);
 
       const rescheduled: ActivityPlan = {
         ...changedPlan,
         plan_id: created.plan_id,
         plan_date: newDate,
+        activity_type_name: activityTypeName,
         is_ai_generated: false,
         reasoning_text: `${changedPlan.plan_date}の予定を延期`,
         result_status: "pending",
         memo: null,
         progress_percent: 0,
       };
-      setPlans((prev) => prev.concat(rescheduled));
-      setPostponedToByPlan((prev) => ({ ...prev, [planId]: newDate }));
+      setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(rescheduled));
       await refreshForecast(REP_ID);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "延期の処理に失敗しました");
-      setPlans(plans); // ロールバック
     }
   }
 
@@ -447,9 +420,7 @@ export default function DashboardPage() {
     }
   }
 
-  // 「対応が難しい」も、失注/延期と同じく「押した瞬間にAIが一方的に差し替えを確定する」
-  // 問題があったため、提案の計算(この関数)と確定(confirmAlternative)を分離した。
-  // ボタンを押した直後は候補を計算して見せるだけで、まだ何もバックエンドに送らない。
+  // 候補の計算のみ行う。確定はconfirmAlternativeで、まだ何も送信しない
   function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId) ?? dailyTasks.find((task) => task.plan_id === planId);
     if (!changedPlan) return;

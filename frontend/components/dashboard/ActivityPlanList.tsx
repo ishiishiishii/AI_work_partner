@@ -585,8 +585,7 @@ export function ActivityPlanList({
     );
   }
 
-  // 「対応が難しい」ボタン。押した瞬間にAIが差し替えを確定していた挙動を改め、
-  // 提案を確認してから確定/やめるを選べるようにしている(一覧行・詳細モーダル共通)
+  // 「対応が難しい」ボタン(一覧行・詳細モーダル共通)
   function renderAlternativeControl(planId: number, label: string) {
     if (altPreview?.planId !== planId) {
       return (
