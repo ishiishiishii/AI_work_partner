@@ -221,6 +221,7 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 estimated_amount=body.estimated_amount,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
+                actual_amount=body.actual_amount,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

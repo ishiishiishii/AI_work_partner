@@ -272,10 +272,10 @@ export default function DashboardPage() {
     }
 
     if (status === "lost" || status === "postponed") {
-      const before = calcAchievementRate(updatedPlans, target.target_amount);
+      const before = calcAchievementRate(updatedPlans, target.target_amount, deals);
       try {
         const freshPlans = await replanActivityPlans(REP_ID, TARGET_MONTH);
-        const after = calcAchievementRate(freshPlans, target.target_amount);
+        const after = calcAchievementRate(freshPlans, target.target_amount, deals);
         setPlans(freshPlans);
         setReplan({
           before_achievement_rate: before,
@@ -432,8 +432,8 @@ export default function DashboardPage() {
           setDailyTasks((prev) => prev.filter((task) => task.plan_id !== planId).concat(candidate));
         }
         setReplan({
-          before_achievement_rate: calcAchievementRate(plans, target.target_amount),
-          after_achievement_rate: calcAchievementRate(plans, target.target_amount),
+          before_achievement_rate: calcAchievementRate(plans, target.target_amount, deals),
+          after_achievement_rate: calcAchievementRate(plans, target.target_amount, deals),
           reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが「${candidate.customer_name}」に差し替えました`,
         });
       } catch (error) {
@@ -494,9 +494,9 @@ export default function DashboardPage() {
         progress_percent: 0,
       };
 
-      const before = calcAchievementRate(plans, target.target_amount);
+      const before = calcAchievementRate(plans, target.target_amount, deals);
       const nextPlans = plans.filter((plan) => plan.plan_id !== planId).concat(candidate);
-      const after = calcAchievementRate(nextPlans, target.target_amount);
+      const after = calcAchievementRate(nextPlans, target.target_amount, deals);
 
       setPlans(nextPlans);
       setReplan({
@@ -544,8 +544,10 @@ export default function DashboardPage() {
   // バックエンドの forecast は成約/失注の実績まで反映した正確な値。
   // 目標(sales_target)が未登録の月は 404 になるため、その場合だけクライアント計算に
   // フォールバックする
-  const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans);
-  const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
+  const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans, deals);
+  const achievementRate = forecast
+    ? forecast.achievement_rate
+    : calcAchievementRate(plans, target.target_amount, deals);
 
   // 見込み粗利。バックエンドのforecastにはまだ粗利が無いため、
   // planに紐づくdeal.profitからクライアント側で算出する
@@ -553,8 +555,8 @@ export default function DashboardPage() {
 
   // 「現在の実績」は成約(won)確定分のみの金額。バックエンドのforecastには
   // 見込み(未対応・延期分含む)しか無いため、常にplansから算出する
-  const actualAchievedAmount = calcActualAchievedAmount(plans);
-  const actualAchievementRate = calcActualAchievementRate(plans, target.target_amount);
+  const actualAchievedAmount = calcActualAchievedAmount(plans, deals);
+  const actualAchievementRate = calcActualAchievementRate(plans, target.target_amount, deals);
 
   return (
     <main className="dashboard-main">
@@ -596,6 +598,7 @@ export default function DashboardPage() {
             repId={selectedRep.rep_id}
             plans={plans}
             dailyTasks={dailyTasks}
+            deals={deals}
             onResultChange={handleResultChange}
             onRequestAlternative={handleRequestAlternative}
             onEditPlan={handleEditPlan}

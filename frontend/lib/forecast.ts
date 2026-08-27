@@ -21,13 +21,21 @@ function uniqueByDeal(plans: ActivityPlan[]): ActivityPlan[] {
   return [...dealless, ...bestByDeal.values()];
 }
 
-// 成約(won)は満額、進行中(pending/postponed)は成約確度(expected_probability)で
-// 重み付けした期待値、失注(lost)は0円として合算する
-export function calcForecastAmount(plans: ActivityPlan[]): number {
+// 成約(won)の金額は、plan.expected_amount(計画作成時点の見込みのスナップショット)
+// ではなく、記録されていればdeal.actual_amount(実際の契約金額)を優先する
+function wonAmount(plan: ActivityPlan, dealById: Map<number, Deal>): number {
+  const deal = plan.deal_id !== null ? dealById.get(plan.deal_id) : undefined;
+  return deal?.actual_amount ?? plan.expected_amount;
+}
+
+// 成約(won)は実契約金額(未記録ならexpected_amount)、進行中(pending/postponed)は
+// 成約確度(expected_probability)で重み付けした期待値、失注(lost)は0円として合算する
+export function calcForecastAmount(plans: ActivityPlan[], deals: Deal[]): number {
+  const dealById = new Map(deals.map((deal) => [deal.deal_id, deal]));
   return uniqueByDeal(plans).reduce((sum, plan) => {
     if (plan.result_status === "lost") return sum;
-    const weight = plan.result_status === "won" ? 1 : plan.expected_probability / 100;
-    return sum + plan.expected_amount * weight;
+    if (plan.result_status === "won") return sum + wonAmount(plan, dealById);
+    return sum + plan.expected_amount * (plan.expected_probability / 100);
   }, 0);
 }
 
@@ -44,20 +52,21 @@ export function calcForecastProfit(plans: ActivityPlan[], deals: Deal[]): number
   }, 0);
 }
 
-export function calcAchievementRate(plans: ActivityPlan[], targetAmount: number): number {
+export function calcAchievementRate(plans: ActivityPlan[], targetAmount: number, deals: Deal[]): number {
   if (targetAmount <= 0) return 0;
-  return (calcForecastAmount(plans) / targetAmount) * 100;
+  return (calcForecastAmount(plans, deals) / targetAmount) * 100;
 }
 
 // 「現在の実績」= 成約(won)が確定した予定の金額のみ(見込みの計画は含めない)
-export function calcActualAchievedAmount(plans: ActivityPlan[]): number {
+export function calcActualAchievedAmount(plans: ActivityPlan[], deals: Deal[]): number {
+  const dealById = new Map(deals.map((deal) => [deal.deal_id, deal]));
   return uniqueByDeal(plans).reduce((sum, plan) => {
     if (plan.result_status !== "won") return sum;
-    return sum + plan.expected_amount;
+    return sum + wonAmount(plan, dealById);
   }, 0);
 }
 
-export function calcActualAchievementRate(plans: ActivityPlan[], targetAmount: number): number {
+export function calcActualAchievementRate(plans: ActivityPlan[], targetAmount: number, deals: Deal[]): number {
   if (targetAmount <= 0) return 0;
-  return (calcActualAchievedAmount(plans) / targetAmount) * 100;
+  return (calcActualAchievedAmount(plans, deals) / targetAmount) * 100;
 }
