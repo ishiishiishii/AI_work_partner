@@ -615,7 +615,7 @@ export default function DashboardPage() {
             plans={plans}
             affinities={affinities}
           />
-          <MapPanel customers={customers} territory={territory} />
+          <MapPanel customers={customers} territory={territory} plans={plans} targetMonth={TARGET_MONTH} />
           <AiReasoningPanel plans={plans} />
         </div>
       </div>

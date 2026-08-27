@@ -4,7 +4,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import { boundsForPositions, boundsForPrefectures, coordinatesForCustomer, locationPrefecture } from "@/lib/geo";
-import type { Customer, Territory } from "@/types";
+import type { ActivityPlan, Customer, Territory } from "@/types";
 
 // leafletのデフォルトマーカー画像はCSS相対パス経由で読み込まれる前提になっており、
 // webpack/Next.jsのバンドル環境ではパスが壊れて透明な四角になる定番の問題がある。
@@ -23,6 +23,8 @@ L.Icon.Default.mergeOptions({
 type MapPanelProps = {
   customers: Customer[];
   territory: Territory | null;
+  plans: ActivityPlan[];
+  targetMonth: string; // "YYYY-MM"
 };
 
 const JAPAN_BOUNDS: [[number, number], [number, number]] = [
@@ -35,15 +37,26 @@ const JAPAN_BOUNDS: [[number, number], [number, number]] = [
 // 拡大されるのを防ぐための上限。
 const FIT_BOUNDS_OPTIONS = { padding: [32, 32] as [number, number], maxZoom: 11 };
 
-export function MapPanel({ customers, territory }: MapPanelProps) {
+export function MapPanel({ customers, territory, plans, targetMonth }: MapPanelProps) {
   // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
   // (読み込み中)は絞り込まず全件表示しておく方が「一瞬空になる」より自然。
-  const scopedCustomers = territory
+  const territoryCustomers = territory
     ? customers.filter((customer) => {
         const prefecture = locationPrefecture(customer.location);
         return prefecture !== null && territory.prefectures.includes(prefecture);
       })
     : customers;
+
+  // ピンが多すぎて見づらいとの指摘を受け、今月の計画にある顧客だけに絞り込む。
+  // 今月の計画がまだ無ければ、そのまま何も表示しない(フォールバックしない)。
+  const plannedCustomerIds = new Set(
+    plans
+      .filter((plan) => plan.customer_id !== null && plan.plan_date.startsWith(targetMonth))
+      .map((plan) => plan.customer_id as number),
+  );
+  const scopedCustomers = territoryCustomers.filter((customer) =>
+    plannedCustomerIds.has(customer.customer_id),
+  );
 
   const pins = scopedCustomers.map((customer) => ({
     customer,
@@ -59,7 +72,9 @@ export function MapPanel({ customers, territory }: MapPanelProps) {
 
   return (
     <section className="panel map-panel">
-      <h2>顧客の分布{territory && `(${territory.branch_name}エリア)`}</h2>
+      <h2>
+        顧客の分布{territory && `(${territory.branch_name}エリア)`}・今月の計画分
+      </h2>
       <div className="map-panel__leaflet">
         <MapContainer
           key={territory?.branch_name ?? "japan"}
