@@ -980,6 +980,13 @@ a {
   background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
 
+/* 業界名から決定的に割り当てたHSL色相(lib/industryColor.ts)を使う。
+   業界数が多い(12種)ため、固定の配色ではなくハッシュベースで自動的に割り当てる */
+.badge--industry {
+  color: hsl(var(--industry-hue) 75% 72%);
+  background: hsl(var(--industry-hue) 55% 45% / 18%);
+}
+
 .ai-reasoning h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
@@ -1144,6 +1151,62 @@ a {
   margin: 1rem auto 0;
 }
 
+.category-bar-chart__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.category-bar-chart__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.category-bar-chart__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.category-bar-chart__row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr 4.5rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.category-bar-chart__label {
+  font-size: 0.78rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-bar-chart__track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.category-bar-chart__fill {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 2px;
+}
+
+.category-bar-chart__value {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
 .affinity-ranking {
   list-style: none;
   margin: 0;
@@ -1202,10 +1265,38 @@ a {
 }
 
 .affinity-ranking__value {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--accent);
+  font-size: 0.85rem;
+  color: var(--muted);
   white-space: nowrap;
+}
+
+.affinity-ranking__rate-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.affinity-ranking__rate-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.affinity-ranking__rate-fill {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 2px;
+  background: var(--accent);
+}
+
+.affinity-ranking__rate-value {
+  flex-shrink: 0;
+  width: 3ch;
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-align: right;
 }
 
 .affinity-ranking__stats {
@@ -1215,12 +1306,12 @@ a {
 }
 
 .affinity-ranking__stat {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--muted);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
+}
+
+.affinity-ranking__stat:not(:last-child)::after {
+  content: "・";
 }
 
 .affinity-ranking__stat strong {
@@ -2191,31 +2282,54 @@ a {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 1rem;
-  padding: 0.75rem 0;
-  border-top: 1px solid var(--line);
+  gap: 0.75rem 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  transition: transform 0.1s ease, border-color 0.1s ease;
 }
 
-.customer-table__row:first-child {
-  border-top: none;
+.customer-table__row:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .customer-table__main {
   flex: 1;
   min-width: 200px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
 }
 
 .customer-table__name {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.customer-table__name:hover {
+  color: var(--accent);
+}
+
+.customer-table__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
 }
 
 .customer-table__meta {
+  flex-basis: 100%;
   color: var(--muted);
-  font-size: 0.85rem;
-  margin-top: 0.15rem;
+  font-size: 0.8rem;
+}
+
+.customer-table__location {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .customer-table__amount {

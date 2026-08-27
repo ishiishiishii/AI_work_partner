@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AffinityCategoryCharts } from "@/components/affinity/AffinityCategoryCharts";
 import { AffinityRankingList } from "@/components/affinity/AffinityRankingList";
 import { AffinitySummary } from "@/components/affinity/AffinitySummary";
 import { fetchRepAffinity, recalculateRepAffinity } from "@/lib/api";
@@ -68,6 +69,11 @@ export default function AffinityPage() {
         <>
           <AffinitySummary affinities={affinities} />
           <section className="panel">
+            <h2>業界・商品カテゴリ別の成約率</h2>
+            <AffinityCategoryCharts affinities={affinities} />
+          </section>
+          <section className="panel">
+            <h2>商談履歴(業界・カテゴリ別)</h2>
             <AffinityRankingList affinities={affinities} />
           </section>
         </>
