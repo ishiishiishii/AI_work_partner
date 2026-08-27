@@ -5,6 +5,7 @@ import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
   ActivityPlanCategory,
+  AdminTaskType,
   Customer,
   CustomerSuggestion,
   Deadline,
@@ -14,6 +15,7 @@ import type {
   Masters,
   Product,
   RepAffinity,
+  RepProfile,
   SalesRep,
   SalesTarget,
   StaleCustomer,
@@ -404,24 +406,6 @@ export async function generateActivityPlans(
   return body.plans.map((row) => mapPlan(row, customerNames));
 }
 
-export async function replanActivityPlans(
-  repId: number,
-  targetMonth: string,
-): Promise<ActivityPlan[]> {
-  const base = getApiBaseUrl();
-  const [replanRes, customerNames] = await Promise.all([
-    fetch(`${base}/api/plans/replan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rep_id: repId, target_month: targetMonth }),
-    }),
-    fetchCustomerNames(repId),
-  ]);
-  if (!replanRes.ok) throw new Error(`再計画に失敗しました (HTTP ${replanRes.status})`);
-  const body: { plans: ApiPlan[] } = await replanRes.json();
-  return body.plans.map((row) => mapPlan(row, customerNames));
-}
-
 // 予定の手動追加の保存。title/customer_id/deal_id の扱いは updatePlan と同じ考え方
 // (title があれば表示上そちらを優先するが、customer_id/deal_id が分かっていれば
 // 商談への紐付けとして残す)。createPlan(差し替え提案の永続化用。plan_id しか返らない)
@@ -438,6 +422,9 @@ export async function createManualPlan(
     customer_id: number | null;
     deal_id: number | null;
     priority: number;
+    product_name: string | null;
+    expected_amount: number;
+    expected_probability: number;
   },
 ): Promise<ActivityPlan> {
   const base = getApiBaseUrl();
@@ -456,6 +443,9 @@ export async function createManualPlan(
         customer_id: input.customer_id,
         deal_id: input.deal_id,
         priority: input.priority,
+        product_name_override: input.product_name,
+        expected_amount: input.expected_amount,
+        expected_probability: input.expected_probability,
       }),
     }),
     fetchCustomerNames(repId),
@@ -478,6 +468,8 @@ export async function updatePlan(
     activity_type_name: string;
     customer_name: string;
     product_name: string | null;
+    expected_amount: number;
+    expected_probability: number;
     memo: string | null;
   },
 ): Promise<void> {
@@ -492,6 +484,8 @@ export async function updatePlan(
       activity_type: updates.activity_type_name,
       title: updates.customer_name,
       product_name_override: updates.product_name,
+      expected_amount: updates.expected_amount,
+      expected_probability: updates.expected_probability,
       memo: updates.memo,
     }),
   });
@@ -518,6 +512,8 @@ export async function createPlan(
   repId: number,
   input: {
     plan_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
     category: ActivityPlanCategory;
     activity_type: string;
     customer_id: number | null;
@@ -619,6 +615,8 @@ type ApiDeal = {
   profit: string | number;
   expected_close_date: string | null;
   next_action: string | null;
+  actual_amount: string | number | null;
+  memo: string | null;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -646,12 +644,17 @@ function mapDeal(row: ApiDeal): Deal {
     profit: Number(row.profit),
     expected_close_date: row.expected_close_date,
     next_action: row.next_action,
+    actual_amount: row.actual_amount === null ? null : Number(row.actual_amount),
+    memo: row.memo,
   };
 }
 
-export async function fetchDeals(repId: number): Promise<Deal[]> {
+export async function fetchDeals(filters: { repId?: number; customerId?: number }): Promise<Deal[]> {
   const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/deals?rep_id=${repId}`, { cache: "no-store" });
+  const params = new URLSearchParams();
+  if (filters.repId != null) params.set("rep_id", String(filters.repId));
+  if (filters.customerId != null) params.set("customer_id", String(filters.customerId));
+  const res = await fetch(`${base}/api/deals?${params.toString()}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`商談一覧の取得に失敗しました (HTTP ${res.status})`);
   const rows: ApiDeal[] = await res.json();
   return rows.map(mapDeal);
@@ -664,12 +667,12 @@ export async function createDeal(
     product_id: number;
     deal_phase_id: number;
     estimated_amount: number;
-    win_probability: number;
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
     expected_close_date?: string;
     next_action?: string;
+    memo?: string;
   },
 ): Promise<Deal> {
   const base = getApiBaseUrl();
@@ -682,12 +685,12 @@ export async function createDeal(
       product_id: input.product_id,
       deal_phase_id: input.deal_phase_id,
       estimated_amount: input.estimated_amount,
-      win_probability: input.win_probability,
       expected_visit_count: input.expected_visit_count,
       expected_effort_hours: input.expected_effort_hours,
       deal_start_date: input.deal_start_date || null,
       expected_close_date: input.expected_close_date || null,
       next_action: input.next_action || null,
+      memo: input.memo || null,
     }),
   });
   if (!res.ok) {
@@ -736,7 +739,7 @@ type ApiRepAffinity = {
 export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps/${repId}/affinity`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`得意分野スコアの取得に失敗しました (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`自己分析スコアの取得に失敗しました (HTTP ${res.status})`);
   const rows: ApiRepAffinity[] = await res.json();
 
   return rows.map((row) => ({
@@ -751,6 +754,20 @@ export async function fetchRepAffinity(repId: number): Promise<RepAffinity[]> {
     avg_won_amount: Number(row.avg_won_amount),
     affinity_score: Number(row.affinity_score),
   }));
+}
+
+export type CustomerWinRate = {
+  customer_id: number;
+  closed_count: number;
+  won_count: number;
+  win_rate: number | null;
+};
+
+export async function fetchCustomerWinRate(customerId: number): Promise<CustomerWinRate> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/customers/${customerId}/win-rate`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`成約率の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
 }
 
 type ApiForecast = {
@@ -799,14 +816,67 @@ export async function fetchForecast(repId: number, targetMonth: string): Promise
   };
 }
 
-// 得意分野スコアはバックエンドの計算結果をキャッシュしたテーブルのため、
+// 自己分析スコアはバックエンドの計算結果をキャッシュしたテーブルのため、
 // 表示前に最新の商談結果を反映させておく
 export async function recalculateRepAffinity(repId: number): Promise<void> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/reps/affinity/recalculate?rep_id=${repId}`, {
     method: "POST",
   });
-  if (!res.ok) throw new Error(`得意分野スコアの再計算に失敗しました (HTTP ${res.status})`);
+  if (!res.ok) throw new Error(`自己分析スコアの再計算に失敗しました (HTTP ${res.status})`);
+}
+
+export async function fetchAdminTaskTypes(): Promise<AdminTaskType[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin-task-types`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`事務作業タスク一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function createAdminTaskType(taskName: string): Promise<AdminTaskType> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin-task-types`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task_name: taskName }),
+  });
+  if (!res.ok) throw new Error(`タスクの追加に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function fetchRepProfile(repId: number): Promise<RepProfile> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/profile`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`プロフィール(今後拡張予定)の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function saveHomeOfficeAvailability(
+  repId: number,
+  dayOfWeek: number,
+  isHomeAvailable: boolean,
+): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/home-office`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ day_of_week: dayOfWeek, is_home_available: isHomeAvailable }),
+  });
+  if (!res.ok) throw new Error(`在宅可否の保存に失敗しました (HTTP ${res.status})`);
+}
+
+export async function saveAdminTaskDuration(
+  repId: number,
+  taskTypeId: number,
+  durationMinutes: number,
+): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/task-durations/${taskTypeId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ duration_minutes: durationMinutes }),
+  });
+  if (!res.ok) throw new Error(`所要時間の保存に失敗しました (HTTP ${res.status})`);
 }
 
 export type AiChatHistoryMessage = {

@@ -1,5 +1,3 @@
-import type { Product } from "@/types";
-
 // deal_result_status テーブルは status_code(英語)しか持たないため、表示用の
 // 日本語名はここで解決する。deal_phase_name・pattern_name 等は ai.* ビューが
 // マスタの日本語名をそのまま返すため、ここでのハードコードは不要。
@@ -34,39 +32,3 @@ export const mockTaskSuggestions: { title: string; activityTypeName: string; rea
     reasoningText: "活動の振り返りと報告書作成の時間として提案しました。",
   },
 ];
-
-// 商品マスタには名称・カテゴリしか無く、価格帯・特徴などを返すAPIがまだ無いため、
-// 商品詳細ページ用に product_id から決定的に(同じ商品なら常に同じ内容になるよう)
-// ダミーの説明・価格帯・納期目安・特徴を生成する。実データが用意でき次第、置き換える。
-const PRODUCT_FEATURE_POOL = [
-  "導入実績豊富",
-  "低コストで導入可能",
-  "短納期対応",
-  "柔軟なカスタマイズ",
-  "保守サポート充実",
-  "クラウド対応",
-  "省スペース設計",
-  "高い信頼性",
-];
-
-export type ProductDummyDetails = {
-  description: string;
-  priceRangeText: string;
-  leadTimeText: string;
-  features: string[];
-};
-
-export function getProductDummyDetails(product: Product): ProductDummyDetails {
-  const seed = product.product_id;
-  const priceLow = 50000 + ((seed * 37) % 950000);
-  const priceHigh = priceLow + 100000 + ((seed * 13) % 300000);
-  const leadDays = 5 + (seed % 20);
-  const features = [0, 3, 5].map((offset) => PRODUCT_FEATURE_POOL[(seed + offset) % PRODUCT_FEATURE_POOL.length]);
-
-  return {
-    description: `${product.category_name}(${product.subcategory_name})に分類される商品です。業種・企業規模に応じた提案実績があります。`,
-    priceRangeText: `¥${priceLow.toLocaleString("ja-JP")} 〜 ¥${priceHigh.toLocaleString("ja-JP")}`,
-    leadTimeText: `約${leadDays}営業日`,
-    features,
-  };
-}

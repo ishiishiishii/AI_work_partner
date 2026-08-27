@@ -1,15 +1,7 @@
--- Adds per-deal fields needed for month->week->day target planning: the
--- rep's own estimate of when an open deal will close (distinct from
--- contract_date, which is only set once a deal is actually won) and a free
--- text note on what to do next. Both nullable, no trigger -- unlike
--- contract_date these carry no won/lost-state invariant to enforce.
-alter table deal
-  add column expected_close_date date,
-  add column next_action text;
-
--- Extends ai.deal (20260825120100) with the two new columns, appended at the
--- end so the existing column order stays intact (CREATE OR REPLACE VIEW
--- requirement -- see 20260824110000/20260824120000 for the same pattern).
+-- Extends ai.deal (20260827150000_add_deal_actual_amount) with memo,
+-- appended at the end so the existing column order stays intact (CREATE OR
+-- REPLACE VIEW requirement -- see 20260824110000/20260824120000 for the same
+-- pattern). Must keep actual_amount from that migration's view too.
 create or replace view ai.deal as
 select
   d.deal_id,
@@ -32,8 +24,8 @@ select
   d.deal_phase_id,
   d.cost,
   d.profit,
-  d.expected_close_date,
-  d.next_action
+  d.actual_amount,
+  d.memo
 from deal d
 join customer c on c.customer_id = d.customer_id
 join sales_rep r on r.rep_id = d.rep_id

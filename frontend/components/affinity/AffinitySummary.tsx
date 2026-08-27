@@ -13,7 +13,7 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
   const totalWonCount = ranked.reduce((sum, affinity) => sum + affinity.won_count, 0);
   const overallWinRate = totalDealCount > 0 ? totalWonCount / totalDealCount : 0;
 
-  // 「得意分野」は成約実績があってこその強みなので、勝率0%の組み合わせはTOP3から除く
+  // 「自己分析」は成約実績があってこその強みなので、勝率0%の組み合わせはTOP3から除く
   const topAffinities = ranked.filter((affinity) => affinity.won_count > 0).slice(0, TOP_COUNT);
 
   // pattern_name は "新規開拓・大型" のように「新規開拓/既存深耕」+「大型/小口」を
@@ -25,6 +25,8 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
   const existingWonCount = totalWonCount - newWonCount;
   const newWinRate = newDealCount > 0 ? newWonCount / newDealCount : 0;
   const existingWinRate = existingDealCount > 0 ? existingWonCount / existingDealCount : 0;
+  const newRatioPercent = totalDealCount > 0 ? Math.round((newDealCount / totalDealCount) * 100) : 0;
+  const existingRatioPercent = 100 - newRatioPercent;
 
   if (ranked.length === 0) {
     return null;
@@ -49,18 +51,37 @@ export function AffinitySummary({ affinities }: AffinitySummaryProps) {
       </dl>
 
       <h3 className="affinity-summary__subheading">新規開拓・既存深耕の割合(商談数ベース)</h3>
+      {/* バー自体は色の比率だけを示す(文字は入れない)。比率が偏ると文字が
+          セグメント幅に収まらず省略されてしまうため、件数・成約率は下の
+          凡例に分離し、バーの幅に関係なく常に全文表示する */}
+      <div className="affinity-summary__ratio-track">
+        {newRatioPercent > 0 && (
+          <span
+            className="affinity-summary__ratio-fill affinity-summary__ratio-fill--new"
+            style={{ "--ratio-width": `${newRatioPercent}%` } as React.CSSProperties}
+          />
+        )}
+        {existingRatioPercent > 0 && (
+          <span
+            className="affinity-summary__ratio-fill affinity-summary__ratio-fill--existing"
+            style={{ "--ratio-width": `${existingRatioPercent}%` } as React.CSSProperties}
+          />
+        )}
+      </div>
       <div className="affinity-summary__ratio-legend">
-        <span className="affinity-summary__ratio-item">
-          <span className="affinity-summary__ratio-dot affinity-summary__ratio-dot--new" />
-          新規開拓 <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
-        </span>
-        <span className="affinity-summary__ratio-item">
-          <span className="affinity-summary__ratio-dot affinity-summary__ratio-dot--existing" />
-          既存深耕 <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
-        </span>
+        {newRatioPercent > 0 && (
+          <div className="affinity-summary__ratio-segment affinity-summary__ratio-segment--new">
+            新規開拓 <strong>{newDealCount}件</strong>(成約率 {Math.round(newWinRate * 100)}%)
+          </div>
+        )}
+        {existingRatioPercent > 0 && (
+          <div className="affinity-summary__ratio-segment affinity-summary__ratio-segment--existing">
+            既存深耕 <strong>{existingDealCount}件</strong>(成約率 {Math.round(existingWinRate * 100)}%)
+          </div>
+        )}
       </div>
 
-      <h3 className="affinity-summary__subheading">得意分野TOP{TOP_COUNT}</h3>
+      <h3 className="affinity-summary__subheading">自己分析TOP{TOP_COUNT}</h3>
       {topAffinities.length === 0 ? (
         <p className="activity-plan-list__empty">まだ成約実績がありません</p>
       ) : (

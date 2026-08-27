@@ -1,6 +1,8 @@
 export type SalesRep = {
   rep_id: number;
   rep_name: string;
+  branch_id: number;
+  branch_name: string;
 };
 
 // 担当者の営業所(branch)が管轄する都道府県一覧。GET /api/reps/{rep_id}/territory が返す。
@@ -38,7 +40,7 @@ export type Forecast = {
 };
 
 // AI 参照用の第一正規形ビュー(ai.rep_affinity)の形にそのまま対応させている。
-// 得意分野の判定は業種・商材カテゴリ・案件パターンの組み合わせなので、名前解決済みの
+// 自己分析の判定は業種・商材カテゴリ・案件パターンの組み合わせなので、名前解決済みの
 // 3つの名称で識別する(数値idはAIの説明文にもUIにも不要)。
 export type RepAffinity = {
   rep_id: number;
@@ -51,6 +53,32 @@ export type RepAffinity = {
   win_rate: number; // 0-1
   avg_won_amount: number;
   affinity_score: number;
+};
+
+// 曜日ごとの在宅可否と、事務作業タスク種別ごとの所要時間見積もり。
+// 将来的にルート計画(work_start/work_end/turnaround_buffer_min)の初期値に
+// 反映する想定だが、現時点では表示・記録のみで route_planning 側は未連携。
+export type AdminTaskType = {
+  task_type_id: number;
+  task_name: string;
+  is_default: boolean;
+};
+
+export type RepHomeOfficeDay = {
+  day_of_week: number; // 0=月, 1=火, ... 6=日
+  is_home_available: boolean;
+};
+
+export type RepAdminTaskDuration = {
+  task_type_id: number;
+  task_name: string;
+  duration_minutes: number | null;
+};
+
+export type RepProfile = {
+  rep_id: number;
+  home_office: RepHomeOfficeDay[];
+  task_durations: RepAdminTaskDuration[];
 };
 
 // 見込み金額・成約確率・ステータスは deal（商談）側に移動したため、
@@ -112,6 +140,11 @@ export type Product = {
   subcategory_name: string;
   category_id: number;
   category_name: string;
+  description: string;
+  price_min: number;
+  price_max: number;
+  lead_time_days: number;
+  features: string[];
 };
 
 // 新規顧客登録・商談登録/編集フォームのセレクトボックス用マスタ。GET /api/masters が返す。
@@ -163,6 +196,8 @@ export type Deal = {
   profit: number; // 見込み利益 = estimated_amount - cost(DB側のgenerated column)
   expected_close_date: string | null; // "YYYY-MM-DD"。受注予定日(見込み)。契約済みのcontract_dateとは別
   next_action: string | null; // 次のアクション（自由記述）
+  actual_amount: number | null; // 実際の契約金額。成約(won)時のみ値を持つ
+  memo: string | null;
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";

@@ -156,8 +156,11 @@ AI が目標達成見込みを再計算
    得意業界・顧客傾向を保持し、計画をパーソナライズする。
 
 4. **顧客ごとの成約可能性・期待売上の算出** ★★★☆☆ ✅ 実装済み
-   ルールベース / 簡易スコアリングで可（複雑 ML は不要）。
-   例: 成約可能性 × 見込み売上。
+   商談の成約確率(`deal.win_probability`)は手入力ではなくルールベースで自動算出する
+   (`backend/app/services/affinity.py` の `estimate_win_probability`)。優先順位:
+   ①この顧客自身の過去の成約/失注実績 → ②担当者×業界×商品カテゴリ×パターン
+   (`rep_affinity`)の実績 → ③同業界×同規模企業の実績 → ④担当者全体の実績 →
+   ⑤固定値(30%)。見込み売上(forecast)はこの確率で重み付けした期待値。
 
 5. **月間営業計画の自動生成** ★★★☆☆ 🔧 対応中（担当メンバーあり。他の項目の作業では触らない）
    目標から逆算し、優先顧客を選定。達成可能性と負担を考慮。
@@ -225,9 +228,9 @@ MVPのコア体験を優先するため後回しにしてきた機能群。Must 
 | `customer` | 顧客企業（主担当 `primary_rep_id`） |
 | `customer_contact` | 先方キーパーソン。`(contact_id, customer_id)` UNIQUE |
 | `product` / `deal_line` | 商材と商談明細 |
-| `deal` | 商談。`(deal_id, customer_id)` UNIQUE。複合 FK で contact / plan / result の整合を担保 |
+| `deal` | 商談。`(deal_id, customer_id)` UNIQUE。複合 FK で contact / plan / result の整合を担保。`estimated_amount`（見込み金額）と `actual_amount`（実際の契約金額、成約時のみ・トリガーで自動補完/検証）は別カラムで、成約後に見積もり精度を追える |
 | `sales_target` | 月次目標 `(rep_id, target_month)` |
-| `rep_affinity` | 得意分野スコア `(rep_id, category_id, pattern_id)` |
+| `rep_affinity` | 自己分析スコア `(rep_id, category_id, pattern_id)` |
 | `activity_plan` | AI 生成を含む活動計画（`is_ai_generated`） |
 | `activity_result` | 活動実績（`plan_id` は NULL 可＝計画外） |
 

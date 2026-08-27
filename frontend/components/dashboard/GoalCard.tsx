@@ -98,6 +98,7 @@ export function GoalCard({
   const grossProfitValue = draftGrossProfit.trim() === "" ? null : Number(draftGrossProfit);
   const isGrossProfitDraftValid =
     grossProfitValue === null || (Number.isFinite(grossProfitValue) && grossProfitValue >= 0);
+  const draftAmountDisplay = draftAmount ? Number(draftAmount).toLocaleString("ja-JP") : "";
 
   function startEditing() {
     setDraftAmount(String(target.target_amount));
@@ -127,7 +128,6 @@ export function GoalCard({
     <section className="panel goal-card">
       <div className="goal-card__header">
         <h2>{formatMonth(target.target_month)}の目標</h2>
-        <span className="goal-card__rep">{rep.rep_name}</span>
       </div>
 
       <div className="goal-card__body">
@@ -152,18 +152,20 @@ export function GoalCard({
                       handleSave();
                     }}
                   >
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      value={draftAmount}
-                      onChange={(event) => setDraftAmount(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") setIsEditing(false);
-                      }}
-                      disabled={isSaving}
-                      autoFocus
-                    />
+                    <span className="goal-card__amount-input-wrap">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={draftAmountDisplay}
+                        onChange={(event) => setDraftAmount(event.target.value.replace(/[^\d]/g, ""))}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") setIsEditing(false);
+                        }}
+                        disabled={isSaving}
+                        autoFocus
+                      />
+                      <span className="goal-card__amount-suffix">円</span>
+                    </span>
                     <button
                       type="submit"
                       className="goal-card__save"
@@ -188,6 +190,15 @@ export function GoalCard({
                     aria-label="目標金額を変更する"
                   >
                     {formatYen(target.target_amount)}
+                    <svg className="goal-card__amount-edit-icon" viewBox="0 0 20 20" aria-hidden="true">
+                      <path
+                        d="M14.7 2.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L7.4 15.6l-3.5.7.7-3.5L14.7 2.3Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                   </button>
                 )}
               </dd>
@@ -246,14 +257,6 @@ export function GoalCard({
           {isEditing && willGeneratePlan && (
             <p className="goal-card__hint">保存すると、AIが今月の活動計画を作成します</p>
           )}
-          <button
-            type="button"
-            className="goal-card__edit-button"
-            onClick={startEditing}
-            disabled={isEditing}
-          >
-            目標を変更する
-          </button>
         </div>
       </div>
     </section>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Product } from "@/types";
 
 type ProductCatalogProps = {
@@ -57,7 +58,7 @@ export function ProductCatalog({ products }: ProductCatalogProps) {
                     .sort((a, b) => a.product_name.localeCompare(b.product_name, "ja"))
                     .map((product) => (
                       <li key={product.product_id} className="product-catalog__item">
-                        {product.product_name}
+                        <Link href={`/products/${product.product_id}`}>{product.product_name}</Link>
                       </li>
                     ))}
                 </ul>

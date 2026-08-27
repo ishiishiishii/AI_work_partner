@@ -1,11 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useRef, useState } from "react";
-import { fetchProducts } from "@/lib/api";
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from "react";
+import { CompanyAutocompleteField } from "@/components/CompanyAutocompleteField";
+import { ProductAutocompleteField } from "@/components/ProductAutocompleteField";
+import { NewCustomerForm } from "@/components/customers/NewCustomerForm";
+import { QuickDealForm } from "@/components/QuickDealForm";
+import { QuickDeadlineForm } from "@/components/QuickDeadlineForm";
+import { createCustomer, fetchProducts } from "@/lib/api";
+import { calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
-import type { ActivityPlan, ActivityPlanCategory, DealResultStatus } from "@/types";
+import { ADD_TYPE_LABELS, type AddType } from "@/lib/quickAddTypes";
+import type { ActivityPlan, ActivityPlanCategory, Deal, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
   plan_date: string;
@@ -13,8 +20,10 @@ export type PlanEditFields = {
   end_time: string | null;
   category: ActivityPlanCategory;
   activity_type_name: string;
+  customer_id: number | null;
   customer_name: string;
   product_name: string | null;
+  expected_amount: number;
   expected_probability: number;
   memo: string | null;
 };
@@ -28,8 +37,13 @@ type ActivityPlanListProps = {
   repId: number;
   plans: ActivityPlan[];
   dailyTasks: ActivityPlan[];
+  deals: Deal[];
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
+  onPostpone: (planId: number, newDate: string, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
+  altPreview: { planId: number; label: string } | null;
+  onConfirmAlternative: () => void;
+  onCancelAlternative: () => void;
   onEditPlan: (planId: number, updates: PlanEditFields) => void;
   onAddPlan: (plan: ActivityPlan) => void;
   onConfirmPlan: (planId: number) => void;
@@ -59,6 +73,21 @@ const ACTIVITY_TYPE_CLASS: Record<string, string> = {
   Web会議: "activity-plan-list__type--online",
   資料作成: "activity-plan-list__type--prep",
   新規開拓: "activity-plan-list__type--prospect",
+  移動: "activity-plan-list__type--travel",
+  "準備・記録": "activity-plan-list__type--prep",
+};
+
+// 詳細モーダルのアクセントカラー(上部バーなど)を活動種別ごとに変える。
+// 色自体は既存のバッジ配色(activity-plan-list__type--*)と揃えている
+const ACTIVITY_TYPE_ACCENT: Record<string, string> = {
+  訪問: "var(--accent)",
+  電話: "#a78bfa",
+  メール: "#38bdf8",
+  Web会議: "#f472b6",
+  資料作成: "#2dd4bf",
+  新規開拓: "#a3e635",
+  移動: "#94a3b8",
+  "準備・記録": "#2dd4bf",
 };
 
 const VIEW_LABELS: Record<ViewMode, string> = { day: "日", week: "週", month: "月" };
@@ -192,7 +221,7 @@ function formatDurationMinutes(minutes: number): string {
 // 企業(customer_id)ごとにグルーピングし、グループ内は見込み金額×成約確率の高い順に並べる
 type CompanyGroup = { customerName: string; customerId: number | null; items: ActivityPlan[]; totalValue: number };
 
-function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
+function groupPlansByCompany(items: ActivityPlan[], deals: Deal[]): CompanyGroup[] {
   const groups = new Map<string, { customerName: string; customerId: number | null; items: ActivityPlan[] }>();
   for (const item of items) {
     const key = item.customer_id !== null ? String(item.customer_id) : item.customer_name;
@@ -208,10 +237,7 @@ function groupPlansByCompany(items: ActivityPlan[]): CompanyGroup[] {
       const sorted = [...list].sort(
         (a, b) => b.expected_amount * b.expected_probability - a.expected_amount * a.expected_probability,
       );
-      const totalValue = sorted.reduce(
-        (sum, plan) => sum + (plan.expected_amount * plan.expected_probability) / 100,
-        0,
-      );
+      const totalValue = calcForecastAmount(sorted, deals);
       return { customerName, customerId, items: sorted, totalValue };
     })
     .sort((a, b) => b.totalValue - a.totalValue);
@@ -292,8 +318,13 @@ export function ActivityPlanList({
   repId,
   plans,
   dailyTasks,
+  deals,
   onResultChange,
+  onPostpone,
   onRequestAlternative,
+  altPreview,
+  onConfirmAlternative,
+  onCancelAlternative,
   onEditPlan,
   onAddPlan,
   onConfirmPlan,
@@ -307,7 +338,14 @@ export function ActivityPlanList({
   const [detailPlanId, setDetailPlanId] = useState<number | null>(null);
   const [newPlanDraft, setNewPlanDraft] = useState<ActivityPlan | null>(null);
   const [editDraft, setEditDraft] = useState<(PlanEditFields & { planId: number }) | null>(null);
+  // 新規作成パネルの追加種別。全ページ共通のQuickAddFabと同じ選択肢(予定/新規
+  // 顧客/期限/商談)をこのパネルの見出しにも出し、予定以外もここから作れるように
+  // する。作成パネルを開き直すたびに「予定」に戻す。
+  const [addType, setAddType] = useState<AddType>("plan");
   const [gapPicker, setGapPicker] = useState<{ start: string; maxEnd: string; end: string } | null>(null);
+  // 「延期」ボタンを押した予定について、その場で延期先の日付を選ぶための状態
+  const [postponingPlanId, setPostponingPlanId] = useState<number | null>(null);
+  const [postponeDate, setPostponeDate] = useState("");
   // 「月」表示で商品名をダブルクリックした際に商品詳細ページへ飛べるよう、
   // 商品名→product_id の対応をあらかじめ取得しておく
   const [productIdByName, setProductIdByName] = useState<Map<string, number>>(new Map());
@@ -351,7 +389,7 @@ export function ActivityPlanList({
     }
     return a.plan_date.localeCompare(b.plan_date) || a.priority - b.priority;
   });
-  const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans) : [];
+  const monthGroups = viewMode === "month" ? groupPlansByCompany(filteredPlans, deals) : [];
 
   // 週・月表示の上に出す簡易カレンダー。訪問予定は plans に日付を問わず全期間分入っているので、
   // 月表示ではみ出す前後月の日付にも訪問があれば表示できる
@@ -454,9 +492,47 @@ export function ActivityPlanList({
     return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
   }
 
+  function startPostpone(plan: ActivityPlan) {
+    setPostponingPlanId(plan.plan_id);
+    // 「延期」なので元の予定日より後をデフォルトにする(1週間後)
+    setPostponeDate(formatISODate(addDays(parseISODate(plan.plan_date), 7)));
+  }
+
+  function confirmPostpone(plan: ActivityPlan) {
+    if (!postponeDate) return;
+    onPostpone(plan.plan_id, postponeDate, getSelectedContactType(plan));
+    setPostponingPlanId(null);
+  }
+
   // ステータスの記録・取り消しUI。一覧行と詳細モーダルの両方で同じものを使う
   function renderResultControls(plan: ActivityPlan) {
     if (plan.result_status === "pending") {
+      if (postponingPlanId === plan.plan_id) {
+        return (
+          <div className="activity-plan-list__postpone-form">
+            <label>
+              延期先の日付
+              <input
+                type="date"
+                min={formatISODate(addDays(parseISODate(plan.plan_date), 1))}
+                value={postponeDate}
+                onChange={(event) => setPostponeDate(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="activity-plan-list__result-button"
+              disabled={!postponeDate}
+              onClick={() => confirmPostpone(plan)}
+            >
+              この日に延期する
+            </button>
+            <button type="button" className="activity-plan-list__undo-button" onClick={() => setPostponingPlanId(null)}>
+              キャンセル
+            </button>
+          </div>
+        );
+      }
       return (
         <>
           <label className="activity-plan-list__contact-type">
@@ -482,7 +558,11 @@ export function ActivityPlanList({
               key={option.value}
               type="button"
               className="activity-plan-list__result-button"
-              onClick={() => onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))}
+              onClick={() =>
+                option.value === "postponed"
+                  ? startPostpone(plan)
+                  : onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))
+              }
             >
               {option.label}
             </button>
@@ -503,6 +583,28 @@ export function ActivityPlanList({
           取り消す
         </button>
       </>
+    );
+  }
+
+  // 「対応が難しい」ボタン(一覧行・詳細モーダル共通)
+  function renderAlternativeControl(planId: number, label: string) {
+    if (altPreview?.planId !== planId) {
+      return (
+        <button type="button" className="activity-plan-list__alt-button" onClick={() => onRequestAlternative(planId)}>
+          {label}
+        </button>
+      );
+    }
+    return (
+      <span className="activity-plan-list__alt-preview">
+        代わりに「{altPreview.label}」はどうですか？
+        <button type="button" className="activity-plan-list__result-button" onClick={onConfirmAlternative}>
+          この内容で差し替える
+        </button>
+        <button type="button" className="activity-plan-list__undo-button" onClick={onCancelAlternative}>
+          やめる
+        </button>
+      </span>
     );
   }
 
@@ -563,19 +665,29 @@ export function ActivityPlanList({
           {plan.expected_amount > 0 && (
             <div className="activity-plan-list__amount">{formatYen(plan.expected_amount)}</div>
           )}
+          {plan.category === "task" && !plan.is_ai_generated && (
+            <div className="activity-plan-list__progress">
+              <svg className="plan-modal__progress-ring" viewBox="0 0 80 80" width="40" height="40">
+                <circle cx="40" cy="40" r={PROGRESS_RING_RADIUS} className="plan-modal__progress-ring-track" />
+                <circle
+                  cx="40"
+                  cy="40"
+                  r={PROGRESS_RING_RADIUS}
+                  className="plan-modal__progress-ring-value"
+                  strokeDasharray={PROGRESS_RING_CIRCUMFERENCE}
+                  strokeDashoffset={PROGRESS_RING_CIRCUMFERENCE * (1 - plan.progress_percent / 100)}
+                />
+                <text x="40" y="45" textAnchor="middle" className="plan-modal__progress-ring-label">
+                  {plan.progress_percent}%
+                </text>
+              </svg>
+            </div>
+          )}
         </div>
         {plan.category === "visit" && (
           <div className="activity-plan-list__result-buttons">
             {renderResultControls(plan)}
-            {plan.result_status === "pending" && (
-              <button
-                type="button"
-                className="activity-plan-list__alt-button"
-                onClick={() => onRequestAlternative(plan.plan_id)}
-              >
-                対応が難しい
-              </button>
-            )}
+            {plan.result_status === "pending" && renderAlternativeControl(plan.plan_id, "対応が難しい")}
           </div>
         )}
       </>
@@ -592,6 +704,7 @@ export function ActivityPlanList({
     setDetailPlanId(null);
     setNewPlanDraft(null);
     setEditDraft(null);
+    setAddType("plan");
   }
 
   function startEdit(plan: ActivityPlan) {
@@ -603,8 +716,10 @@ export function ActivityPlanList({
       end_time: plan.end_time,
       category: plan.category,
       activity_type_name: plan.activity_type_name,
+      customer_id: plan.customer_id,
       customer_name: plan.customer_name,
       product_name: plan.product_name,
+      expected_amount: plan.expected_amount,
       expected_probability: plan.expected_probability,
       memo: plan.memo,
     });
@@ -612,6 +727,7 @@ export function ActivityPlanList({
 
   // 引数無しなら空の新規予定、引数ありなら会社・商品などを引き継いだ「次回の予定」を作る
   function startCreate(base?: ActivityPlan) {
+    setAddType("plan");
     const draft: ActivityPlan = base
       ? {
           ...base,
@@ -655,8 +771,10 @@ export function ActivityPlanList({
       end_time: draft.end_time,
       category: draft.category,
       activity_type_name: draft.activity_type_name,
+      customer_id: draft.customer_id,
       customer_name: draft.customer_name,
       product_name: draft.product_name,
+      expected_amount: draft.expected_amount,
       expected_probability: draft.expected_probability,
       memo: draft.memo,
     });
@@ -680,6 +798,7 @@ export function ActivityPlanList({
     if (newPlanDraft) {
       setNewPlanDraft(null);
       setDetailPlanId(null);
+      setAddType("plan");
     }
     setEditDraft(null);
   }
@@ -691,6 +810,7 @@ export function ActivityPlanList({
       ...updates,
       customer_name: updates.customer_name.trim() || "(未設定)",
       product_name: updates.product_name?.trim() || null,
+      expected_amount: Math.max(0, updates.expected_amount),
       expected_probability: Math.min(100, Math.max(0, updates.expected_probability)),
       memo: updates.memo?.trim() || null,
     };
@@ -873,19 +993,84 @@ export function ActivityPlanList({
 
     {detailPlan && (
       <div className="plan-modal-overlay" onClick={closeDetail}>
-        <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="plan-modal"
+          style={{ "--type-accent": ACTIVITY_TYPE_ACCENT[detailPlan.activity_type_name] ?? "var(--accent)" } as CSSProperties}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className="plan-modal__header">
-            <h3>{isCreating ? "予定を追加" : "予定の詳細"}</h3>
+            <div className="plan-modal__header-text">
+              <span className="plan-modal__eyebrow">
+                {isCreating ? "新規作成" : CATEGORY_LABELS[detailPlan.category]}
+              </span>
+              {isCreating ? (
+                <h3 className="quick-add-fab__title">
+                  <select
+                    className="quick-add-fab__type-select"
+                    value={addType}
+                    onChange={(event) => setAddType(event.target.value as AddType)}
+                    aria-label="追加する種類"
+                  >
+                    {Object.entries(ADD_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  を追加
+                </h3>
+              ) : (
+                <h3>{detailPlan.customer_name || "予定の詳細"}</h3>
+              )}
+            </div>
             <button type="button" className="plan-modal__close" onClick={closeDetail} aria-label="閉じる">
               ×
             </button>
           </div>
 
-          {(() => {
+          {isCreating && addType !== "plan" ? (
+            <div className="plan-modal__detail">
+              {addType === "customer" && (
+                <NewCustomerForm
+                  onCreate={async (input) => {
+                    await createCustomer(repId, input);
+                    closeDetail();
+                  }}
+                />
+              )}
+              {addType === "deadline" && <QuickDeadlineForm repId={repId} onDone={closeDetail} />}
+              {addType === "deal" && <QuickDealForm repId={repId} onDone={closeDetail} />}
+            </div>
+          ) : (
+            (() => {
             const isEditing = editDraft !== null && editDraft.planId === detailPlan.plan_id;
             const effectiveCategory = isEditing ? editDraft.category : detailPlan.category;
             return (
               <div className="plan-modal__detail">
+                {!isEditing && (
+                  <div className="plan-modal__stats">
+                    <span
+                      className={`activity-plan-list__type ${
+                        ACTIVITY_TYPE_CLASS[detailPlan.activity_type_name] ?? "activity-plan-list__type--default"
+                      }`}
+                    >
+                      {detailPlan.activity_type_name}
+                    </span>
+                    {detailPlan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
+                    {effectiveCategory === "visit" && (
+                      <span className="plan-modal__stat-chip">優先度{detailPlan.priority}</span>
+                    )}
+                    {effectiveCategory === "visit" && (
+                      <span className="plan-modal__stat-chip">
+                        成約確率{detailPlan.expected_probability.toFixed(0)}%
+                      </span>
+                    )}
+                    {detailPlan.expected_amount > 0 && (
+                      <span className="plan-modal__stat-amount">{formatYen(detailPlan.expected_amount)}</span>
+                    )}
+                  </div>
+                )}
+                {/* 日付・時間は常に表示。種別/内容/会社名は編集時のみ(閲覧時はヘッダーと上の統計行に既に出ているため) */}
                 <dl className="plan-modal__fields">
                   <dt>日付</dt>
                   <dd>
@@ -900,22 +1085,22 @@ export function ActivityPlanList({
                     )}
                   </dd>
 
-                  <dt>種別</dt>
-                  <dd>
-                    {isEditing ? (
-                      <select
-                        value={editDraft.category}
-                        onChange={(event) =>
-                          setEditDraft({ ...editDraft, category: event.target.value as ActivityPlanCategory })
-                        }
-                      >
-                        <option value="visit">{CATEGORY_LABELS.visit}</option>
-                        <option value="task">{CATEGORY_LABELS.task}</option>
-                      </select>
-                    ) : (
-                      CATEGORY_LABELS[detailPlan.category]
-                    )}
-                  </dd>
+                  {isEditing && (
+                    <>
+                      <dt>種別</dt>
+                      <dd>
+                        <select
+                          value={editDraft.category}
+                          onChange={(event) =>
+                            setEditDraft({ ...editDraft, category: event.target.value as ActivityPlanCategory })
+                          }
+                        >
+                          <option value="visit">{CATEGORY_LABELS.visit}</option>
+                          <option value="task">{CATEGORY_LABELS.task}</option>
+                        </select>
+                      </dd>
+                    </>
+                  )}
 
                   <dt>時間</dt>
                   <dd>
@@ -944,56 +1129,57 @@ export function ActivityPlanList({
                     )}
                   </dd>
 
-                  <dt>内容</dt>
-                  <dd>
-                    {isEditing ? (
-                      <select
-                        value={editDraft.activity_type_name}
-                        onChange={(event) =>
-                          setEditDraft({ ...editDraft, activity_type_name: event.target.value })
-                        }
-                      >
-                        {EDITABLE_ACTIVITY_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span
-                        className={`activity-plan-list__type ${
-                          ACTIVITY_TYPE_CLASS[detailPlan.activity_type_name] ??
-                          "activity-plan-list__type--default"
-                        }`}
-                      >
-                        {detailPlan.activity_type_name}
-                      </span>
-                    )}
-                  </dd>
+                  {isEditing && (
+                    <>
+                      <dt>内容</dt>
+                      <dd>
+                        <select
+                          value={editDraft.activity_type_name}
+                          onChange={(event) =>
+                            setEditDraft({ ...editDraft, activity_type_name: event.target.value })
+                          }
+                        >
+                          {EDITABLE_ACTIVITY_TYPES.map((type) => (
+                            <option key={type} value={type}>
+                              {type}
+                            </option>
+                          ))}
+                        </select>
+                      </dd>
 
-                  <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
-                  <dd>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editDraft.customer_name}
-                        onChange={(event) => setEditDraft({ ...editDraft, customer_name: event.target.value })}
-                      />
-                    ) : (
-                      detailPlan.customer_name
-                    )}
-                  </dd>
+                      <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
+                      <dd>
+                        {effectiveCategory === "visit" && isCreating ? (
+                          <CompanyAutocompleteField
+                            repId={repId}
+                            value={{ customerId: editDraft.customer_id, customerName: editDraft.customer_name }}
+                            onChange={({ customerId, customerName }) =>
+                              setEditDraft({ ...editDraft, customer_id: customerId, customer_name: customerName })
+                            }
+                            placeholder="例: D工業株式会社"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={editDraft.customer_name}
+                            onChange={(event) =>
+                              setEditDraft({ ...editDraft, customer_name: event.target.value })
+                            }
+                          />
+                        )}
+                      </dd>
+                    </>
+                  )}
 
                   {effectiveCategory === "visit" && (
                     <>
                       <dt>商品</dt>
                       <dd>
                         {isEditing ? (
-                          <input
-                            type="text"
+                          <ProductAutocompleteField
                             value={editDraft.product_name ?? ""}
-                            onChange={(event) =>
-                              setEditDraft({ ...editDraft, product_name: event.target.value })
+                            onChange={(productName) =>
+                              setEditDraft({ ...editDraft, product_name: productName })
                             }
                           />
                         ) : (
@@ -1003,41 +1189,55 @@ export function ActivityPlanList({
                     </>
                   )}
 
-                  {detailPlan.expected_amount > 0 && (
+                  {effectiveCategory === "visit" && isEditing && (
                     <>
-                      <dt>見込み金額</dt>
-                      <dd>{formatYen(detailPlan.expected_amount)}</dd>
+                      <dt>金額</dt>
+                      <dd>
+                        <span className="plan-modal__amount-input">
+                          <input
+                            type="number"
+                            min={0}
+                            step={10000}
+                            value={editDraft.expected_amount}
+                            onChange={(event) =>
+                              setEditDraft({
+                                ...editDraft,
+                                expected_amount: Number(event.target.value),
+                              })
+                            }
+                          />
+                          円
+                        </span>
+                      </dd>
                     </>
                   )}
-                  {effectiveCategory === "visit" && (
-                    <>
-                      <dt>優先度</dt>
-                      <dd>優先度{detailPlan.priority}</dd>
 
+                  {effectiveCategory === "visit" && isEditing && (
+                    <>
                       <dt>成約確率</dt>
                       <dd>
-                        {isEditing ? (
-                          <span className="plan-modal__percent-input">
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={5}
-                              value={editDraft.expected_probability}
-                              onChange={(event) =>
-                                setEditDraft({
-                                  ...editDraft,
-                                  expected_probability: Number(event.target.value),
-                                })
-                              }
-                            />
-                            %
-                          </span>
-                        ) : (
-                          `${detailPlan.expected_probability.toFixed(0)}%`
-                        )}
+                        <span className="plan-modal__percent-input">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={editDraft.expected_probability}
+                            onChange={(event) =>
+                              setEditDraft({
+                                ...editDraft,
+                                expected_probability: Number(event.target.value),
+                              })
+                            }
+                          />
+                          %
+                        </span>
                       </dd>
+                    </>
+                  )}
 
+                  {effectiveCategory === "visit" && (
+                    <>
                       <dt>メモ</dt>
                       <dd>
                         {isEditing ? (
@@ -1048,7 +1248,7 @@ export function ActivityPlanList({
                             rows={3}
                           />
                         ) : (
-                          (detailPlan.memo ?? "(メモなし)")
+                          <span className="plan-modal__memo-display">{detailPlan.memo ?? "(メモなし)"}</span>
                         )}
                       </dd>
 
@@ -1056,7 +1256,7 @@ export function ActivityPlanList({
                       <dd className="plan-modal__status-controls">{renderResultControls(detailPlan)}</dd>
                     </>
                   )}
-                  {effectiveCategory === "task" && !detailPlan.is_ai_generated && (
+                  {effectiveCategory === "task" && !detailPlan.is_ai_generated && !isCreating && (
                     <>
                       <dt>進捗</dt>
                       <dd>
@@ -1105,10 +1305,14 @@ export function ActivityPlanList({
                     <p>{detailPlan.reasoning_text}</p>
                   </div>
                 )}
-                <div className="activity-plan-list__edit-actions">
+                <div className="activity-plan-list__edit-actions plan-modal__actions">
                   {isEditing ? (
                     <>
-                      <button type="button" className="activity-plan-list__result-button" onClick={saveEdit}>
+                      <button
+                        type="button"
+                        className="activity-plan-list__result-button plan-modal__primary-button"
+                        onClick={saveEdit}
+                      >
                         保存
                       </button>
                       <button type="button" className="activity-plan-list__undo-button" onClick={cancelEdit}>
@@ -1120,7 +1324,7 @@ export function ActivityPlanList({
                       {detailPlan.is_ai_generated && (
                         <button
                           type="button"
-                          className="activity-plan-list__result-button"
+                          className="activity-plan-list__result-button plan-modal__primary-button"
                           onClick={() => onConfirmPlan(detailPlan.plan_id)}
                         >
                           確定する
@@ -1133,13 +1337,7 @@ export function ActivityPlanList({
                       >
                         編集
                       </button>
-                      <button
-                        type="button"
-                        className="activity-plan-list__alt-button"
-                        onClick={() => onRequestAlternative(detailPlan.plan_id)}
-                      >
-                        AI作り直し
-                      </button>
+                      {renderAlternativeControl(detailPlan.plan_id, "AI作り直し")}
                       {detailPlan.category === "visit" && (
                         <button
                           type="button"
@@ -1157,7 +1355,8 @@ export function ActivityPlanList({
                 </div>
               </div>
             );
-          })()}
+            })()
+          )}
         </div>
       </div>
     )}

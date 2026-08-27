@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AffinityCategoryCharts } from "@/components/affinity/AffinityCategoryCharts";
 import { AffinityRankingList } from "@/components/affinity/AffinityRankingList";
 import { AffinitySummary } from "@/components/affinity/AffinitySummary";
 import { fetchRepAffinity, recalculateRepAffinity } from "@/lib/api";
@@ -23,7 +24,7 @@ export default function AffinityPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        // 得意分野スコアは計算済みのキャッシュなので、表示前に最新の商談結果を反映させておく
+        // 自己分析スコアは計算済みのキャッシュなので、表示前に最新の商談結果を反映させておく
         await recalculateRepAffinity(repId);
         const fetched = await fetchRepAffinity(repId);
         if (!cancelled) setAffinities(fetched);
@@ -44,16 +45,16 @@ export default function AffinityPage() {
 
   if (!selectedRep) {
     return (
-      <main>
-        <h1>得意分野</h1>
+      <main className="wide-main">
+        <h1>自己分析</h1>
         <p>読み込み中...</p>
       </main>
     );
   }
 
   return (
-    <main>
-      <h1>得意分野</h1>
+    <main className="wide-main">
+      <h1>自己分析</h1>
       <p>
         {selectedRep.rep_name}さんの過去の成約・失注実績から、業種・商材カテゴリ・案件パターンごとの成約率を算出しています。
       </p>
@@ -68,6 +69,11 @@ export default function AffinityPage() {
         <>
           <AffinitySummary affinities={affinities} />
           <section className="panel">
+            <h2>業界・商品カテゴリ別の成約率</h2>
+            <AffinityCategoryCharts affinities={affinities} />
+          </section>
+          <section className="panel">
+            <h2>商談履歴(業界・カテゴリ別)</h2>
             <AffinityRankingList affinities={affinities} />
           </section>
         </>

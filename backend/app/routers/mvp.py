@@ -8,6 +8,7 @@ from app.schemas.models import (
     CustomerCreate,
     CustomerOut,
     CustomerSuggestionOut,
+    CustomerWinRateOut,
     DeadlineCreate,
     DeadlineOut,
     DealCreate,
@@ -149,6 +150,13 @@ def get_stale_customers(
     return [StaleCustomerOut.model_validate(row) for row in rows]
 
 
+@router.get("/customers/{customer_id}/win-rate", response_model=CustomerWinRateOut)
+def get_customer_win_rate(customer_id: int) -> CustomerWinRateOut:
+    with get_connection() as conn:
+        row = affinity.customer_win_rate_summary(conn, customer_id)
+    return CustomerWinRateOut.model_validate(row)
+
+
 @router.get("/deadlines", response_model=list[DeadlineOut])
 def get_deadlines(rep_id: int | None = None) -> list[DeadlineOut]:
     with get_connection() as conn:
@@ -175,9 +183,9 @@ def post_deadline(body: DeadlineCreate) -> DeadlineOut:
 
 
 @router.get("/deals", response_model=list[DealOut])
-def get_deals(rep_id: int | None = None) -> list[DealOut]:
+def get_deals(rep_id: int | None = None, customer_id: int | None = None) -> list[DealOut]:
     with get_connection() as conn:
-        rows = planning.list_deals(conn, rep_id)
+        rows = planning.list_deals(conn, rep_id, customer_id)
     return [DealOut.model_validate(row) for row in rows]
 
 
@@ -192,12 +200,12 @@ def post_deal(body: DealCreate) -> DealOut:
                 product_id=body.product_id,
                 deal_phase_id=body.deal_phase_id,
                 estimated_amount=body.estimated_amount,
-                win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 deal_start_date=body.deal_start_date or date.today(),
                 expected_close_date=body.expected_close_date,
                 next_action=body.next_action,
+                memo=body.memo,
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -215,11 +223,12 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 product_id=body.product_id,
                 deal_phase_id=body.deal_phase_id,
                 estimated_amount=body.estimated_amount,
-                win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 expected_close_date=body.expected_close_date,
                 next_action=body.next_action,
+                actual_amount=body.actual_amount,
+                memo=body.memo,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -287,6 +296,7 @@ def post_plan(body: PlanCreate) -> PlanOut:
             expected_amount=body.expected_amount,
             expected_probability=body.expected_probability,
             rationale=body.rationale,
+            product_name_override=body.product_name_override,
         )
     return PlanOut.model_validate(row)
 
@@ -316,6 +326,8 @@ def patch_plan(plan_id: int, body: PlanUpdate, rep_id: int = Query(...)) -> Plan
                 activity_type=body.activity_type,
                 title=body.title,
                 product_name_override=body.product_name_override,
+                expected_amount=body.expected_amount,
+                expected_probability=body.expected_probability,
                 memo=body.memo,
             )
         except ValueError as exc:

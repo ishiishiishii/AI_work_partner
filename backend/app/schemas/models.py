@@ -12,6 +12,8 @@ class OrmModel(BaseModel):
 class SalesRepOut(OrmModel):
     rep_id: int
     rep_name: str
+    branch_id: int
+    branch_name: str
 
 
 class TerritoryOut(BaseModel):
@@ -122,12 +124,12 @@ class DealCreate(BaseModel):
     product_id: int
     deal_phase_id: int
     estimated_amount: Decimal = Field(ge=0)
-    win_probability: int = Field(ge=0, le=100)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
     deal_start_date: date | None = None
     expected_close_date: date | None = None
     next_action: str | None = None
+    memo: str | None = None
 
 
 class DealOut(OrmModel):
@@ -153,17 +155,28 @@ class DealOut(OrmModel):
     profit: Decimal
     expected_close_date: date | None = None
     next_action: str | None = None
+    actual_amount: Decimal | None = None
+    memo: str | None = None
 
 
 class DealUpdate(BaseModel):
     product_id: int
     deal_phase_id: int
     estimated_amount: Decimal = Field(ge=0)
-    win_probability: int = Field(ge=0, le=100)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
     expected_close_date: date | None = None
     next_action: str | None = None
+    # 成約(won)済みの商談のみ有効。未成約に送っても保存時のトリガーで拒否される
+    actual_amount: Decimal | None = Field(default=None, ge=0)
+    memo: str | None = None
+
+
+class CustomerWinRateOut(OrmModel):
+    customer_id: int
+    closed_count: int
+    won_count: int
+    win_rate: int | None = None
 
 
 class RepAffinityOut(OrmModel):
@@ -178,6 +191,43 @@ class RepAffinityOut(OrmModel):
     avg_won_amount: Decimal
     affinity_score: Decimal
     calculated_at: datetime | None = None
+
+
+class AdminTaskTypeOut(OrmModel):
+    task_type_id: int
+    task_name: str
+    is_default: bool
+
+
+class AdminTaskTypeCreate(BaseModel):
+    task_name: str
+
+
+class RepHomeOfficeDayOut(OrmModel):
+    day_of_week: int
+    is_home_available: bool
+
+
+class HomeOfficeAvailabilityUpdate(BaseModel):
+    day_of_week: int = Field(ge=0, le=6)
+    is_home_available: bool
+
+
+class RepAdminTaskDurationOut(OrmModel):
+    task_type_id: int
+    task_name: str
+    duration_minutes: int | None = None
+    updated_at: datetime | None = None
+
+
+class AdminTaskDurationUpdate(BaseModel):
+    duration_minutes: int = Field(ge=0)
+
+
+class RepProfileOut(BaseModel):
+    rep_id: int
+    home_office: list[RepHomeOfficeDayOut]
+    task_durations: list[RepAdminTaskDurationOut]
 
 
 class PlanOut(OrmModel):
@@ -216,6 +266,7 @@ class PlanCreate(BaseModel):
     expected_amount: Decimal = Field(default=Decimal("0"), ge=0)
     expected_probability: int = Field(default=0, ge=0, le=100)
     rationale: str | None = None
+    product_name_override: str | None = None
 
 
 class PlanUpdate(BaseModel):
@@ -225,6 +276,8 @@ class PlanUpdate(BaseModel):
     activity_type: str
     title: str | None = None
     product_name_override: str | None = None
+    expected_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    expected_probability: int = Field(default=0, ge=0, le=100)
     memo: str | None = None
 
 
@@ -274,6 +327,11 @@ class ProductOut(OrmModel):
     subcategory_name: str
     category_id: int
     category_name: str
+    description: str
+    price_min: int
+    price_max: int
+    lead_time_days: int
+    features: list[str]
 
 
 class ReplanRequest(BaseModel):
