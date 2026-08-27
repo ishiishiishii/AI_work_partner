@@ -146,6 +146,7 @@ export function useDashboardData(repId: number | null) {
             target_month: TARGET_MONTH,
             target_amount: 0,
             target_deal_count: 0,
+            target_gross_profit: null,
           },
         );
         setPlans(initialVisitPlans);
@@ -170,7 +171,11 @@ export function useDashboardData(repId: number | null) {
     };
   }, [repId]);
 
-  async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
+  async function handleTargetSave(input: {
+    target_amount: number;
+    target_deal_count: number;
+    target_gross_profit: number | null;
+  }) {
     if (repId === null) return;
     const rid = repId;
     const updated = await saveSalesTarget(rid, TARGET_MONTH, input);
@@ -588,9 +593,15 @@ export function useDashboardData(repId: number | null) {
       ? calcAchievementRate(plans, target.target_amount, deals)
       : 0;
 
-  // 見込み粗利。バックエンドのforecastにはまだ粗利が無いため、
-  // planに紐づくdeal.profitからクライアント側で算出する
-  const forecastProfitAmount = calcForecastProfit(plans, deals);
+  // 見込み粗利。バックエンドのforecastが粗利も返すようになったので、
+  // そちらを優先し、未登録月のフォールバックのみクライアント計算を使う
+  const forecastProfitAmount = forecast ? forecast.forecast_profit_amount : calcForecastProfit(plans, deals);
+
+  // 達成"確率"(モンテカルロシミュレーション)。フォールバック計算を持たないため、
+  // forecastが無い(目標未登録)月は「算出不可」として0%扱いにする
+  const salesAchievementProbability = forecast ? forecast.sales_achievement_probability : 0;
+  const profitAchievementProbability = forecast ? forecast.profit_achievement_probability : null;
+  const jointAchievementProbability = forecast ? forecast.joint_achievement_probability : 0;
 
   // 「現在の実績」は成約(won)確定分のみの金額。バックエンドのforecastには
   // 見込み(未対応・延期分含む)しか無いため、常にplansから算出する
@@ -616,6 +627,9 @@ export function useDashboardData(repId: number | null) {
     forecastAmount,
     achievementRate,
     forecastProfitAmount,
+    salesAchievementProbability,
+    profitAchievementProbability,
+    jointAchievementProbability,
     actualAchievedAmount,
     actualAchievementRate,
     handleTargetSave,

@@ -1010,9 +1010,10 @@ def _blocked_windows(conn: Connection, *, rep_id: int, target_date: date) -> lis
         """,
         (rep_id, target_date),
     ).fetchall()
-    # start_time/end_timeはDB上text("HH:MM")のため、time型に揃えてから返す
-    # (break_start/end等の他のwindowはtime型で、混在するとsorted()やdatetime.combine()が壊れる)
-    return [(time.fromisoformat(row["start_time"]), time.fromisoformat(row["end_time"])) for row in rows]
+    # start_time/end_timeはDB上text("HH:MM")だが、::timeにキャストしているためpsycopgは
+    # 既にtime型として返す(break_start/end等の他のwindowと型を揃えるため、ここでは
+    # fromisoformatでの再変換はしない -- 既にstrでなくtimeなのでTypeErrorになる)。
+    return [(row["start_time"], row["end_time"]) for row in rows]
 
 
 def _route_time(value: time | str) -> time:
