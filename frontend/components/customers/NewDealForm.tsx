@@ -12,7 +12,9 @@ type NewDealFormProps = {
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
+    memo?: string;
   }) => Promise<void>;
+  showTitle?: boolean;
 };
 
 const initialDraft = {
@@ -22,9 +24,10 @@ const initialDraft = {
   expected_visit_count: "",
   expected_effort_hours: "",
   deal_start_date: "",
+  memo: "",
 };
 
-export function NewDealForm({ onCreate }: NewDealFormProps) {
+export function NewDealForm({ onCreate, showTitle = true }: NewDealFormProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [dealPhases, setDealPhases] = useState<DealPhase[]>([]);
   const [draft, setDraft] = useState(initialDraft);
@@ -70,6 +73,7 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
         expected_visit_count: Number(draft.expected_visit_count),
         expected_effort_hours: Number(draft.expected_effort_hours),
         deal_start_date: draft.deal_start_date || undefined,
+        memo: draft.memo || undefined,
       });
       setDraft({ ...initialDraft, product_id: draft.product_id, deal_phase_id: draft.deal_phase_id });
     } catch (err) {
@@ -81,7 +85,7 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
 
   return (
     <form className="panel new-customer-form" onSubmit={handleSubmit}>
-      <h2>商談を追加</h2>
+      {showTitle && <h2>商談を追加</h2>}
       <div className="new-customer-form__grid">
         <label className="goal-card__field">
           <span>商品</span>
@@ -146,6 +150,16 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
             type="date"
             value={draft.deal_start_date}
             onChange={(event) => setDraft({ ...draft, deal_start_date: event.target.value })}
+          />
+        </label>
+        <label className="goal-card__field">
+          <span>メモ</span>
+          <textarea
+            className="plan-modal__memo-input"
+            value={draft.memo}
+            onChange={(event) => setDraft({ ...draft, memo: event.target.value })}
+            rows={3}
+            placeholder="任意"
           />
         </label>
       </div>

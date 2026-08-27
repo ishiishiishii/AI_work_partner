@@ -7166,9 +7166,61 @@ insert into product (product_name, subcategory_id, description, price_min, price
   (6311, (select customer_id from customer where customer_name = '有限会社夕凪フードサービス'), (select rep_id from sales_rep where rep_name = '小林綾子'), (select deal_phase_id from deal_phase where deal_phase_name = '初回接触'), (select deal_result_status_id from deal_result_status where status_code = 'ongoing'), 77, 5630000, 4114199, 59, 7, 13.7, '2026-08-23', NULL),
   (6312, (select customer_id from customer where customer_name = '湘南製作所株式会社'), (select rep_id from sales_rep where rep_name = '青木涼太'), (select deal_phase_id from deal_phase where deal_phase_name = '初回接触'), (select deal_result_status_id from deal_result_status where status_code = 'ongoing'), 39, 830000, 591802, 10, 7, 10.7, '2026-08-13', NULL);
 
+-- Repeat-business demo data: every 'won' deal gets expected_visit_count
+-- preceding 'ongoing' deals for the same customer/rep/product, dated before
+-- the winning deal's start date, so the history reads as several negotiation
+-- rounds that finally converted -- not a single-shot contract. These rounds
+-- carry no forecast value of their own (estimated_amount/cost = 0) so they
+-- don't inflate pipeline totals; only the existing 'won' deal keeps the real
+-- amount.
+do $$
+declare
+  won record;
+  i int;
+  max_id int;
+  new_start_date date;
+  new_win_probability int;
+  phase_ids int[];
+  num_phases int;
+  chosen_phase int;
+  ongoing_status_id int;
+begin
+  select coalesce(max(deal_id), 0) into max_id from deal;
+  select array_agg(deal_phase_id order by sort_order) into phase_ids
+    from deal_phase where deal_phase_name <> '契約交渉';
+  num_phases := array_length(phase_ids, 1);
+  select deal_result_status_id into ongoing_status_id from deal_result_status where status_code = 'ongoing';
+
+  for won in
+    select d.deal_id, d.customer_id, d.rep_id, d.product_id,
+           d.expected_visit_count, d.expected_effort_hours, d.deal_start_date
+    from deal d
+    join deal_result_status drs on drs.deal_result_status_id = d.deal_result_status_id
+    where drs.status_code = 'won'
+  loop
+    for i in 1..won.expected_visit_count loop
+      max_id := max_id + 1;
+      chosen_phase := phase_ids[((i - 1) % num_phases) + 1];
+      new_win_probability := (15 + floor(random() * 31))::int; -- 15〜45%
+      -- Earliest round furthest in the past, last round just before deal_start_date.
+      new_start_date := won.deal_start_date - ((won.expected_visit_count - i + 1) * 14);
+
+      insert into deal (
+        deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
+        product_id, estimated_amount, cost, win_probability, expected_visit_count,
+        expected_effort_hours, deal_start_date, contract_date
+      ) values (
+        max_id, won.customer_id, won.rep_id, chosen_phase, ongoing_status_id,
+        won.product_id, 0, 0, new_win_probability,
+        won.expected_visit_count, won.expected_effort_hours, new_start_date, null
+      );
+    end loop;
+  end loop;
+end $$;
 
 
-﻿
+
+
 insert into sales_target (target_id, rep_id, target_month, target_amount) values
   (1, 1, '2026-03-01', 4910000),
   (2, 1, '2026-04-01', 4580000),

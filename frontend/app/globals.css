@@ -301,16 +301,19 @@ a {
   color: var(--muted);
 }
 
-.goal-card__field input {
+.goal-card__field input,
+.goal-card__field select {
   font-size: 1rem;
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
+  background: var(--bg-elevated);
   font-family: inherit;
 }
 
-.goal-card__field input:focus {
+.goal-card__field input:focus,
+.goal-card__field select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -925,6 +928,12 @@ a {
 .activity-plan-list__amount {
   flex-shrink: 0;
   font-weight: 600;
+}
+
+.activity-plan-list__progress {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .badge {
@@ -1970,6 +1979,25 @@ a {
   color: var(--muted);
 }
 
+.app-sidebar__signout {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.3rem 0.6rem;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.app-sidebar__signout:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .app-sidebar__status-dot {
   width: 0.45rem;
   height: 0.45rem;
@@ -1997,36 +2025,14 @@ a {
   gap: 0.6rem;
 }
 
-.rep-switcher__select {
+.rep-switcher__name {
   font-size: 0.85rem;
   font-family: inherit;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.3rem 0.6rem;
-  background: var(--card);
   color: var(--ink);
-  min-width: 0;
-  max-width: 9rem;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.rep-switcher__signout {
-  font-size: 0.8rem;
-  font-family: inherit;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.3rem 0.6rem;
-  background: var(--card);
-  color: var(--ink);
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.rep-switcher__signout:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  max-width: 9rem;
 }
 
 @media (max-width: 480px) {
@@ -2044,15 +2050,9 @@ a {
     gap: 0.35rem;
   }
 
-  .rep-switcher__select {
+  .rep-switcher__name {
     max-width: 5.25rem;
     font-size: 0.75rem;
-    padding: 0.25rem 0.35rem;
-  }
-
-  .rep-switcher__signout {
-    font-size: 0.7rem;
-    padding: 0.25rem 0.45rem;
   }
 }
 
@@ -2165,9 +2165,16 @@ a {
 
 .new-customer-form__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.1rem 0.9rem;
+  margin-bottom: 1.1rem;
+}
+
+.new-customer-form__grid .goal-card__field {
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .new-customer-form__error {
@@ -2181,8 +2188,12 @@ a {
 }
 
 .new-customer-form__hint {
-  font-size: 0.72rem;
+  display: block;
+  font-size: 0.75rem;
   color: var(--muted);
+  font-weight: 400;
+  margin-top: 0.3rem;
+  line-height: 1.4;
 }
 
 .new-customer-form__suggestions {
@@ -2232,6 +2243,36 @@ a {
 .new-customer-form__suggestion-meta {
   font-size: 0.72rem;
   color: var(--muted);
+}
+
+.company-autocomplete {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.company-autocomplete__linked {
+  font-size: 0.72rem;
+  color: var(--ok);
+}
+
+.company-autocomplete__register-link {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: inherit;
+}
+
+.company-autocomplete__register-form {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
 .customer-detail__back {
@@ -2515,6 +2556,40 @@ a {
 .deal-history__note {
   margin: 0.25rem 0 0;
   font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.deal-history__rep {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+
+.deal-history__rep--mine {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.deal-history__item--other-rep {
+  opacity: 0.85;
+}
+
+.deal-history__item--clickable {
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.deal-history__item--clickable:hover {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.deal-history__count {
+  font-size: 0.7rem;
+  font-weight: 600;
   color: var(--muted);
 }
 

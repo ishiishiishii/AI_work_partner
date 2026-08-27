@@ -183,6 +183,7 @@ export type Deal = {
   cost: number; // 原価。ユーザー入力ではなくバックエンドが自動算出(見込み金額の50〜95%)
   profit: number; // 見込み利益 = estimated_amount - cost(DB側のgenerated column)
   actual_amount: number | null; // 実際の契約金額。成約(won)時のみ値を持つ
+  memo: string | null;
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";

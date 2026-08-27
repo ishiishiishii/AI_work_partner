@@ -128,7 +128,7 @@ export default function DashboardPage() {
         await recalculateRepAffinity(repId);
         const [fetchedAffinities, fetchedDeals, fetchedCustomers, fetchedTerritory] = await Promise.all([
           fetchRepAffinity(repId),
-          fetchDeals(repId),
+          fetchDeals({ repId }),
           fetchCustomers(repId),
           fetchRepTerritory(repId),
         ]);
