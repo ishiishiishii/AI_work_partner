@@ -1,20 +1,17 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useLayoutEffect, useState } from "react";
+import { useState } from "react";
+import { CompanyAutocompleteField, type CompanyFieldValue } from "@/components/CompanyAutocompleteField";
+import { ProductAutocompleteField } from "@/components/ProductAutocompleteField";
 import { NewCustomerForm } from "@/components/customers/NewCustomerForm";
-import { createCustomer, createDeadline, createManualPlan } from "@/lib/api";
+import { QuickDealForm } from "@/components/QuickDealForm";
+import { QuickDeadlineForm } from "@/components/QuickDeadlineForm";
+import { createCustomer, createManualPlan } from "@/lib/api";
+import { ADD_TYPE_LABELS, type AddType } from "@/lib/quickAddTypes";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
 import { useRep } from "@/lib/repContext";
 import type { ActivityPlan, ActivityPlanCategory } from "@/types";
-
-type AddType = "plan" | "customer" | "deadline";
-
-const TYPE_LABELS: Record<AddType, string> = {
-  plan: "予定",
-  customer: "新規顧客",
-  deadline: "期限",
-};
 
 function todayISODate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -44,14 +41,14 @@ function QuickPlanForm({
   const [startTime, setStartTime] = useState<string | null>(null);
   const [endTime, setEndTime] = useState<string | null>(null);
   const [activityTypeName, setActivityTypeName] = useState("訪問");
-  const [customerName, setCustomerName] = useState("");
+  const [company, setCompany] = useState<CompanyFieldValue>({ customerId: null, customerName: "" });
   const [productName, setProductName] = useState("");
   const [expectedProbability, setExpectedProbability] = useState(0);
   const [memo, setMemo] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isValid = customerName.trim().length > 0 && planDate.length > 0;
+  const isValid = company.customerName.trim().length > 0 && planDate.length > 0;
 
   async function handleSave() {
     if (!isValid) return;
@@ -64,8 +61,8 @@ function QuickPlanForm({
         end_time: endTime,
         category,
         activity_type_name: activityTypeName,
-        customer_name: customerName.trim(),
-        customer_id: null,
+        customer_name: company.customerName.trim(),
+        customer_id: company.customerId,
         deal_id: null,
         priority: 3,
       });
@@ -129,22 +126,27 @@ function QuickPlanForm({
 
         <dt>{category === "visit" ? "会社" : "件名"}</dt>
         <dd>
-          <input
-            type="text"
-            value={customerName}
-            onChange={(event) => setCustomerName(event.target.value)}
-          />
+          {category === "visit" ? (
+            <CompanyAutocompleteField
+              repId={repId}
+              value={company}
+              onChange={setCompany}
+              placeholder="例: D工業株式会社"
+            />
+          ) : (
+            <input
+              type="text"
+              value={company.customerName}
+              onChange={(event) => setCompany({ customerId: null, customerName: event.target.value })}
+            />
+          )}
         </dd>
 
         {category === "visit" && (
           <>
             <dt>商品</dt>
             <dd>
-              <input
-                type="text"
-                value={productName}
-                onChange={(event) => setProductName(event.target.value)}
-              />
+              <ProductAutocompleteField value={productName} onChange={setProductName} />
             </dd>
 
             <dt>成約確率</dt>
@@ -194,74 +196,6 @@ function QuickPlanForm({
   );
 }
 
-function QuickDeadlineForm({ repId, onDone }: { repId: number; onDone: () => void }) {
-  const [title, setTitle] = useState("");
-  const [dueDate, setDueDate] = useState(todayISODate());
-  const [memo, setMemo] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const isValid = title.trim().length > 0 && dueDate.length > 0;
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!isValid) return;
-    setIsSaving(true);
-    setError(null);
-    try {
-      await createDeadline(repId, {
-        title: title.trim(),
-        due_date: dueDate,
-        memo: memo.trim() || null,
-      });
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "期限の追加に失敗しました");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  return (
-    <form className="new-customer-form" onSubmit={handleSubmit}>
-      <div className="new-customer-form__grid">
-        <label className="goal-card__field">
-          <span>件名</span>
-          <input
-            type="text"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="例: 見積提出"
-          />
-        </label>
-        <label className="goal-card__field">
-          <span>期限日</span>
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(event) => setDueDate(event.target.value)}
-          />
-        </label>
-        <label className="goal-card__field">
-          <span>メモ</span>
-          <input
-            type="text"
-            value={memo}
-            onChange={(event) => setMemo(event.target.value)}
-            placeholder="任意"
-          />
-        </label>
-      </div>
-
-      {error && <p className="new-customer-form__error">{error}</p>}
-
-      <button type="submit" className="goal-card__save" disabled={!isValid || isSaving}>
-        {isSaving ? "登録中..." : "登録する"}
-      </button>
-    </form>
-  );
-}
-
 // 顧客一覧(とその詳細ページ)では新規顧客、それ以外のページでは予定をデフォルトにする。
 // ログインページはAppNav自体が非表示のためここでは考慮不要。
 function defaultTypeForPath(pathname: string): AddType {
@@ -275,22 +209,14 @@ export function QuickAddFab() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeType, setActiveType] = useState<AddType>("plan");
 
-  // ダッシュボードでは「予定」に元々の詳細な作成パネル(ActivityPlanList)が
-  // あるため、この簡易フォームは使わずそちらへ委譲する。開いた後に▼で
-  // 「予定」へ切り替えた場合もここで拾えるよう、レイアウト確定前
-  // (useLayoutEffect)で閉じて委譲することで簡易フォームがちらつくのを防ぐ。
-  useLayoutEffect(() => {
-    if (isOpen && activeType === "plan" && openRichPlanCreator) {
-      setIsOpen(false);
-      openRichPlanCreator();
-    }
-  }, [isOpen, activeType, openRichPlanCreator]);
-
   if (!selectedRep) {
     return null;
   }
   const repId = selectedRep.rep_id;
 
+  // ダッシュボードでは「予定」に元々の詳細な作成パネル(ActivityPlanList)があり、
+  // そちらでは予定以外の種類にも切り替えられるため、そのまま委譲する。
+  // それ以外のページでは、この種類選択モーダルを開く。
   function open() {
     const type = defaultTypeForPath(pathname);
     if (type === "plan" && openRichPlanCreator) {
@@ -322,9 +248,11 @@ export function QuickAddFab() {
                   onChange={(event) => setActiveType(event.target.value as AddType)}
                   aria-label="追加する種類"
                 >
-                  <option value="plan">予定</option>
-                  <option value="customer">新規顧客</option>
-                  <option value="deadline">期限</option>
+                  {Object.entries(ADD_TYPE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
                 を追加
               </h3>
@@ -350,6 +278,7 @@ export function QuickAddFab() {
               />
             )}
             {activeType === "deadline" && <QuickDeadlineForm repId={repId} onDone={close} />}
+            {activeType === "deal" && <QuickDealForm repId={repId} onDone={close} />}
           </div>
         </div>
       )}

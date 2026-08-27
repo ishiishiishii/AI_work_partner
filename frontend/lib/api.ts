@@ -592,6 +592,7 @@ type ApiDeal = {
   cost: string | number;
   profit: string | number;
   actual_amount: string | number | null;
+  memo: string | null;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -618,12 +619,16 @@ function mapDeal(row: ApiDeal): Deal {
     cost: Number(row.cost),
     profit: Number(row.profit),
     actual_amount: row.actual_amount === null ? null : Number(row.actual_amount),
+    memo: row.memo,
   };
 }
 
-export async function fetchDeals(repId: number): Promise<Deal[]> {
+export async function fetchDeals(filters: { repId?: number; customerId?: number }): Promise<Deal[]> {
   const base = getApiBaseUrl();
-  const res = await fetch(`${base}/api/deals?rep_id=${repId}`, { cache: "no-store" });
+  const params = new URLSearchParams();
+  if (filters.repId != null) params.set("rep_id", String(filters.repId));
+  if (filters.customerId != null) params.set("customer_id", String(filters.customerId));
+  const res = await fetch(`${base}/api/deals?${params.toString()}`, { cache: "no-store" });
   if (!res.ok) throw new Error(`商談一覧の取得に失敗しました (HTTP ${res.status})`);
   const rows: ApiDeal[] = await res.json();
   return rows.map(mapDeal);
@@ -639,6 +644,7 @@ export async function createDeal(
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
+    memo?: string;
   },
 ): Promise<Deal> {
   const base = getApiBaseUrl();
@@ -654,6 +660,7 @@ export async function createDeal(
       expected_visit_count: input.expected_visit_count,
       expected_effort_hours: input.expected_effort_hours,
       deal_start_date: input.deal_start_date || null,
+      memo: input.memo || null,
     }),
   });
   if (!res.ok) {

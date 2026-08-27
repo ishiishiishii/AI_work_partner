@@ -43,15 +43,15 @@ export default function CustomerDetailPage() {
       try {
         setIsLoading(true);
         setLoadError(null);
-        const [customers, repDeals, allProducts, masters] = await Promise.all([
+        const [customers, customerDeals, allProducts, masters] = await Promise.all([
           fetchCustomers(repId),
-          fetchDeals(repId),
+          fetchDeals({ customerId: targetId }),
           fetchProducts(),
           fetchMasters(),
         ]);
         if (cancelled) return;
         setCustomer(customers.find((item) => item.customer_id === targetId) ?? null);
-        setDeals(repDeals.filter((deal) => deal.customer_id === targetId));
+        setDeals(customerDeals);
         setProducts(allProducts);
         setDealPhases(masters.deal_phases);
 
@@ -88,6 +88,7 @@ export default function CustomerDetailPage() {
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
+    memo?: string;
   }) {
     if (REP_ID === null || !customer) return;
     const created = await createDeal(REP_ID, { ...input, customer_id: customer.customer_id });
@@ -192,6 +193,7 @@ export default function CustomerDetailPage() {
             deals={deals}
             products={products}
             dealPhases={dealPhases}
+            currentRepId={REP_ID}
             onUpdateDeal={handleUpdateDeal}
             onDeleteDeal={handleDeleteDeal}
           />

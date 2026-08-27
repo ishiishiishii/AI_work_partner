@@ -350,29 +350,31 @@ _AI_DEAL_COLUMNS = """
     deal_phase_name, deal_result_status, product_name, subcategory_name,
     category_name, estimated_amount, win_probability, expected_visit_count,
     expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id,
-    cost, profit, actual_amount
+    cost, profit, actual_amount, memo
 """
 
 
-def list_deals(conn: Connection, rep_id: int | None = None) -> list[dict]:
+def list_deals(
+    conn: Connection, rep_id: int | None = None, customer_id: int | None = None
+) -> list[dict]:
+    conditions = []
+    params: list[int] = []
     if rep_id:
-        rows = conn.execute(
-            f"""
-            select {_AI_DEAL_COLUMNS}
-            from ai.deal
-            where rep_id = %s
-            order by deal_start_date desc, deal_id desc
-            """,
-            (rep_id,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            f"""
-            select {_AI_DEAL_COLUMNS}
-            from ai.deal
-            order by deal_start_date desc, deal_id desc
-            """
-        ).fetchall()
+        conditions.append("rep_id = %s")
+        params.append(rep_id)
+    if customer_id:
+        conditions.append("customer_id = %s")
+        params.append(customer_id)
+    where_clause = f"where {' and '.join(conditions)}" if conditions else ""
+    rows = conn.execute(
+        f"""
+        select {_AI_DEAL_COLUMNS}
+        from ai.deal
+        {where_clause}
+        order by deal_start_date desc, deal_id desc
+        """,
+        tuple(params),
+    ).fetchall()
     return list(rows)
 
 
@@ -439,6 +441,7 @@ def create_deal(
     expected_visit_count: int,
     expected_effort_hours: Decimal,
     deal_start_date: date,
+    memo: str | None = None,
 ) -> dict:
     # New deals (unlike imported/seeded history, which predates branch
     # assignment) must be logged by a rep whose branch covers the customer's
@@ -478,13 +481,13 @@ def create_deal(
         insert into deal (
           deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
           product_id, estimated_amount, cost, win_probability, expected_visit_count,
-          expected_effort_hours, deal_start_date, contract_date
+          expected_effort_hours, deal_start_date, contract_date, memo
         )
         values (
           (select coalesce(max(deal_id), 0) + 1 from deal),
           %s, %s, %s,
           (select deal_result_status_id from deal_result_status where status_code = 'ongoing'),
-          %s, %s, %s, %s, %s, %s, %s, null
+          %s, %s, %s, %s, %s, %s, %s, null, %s
         )
         returning deal_id
         """,
@@ -499,6 +502,7 @@ def create_deal(
             expected_visit_count,
             expected_effort_hours,
             deal_start_date,
+            memo,
         ),
     ).fetchone()["deal_id"]
     # Re-read through the AI view so the response carries resolved names
@@ -522,6 +526,7 @@ def update_deal(
     expected_visit_count: int,
     expected_effort_hours: Decimal,
     actual_amount: Decimal | None = None,
+    memo: str | None = None,
 ) -> dict:
     existing = conn.execute(
         "select customer_id from deal where deal_id = %s and rep_id = %s",
@@ -550,7 +555,8 @@ def update_deal(
             win_probability = %s,
             expected_visit_count = %s,
             expected_effort_hours = %s,
-            actual_amount = coalesce(%s, actual_amount)
+            actual_amount = coalesce(%s, actual_amount),
+            memo = coalesce(%s, memo)
         where deal_id = %s and rep_id = %s
         returning deal_id
         """,
@@ -562,6 +568,7 @@ def update_deal(
             expected_visit_count,
             expected_effort_hours,
             actual_amount,
+            memo,
             deal_id,
             rep_id,
         ),

@@ -87,7 +87,7 @@ const LINKS = [
 
 export function AppNav() {
   const pathname = usePathname();
-  const { selectedRep } = useRep();
+  const { selectedRep, signOut } = useRep();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const repInitial = selectedRep?.rep_name?.charAt(0) || "A";
 
@@ -156,6 +156,9 @@ export function AppNav() {
         <div className="app-sidebar__footer">
           <span className="app-sidebar__status-dot" aria-hidden="true" />
           SYSTEM ONLINE
+          <button type="button" className="app-sidebar__signout" onClick={() => void signOut()}>
+            ログアウト
+          </button>
         </div>
       </aside>
 
