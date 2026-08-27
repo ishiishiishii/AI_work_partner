@@ -38,7 +38,11 @@ type ActivityPlanListProps = {
   dailyTasks: ActivityPlan[];
   deals: Deal[];
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
+  onPostpone: (planId: number, newDate: string, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
+  altPreview: { planId: number; label: string } | null;
+  onConfirmAlternative: () => void;
+  onCancelAlternative: () => void;
   onEditPlan: (planId: number, updates: PlanEditFields) => void;
   onAddPlan: (plan: ActivityPlan) => void;
   onConfirmPlan: (planId: number) => void;
@@ -315,7 +319,11 @@ export function ActivityPlanList({
   dailyTasks,
   deals,
   onResultChange,
+  onPostpone,
   onRequestAlternative,
+  altPreview,
+  onConfirmAlternative,
+  onCancelAlternative,
   onEditPlan,
   onAddPlan,
   onConfirmPlan,
@@ -334,6 +342,9 @@ export function ActivityPlanList({
   // する。作成パネルを開き直すたびに「予定」に戻す。
   const [addType, setAddType] = useState<AddType>("plan");
   const [gapPicker, setGapPicker] = useState<{ start: string; maxEnd: string; end: string } | null>(null);
+  // 「延期」ボタンを押した予定について、その場で延期先の日付を選ぶための状態
+  const [postponingPlanId, setPostponingPlanId] = useState<number | null>(null);
+  const [postponeDate, setPostponeDate] = useState("");
   // 「月」表示で商品名をダブルクリックした際に商品詳細ページへ飛べるよう、
   // 商品名→product_id の対応をあらかじめ取得しておく
   const [productIdByName, setProductIdByName] = useState<Map<string, number>>(new Map());
@@ -480,9 +491,47 @@ export function ActivityPlanList({
     return contactTypeSelections[plan.plan_id] ?? plan.activity_type_name;
   }
 
+  function startPostpone(plan: ActivityPlan) {
+    setPostponingPlanId(plan.plan_id);
+    // 「延期」なので元の予定日より後をデフォルトにする(1週間後)
+    setPostponeDate(formatISODate(addDays(parseISODate(plan.plan_date), 7)));
+  }
+
+  function confirmPostpone(plan: ActivityPlan) {
+    if (!postponeDate) return;
+    onPostpone(plan.plan_id, postponeDate, getSelectedContactType(plan));
+    setPostponingPlanId(null);
+  }
+
   // ステータスの記録・取り消しUI。一覧行と詳細モーダルの両方で同じものを使う
   function renderResultControls(plan: ActivityPlan) {
     if (plan.result_status === "pending") {
+      if (postponingPlanId === plan.plan_id) {
+        return (
+          <div className="activity-plan-list__postpone-form">
+            <label>
+              延期先の日付
+              <input
+                type="date"
+                min={formatISODate(addDays(parseISODate(plan.plan_date), 1))}
+                value={postponeDate}
+                onChange={(event) => setPostponeDate(event.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="activity-plan-list__result-button"
+              disabled={!postponeDate}
+              onClick={() => confirmPostpone(plan)}
+            >
+              この日に延期する
+            </button>
+            <button type="button" className="activity-plan-list__undo-button" onClick={() => setPostponingPlanId(null)}>
+              キャンセル
+            </button>
+          </div>
+        );
+      }
       return (
         <>
           <label className="activity-plan-list__contact-type">
@@ -508,7 +557,11 @@ export function ActivityPlanList({
               key={option.value}
               type="button"
               className="activity-plan-list__result-button"
-              onClick={() => onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))}
+              onClick={() =>
+                option.value === "postponed"
+                  ? startPostpone(plan)
+                  : onResultChange(plan.plan_id, option.value, getSelectedContactType(plan))
+              }
             >
               {option.label}
             </button>
@@ -529,6 +582,28 @@ export function ActivityPlanList({
           取り消す
         </button>
       </>
+    );
+  }
+
+  // 「対応が難しい」ボタン(一覧行・詳細モーダル共通)
+  function renderAlternativeControl(planId: number, label: string) {
+    if (altPreview?.planId !== planId) {
+      return (
+        <button type="button" className="activity-plan-list__alt-button" onClick={() => onRequestAlternative(planId)}>
+          {label}
+        </button>
+      );
+    }
+    return (
+      <span className="activity-plan-list__alt-preview">
+        代わりに「{altPreview.label}」はどうですか？
+        <button type="button" className="activity-plan-list__result-button" onClick={onConfirmAlternative}>
+          この内容で差し替える
+        </button>
+        <button type="button" className="activity-plan-list__undo-button" onClick={onCancelAlternative}>
+          やめる
+        </button>
+      </span>
     );
   }
 
@@ -611,15 +686,7 @@ export function ActivityPlanList({
         {plan.category === "visit" && (
           <div className="activity-plan-list__result-buttons">
             {renderResultControls(plan)}
-            {plan.result_status === "pending" && (
-              <button
-                type="button"
-                className="activity-plan-list__alt-button"
-                onClick={() => onRequestAlternative(plan.plan_id)}
-              >
-                対応が難しい
-              </button>
-            )}
+            {plan.result_status === "pending" && renderAlternativeControl(plan.plan_id, "対応が難しい")}
           </div>
         )}
       </>
@@ -1243,13 +1310,7 @@ export function ActivityPlanList({
                       >
                         編集
                       </button>
-                      <button
-                        type="button"
-                        className="activity-plan-list__alt-button"
-                        onClick={() => onRequestAlternative(detailPlan.plan_id)}
-                      >
-                        AI作り直し
-                      </button>
+                      {renderAlternativeControl(detailPlan.plan_id, "AI作り直し")}
                       {detailPlan.category === "visit" && (
                         <button
                           type="button"

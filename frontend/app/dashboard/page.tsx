@@ -23,7 +23,6 @@ import {
   generateActivityPlans,
   postActivityResult,
   recalculateRepAffinity,
-  replanActivityPlans,
   saveSalesTarget,
   updatePlan,
   updatePlanProgress,
@@ -64,6 +63,24 @@ function getCurrentMonth(): string {
 
 const TARGET_MONTH = getCurrentMonth();
 
+// 「対応が難しい」ボタンの差し替え提案。ユーザーが確定するまでの一時的な状態
+type AltPreview =
+  | {
+      kind: "task";
+      planId: number;
+      foundInPlans: boolean;
+      changedPlan: ActivityPlan;
+      label: string;
+      candidateTask: (typeof mockTaskSuggestions)[number];
+    }
+  | {
+      kind: "deal";
+      planId: number;
+      changedPlan: ActivityPlan;
+      label: string;
+      candidateDeal: Deal;
+    };
+
 export default function DashboardPage() {
   const { selectedRep, isAuthLoading } = useRep();
   const REP_ID = selectedRep?.rep_id ?? null;
@@ -79,6 +96,8 @@ export default function DashboardPage() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
+  // 「対応が難しい」の差し替え候補。確定するまでバックエンドには送らない
+  const [altPreview, setAltPreview] = useState<AltPreview | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
   const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
@@ -193,13 +212,19 @@ export default function DashboardPage() {
   }
 
   async function handleRegenerate() {
-    if (REP_ID === null) return;
+    if (REP_ID === null || !target) return;
     const repId = REP_ID;
     setIsRegenerating(true);
     try {
+      const before = calcAchievementRate(plans, target.target_amount, deals);
       const fresh = await generateActivityPlans(repId, TARGET_MONTH);
+      const after = calcAchievementRate(fresh, target.target_amount, deals);
       setPlans(fresh);
-      setReplan(null);
+      setReplan({
+        before_achievement_rate: before,
+        after_achievement_rate: after,
+        reason: "手動でAIに残り期間の計画を組み直してもらいました",
+      });
       await refreshForecast(repId);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "計画生成に失敗しました");
@@ -270,22 +295,45 @@ export default function DashboardPage() {
       setPlans(plans); // ロールバック
       return;
     }
+  }
 
-    if (status === "lost" || status === "postponed") {
-      const before = calcAchievementRate(updatedPlans, target.target_amount, deals);
-      try {
-        const freshPlans = await replanActivityPlans(REP_ID, TARGET_MONTH);
-        const after = calcAchievementRate(freshPlans, target.target_amount, deals);
-        setPlans(freshPlans);
-        setReplan({
-          before_achievement_rate: before,
-          after_achievement_rate: after,
-          reason: "商談結果を反映し、AIが残り期間の計画を組み直しました",
-        });
-        await refreshForecast(REP_ID);
-      } catch (error) {
-        setLoadError(error instanceof Error ? error.message : "再計画に失敗しました");
-      }
+  // 「対応が難しい」と同じパターン(新しい予定を作って元をキャンセル)。結果として
+  // 記録すると「取り消す」操作が生え、取り消すと延期先と重複してしまうため避けている。
+  async function handlePostpone(planId: number, newDate: string, activityTypeName: string) {
+    const changedPlan = plans.find((plan) => plan.plan_id === planId);
+    if (!changedPlan || REP_ID === null) return;
+
+    try {
+      const created = await createPlan(REP_ID, {
+        plan_date: newDate,
+        start_time: changedPlan.start_time,
+        end_time: changedPlan.end_time,
+        category: changedPlan.category,
+        activity_type: activityTypeName,
+        customer_id: changedPlan.customer_id,
+        deal_id: changedPlan.deal_id,
+        priority: changedPlan.priority,
+        expected_amount: changedPlan.expected_amount,
+        expected_probability: changedPlan.expected_probability,
+        rationale: `${changedPlan.plan_date}の予定を延期`,
+      });
+      await cancelPlan(REP_ID, planId);
+
+      const rescheduled: ActivityPlan = {
+        ...changedPlan,
+        plan_id: created.plan_id,
+        plan_date: newDate,
+        activity_type_name: activityTypeName,
+        is_ai_generated: false,
+        reasoning_text: `${changedPlan.plan_date}の予定を延期`,
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+      };
+      setPlans((prev) => prev.filter((plan) => plan.plan_id !== planId).concat(rescheduled));
+      await refreshForecast(REP_ID);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "延期の処理に失敗しました");
     }
   }
 
@@ -372,9 +420,10 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleRequestAlternative(planId: number) {
+  // 候補の計算のみ行う。確定はconfirmAlternativeで、まだ何も送信しない
+  function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId) ?? dailyTasks.find((task) => task.plan_id === planId);
-    if (!changedPlan || !target || REP_ID === null) return;
+    if (!changedPlan) return;
     const foundInPlans = plans.some((plan) => plan.plan_id === planId);
     setAltNotice(null);
 
@@ -386,11 +435,50 @@ export default function DashboardPage() {
         setAltNotice("現在、差し替えられる事務作業の候補がありません。");
         return;
       }
+      setAltPreview({
+        kind: "task",
+        planId,
+        foundInPlans,
+        changedPlan,
+        label: candidateTask.title,
+        candidateTask,
+      });
+      return;
+    }
 
+    // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
+    const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
+    const candidateDeal = [...deals]
+      .filter((deal) => deal.deal_result_status === "ongoing" && !usedDealIds.has(deal.deal_id))
+      .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
+    if (!candidateDeal) {
+      setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
+      return;
+    }
+    setAltPreview({
+      kind: "deal",
+      planId,
+      changedPlan,
+      label: `${candidateDeal.customer_name}(${candidateDeal.product_name})`,
+      candidateDeal,
+    });
+  }
+
+  function cancelAlternativePreview() {
+    setAltPreview(null);
+  }
+
+  async function confirmAlternative() {
+    if (!altPreview || !target || REP_ID === null) return;
+    const preview = altPreview;
+    setAltPreview(null);
+    const { planId, changedPlan } = preview;
+
+    if (preview.kind === "task") {
+      const { candidateTask, foundInPlans } = preview;
       try {
-        // 商談側(下)と同じく、差し替え候補を実在の予定として登録し元の予定は取り消す
-        // (どちらもバックエンドに反映。以前はローカル専用の plan_id しか持たず、
-        // リロードすると消えていた)。
+        // 差し替え候補を実在の予定として登録し元の予定は取り消す(どちらもバックエンドに反映。
+        // 以前はローカル専用の plan_id しか持たず、リロードすると消えていた)。
         const created = await createPlan(REP_ID, {
           plan_date: changedPlan.plan_date,
           category: "task",
@@ -442,16 +530,7 @@ export default function DashboardPage() {
       return;
     }
 
-    // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
-    const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
-    const candidateDeal = [...deals]
-      .filter((deal) => deal.deal_result_status === "ongoing" && !usedDealIds.has(deal.deal_id))
-      .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
-    if (!candidateDeal) {
-      setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
-      return;
-    }
-
+    const { candidateDeal } = preview;
     const reasoningText = `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`;
 
     try {
@@ -600,7 +679,11 @@ export default function DashboardPage() {
             dailyTasks={dailyTasks}
             deals={deals}
             onResultChange={handleResultChange}
+            onPostpone={handlePostpone}
             onRequestAlternative={handleRequestAlternative}
+            altPreview={altPreview ? { planId: altPreview.planId, label: altPreview.label } : null}
+            onConfirmAlternative={confirmAlternative}
+            onCancelAlternative={cancelAlternativePreview}
             onEditPlan={handleEditPlan}
             onAddPlan={handleAddPlan}
             onConfirmPlan={handleConfirmPlan}
