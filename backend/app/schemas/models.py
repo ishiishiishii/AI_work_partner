@@ -12,6 +12,8 @@ class OrmModel(BaseModel):
 class SalesRepOut(OrmModel):
     rep_id: int
     rep_name: str
+    branch_id: int
+    branch_name: str
 
 
 class TerritoryOut(BaseModel):
@@ -173,6 +175,43 @@ class RepAffinityOut(OrmModel):
     avg_won_amount: Decimal
     affinity_score: Decimal
     calculated_at: datetime | None = None
+
+
+class AdminTaskTypeOut(OrmModel):
+    task_type_id: int
+    task_name: str
+    is_default: bool
+
+
+class AdminTaskTypeCreate(BaseModel):
+    task_name: str
+
+
+class RepHomeOfficeDayOut(OrmModel):
+    day_of_week: int
+    is_home_available: bool
+
+
+class HomeOfficeAvailabilityUpdate(BaseModel):
+    day_of_week: int = Field(ge=0, le=6)
+    is_home_available: bool
+
+
+class RepAdminTaskDurationOut(OrmModel):
+    task_type_id: int
+    task_name: str
+    duration_minutes: int | None = None
+    updated_at: datetime | None = None
+
+
+class AdminTaskDurationUpdate(BaseModel):
+    duration_minutes: int = Field(ge=0)
+
+
+class RepProfileOut(BaseModel):
+    rep_id: int
+    home_office: list[RepHomeOfficeDayOut]
+    task_durations: list[RepAdminTaskDurationOut]
 
 
 class PlanOut(OrmModel):
