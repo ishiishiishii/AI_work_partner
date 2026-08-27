@@ -15,12 +15,25 @@ from app.services.route_optimization import (
     VisitCandidate,
 )
 from app.services.route_planning import (
+    DEFAULT_MIN_REVISIT_GAP_BUSINESS_DAYS,
     _allocate_target_amounts,
+    _apply_unreachable_day_revision,
+    _apply_target_gap_fill_assignments,
+    _apply_schedule_adjustments,
     _assign_target_customers_to_days,
     _business_days,
     _business_weeks,
+    _cluster_candidates_by_region,
     _expand_visit_occurrences,
+    _monthly_target_context,
+    _round_trip_matrix,
+    _schedule_adjustment_context,
     _select_target_customers,
+    _target_gap_fill_options,
+    _target_gap_improved,
+    _target_gap_shortfalls,
+    _unreachable_day_ai_payload,
+    _unreachable_day_revision_options,
     approve_plan,
     create_batch_preview,
 )
@@ -71,6 +84,39 @@ def test_target_amount_is_allocated_exactly_across_weeks_and_days() -> None:
     assert sum(daily) == Decimal("10000003")
 
 
+def test_monthly_target_context_counts_only_contracts_before_plan_start() -> None:
+    class _Result:
+        @staticmethod
+        def fetchone() -> dict:
+            return {
+                "target_amount": Decimal("40000000"),
+                "target_gross_profit": Decimal("10000000"),
+                "achieved": Decimal("0"),
+                "achieved_profit": Decimal("0"),
+            }
+
+    class _Connection:
+        query = ""
+        params: tuple = ()
+
+        def execute(self, query: str, params: tuple) -> _Result:
+            self.query = query
+            self.params = params
+            return _Result()
+
+    conn = _Connection()
+    month_start = date(2026, 9, 1)
+
+    context = _monthly_target_context(conn, rep_id=10, target_date=month_start)
+
+    assert "d.contract_date < %s::date" in conn.query
+    assert conn.params == (month_start, 10, month_start)
+    assert context["achieved_amount"] == Decimal("0")
+    assert context["achieved_gross_profit"] == Decimal("0")
+    assert context["remaining_target_amount"] == Decimal("40000000")
+    assert context["remaining_target_gross_profit"] == Decimal("10000000")
+
+
 def _candidate(customer_id: int, expected_sales: int, score: int) -> VisitCandidate:
     candidate = VisitCandidate(
         customer_id=customer_id,
@@ -97,13 +143,15 @@ def test_month_customer_selection_stops_after_risk_buffer() -> None:
             _candidate(1, 600, 100),
             _candidate(2, 500, 90),
             _candidate(3, 400, 80),
+            _candidate(4, 300, 70),
         ],
         planning_target=Decimal("1000"),
         capacity=10,
     )
 
-    assert [candidate.customer_id for candidate in selected] == [1, 2]
-    assert sum(candidate.expected_sales for candidate in selected) == Decimal("1100")
+    # 1+2+3 = 1500, already >= target*1.30 (1300), so 4 is excluded.
+    assert [candidate.customer_id for candidate in selected] == [1, 2, 3]
+    assert sum(candidate.expected_sales for candidate in selected) == Decimal("1500")
 
 
 def test_month_customer_selection_mixes_new_and_ongoing_and_consumes_visit_capacity() -> None:
@@ -154,6 +202,326 @@ def test_required_meetings_expand_to_distinct_days_without_double_counting_sales
         for item in occurrences
     )
     assert sum(item.expected_sales for item in occurrences) == Decimal("1000")
+
+
+def test_required_meetings_are_spaced_by_the_minimum_gap_when_the_horizon_allows_it() -> None:
+    candidate = _candidate(1, 1000, 100)
+    candidate.remaining_visit_count = 3
+    candidate.planned_visit_count = 3
+    occurrences = _expand_visit_occurrences([candidate])
+    business_days = _business_days(date(2026, 9, 1), "month")  # ~21 business days
+
+    assigned = _assign_target_customers_to_days(
+        occurrences,
+        business_days=business_days,
+        day_targets={day: Decimal("200") for day in business_days},
+        max_visits=2,
+    )
+
+    assigned_dates = sorted(
+        day
+        for day, day_candidates in assigned.items()
+        if any(item.customer_id == candidate.customer_id for item in day_candidates)
+    )
+    assert len(assigned_dates) == 3
+    day_index = {day: index for index, day in enumerate(business_days)}
+    gaps = [day_index[b] - day_index[a] for a, b in zip(assigned_dates, assigned_dates[1:])]
+    assert all(gap >= DEFAULT_MIN_REVISIT_GAP_BUSINESS_DAYS for gap in gaps)
+
+
+def test_required_meetings_relax_the_gap_rather_than_drop_a_visit_when_horizon_is_short() -> None:
+    # 4 meetings in a 5-business-day week cannot all be >=3 business days
+    # apart -- the visit must still be scheduled somewhere, never dropped.
+    candidate = _candidate(1, 1000, 100)
+    candidate.remaining_visit_count = 4
+    candidate.planned_visit_count = 4
+    occurrences = _expand_visit_occurrences([candidate])
+    business_days = _business_days(date(2026, 9, 1), "week")
+
+    assigned = _assign_target_customers_to_days(
+        occurrences,
+        business_days=business_days,
+        day_targets={day: Decimal("200") for day in business_days},
+        max_visits=1,
+    )
+
+    assigned_dates = [
+        day
+        for day, day_candidates in assigned.items()
+        if any(item.customer_id == candidate.customer_id for item in day_candidates)
+    ]
+    assert len(assigned_dates) == 4
+    assert len(set(assigned_dates)) == 4
+
+
+def test_apply_schedule_adjustments_moves_only_validated_suggestions() -> None:
+    business_days = _business_days(date(2026, 9, 1), "week")
+    a = _candidate(1, 1000, 100)
+    a.visit_sequence = 1
+    b = _candidate(2, 500, 90)
+    b.visit_sequence = 1
+    day_pools = {day: [] for day in business_days}
+    day_pools[business_days[0]] = [a]
+    day_pools[business_days[1]] = [b]
+
+    context = _schedule_adjustment_context(
+        day_pools,
+        business_days=business_days,
+        max_visits=1,
+        min_gap_business_days=1,
+        today=business_days[0],
+    )
+    # Neither candidate has risk or a next_action note, so nothing is flagged
+    # for adjustment -- the LLM is never even asked about them.
+    assert context == []
+
+    # Manually construct a context entry as if a's occurrence had a signal,
+    # to test the validation/application logic in isolation from risk rules.
+    fake_context = [
+        {
+            "customer_id": a.customer_id,
+            "visit_sequence": a.visit_sequence,
+            "current_date": business_days[0],
+            "eligible_dates": [business_days[2], business_days[3]],
+        }
+    ]
+
+    # A valid suggestion (date is in eligible_dates) is applied.
+    updated_pools, reasons = _apply_schedule_adjustments(
+        day_pools,
+        [
+            {
+                "customer_id": a.customer_id,
+                "visit_sequence": a.visit_sequence,
+                "new_date": business_days[2].isoformat(),
+                "reason": "見積回答待ちのため後ろ倒し",
+            }
+        ],
+        fake_context,
+        max_visits=1,
+    )
+    assert a not in updated_pools[business_days[0]]
+    assert a in updated_pools[business_days[2]]
+    assert reasons[(business_days[2], a.customer_id)] == "見積回答待ちのため後ろ倒し"
+
+    # An out-of-range date (not in eligible_dates) is ignored entirely.
+    unchanged_pools, unchanged_reasons = _apply_schedule_adjustments(
+        day_pools,
+        [
+            {
+                "customer_id": a.customer_id,
+                "visit_sequence": a.visit_sequence,
+                "new_date": business_days[4].isoformat(),
+                "reason": "根拠なしの変更",
+            }
+        ],
+        fake_context,
+        max_visits=1,
+    )
+    assert a in unchanged_pools[business_days[0]]
+    assert unchanged_reasons == {}
+
+
+def test_unreachable_day_revision_uses_only_unscheduled_single_visit_reserves() -> None:
+    day_candidate = _candidate(1, 100, 10)
+    already_scheduled_elsewhere = _candidate(2, 9_000, 100)
+    multi_visit_reserve = _candidate(3, 8_000, 90)
+    multi_visit_reserve.remaining_visit_count = 2
+    valid_reserve = _candidate(4, 7_000, 80)
+
+    options = _unreachable_day_revision_options(
+        day_candidates=[day_candidate],
+        all_candidates=[
+            day_candidate,
+            already_scheduled_elsewhere,
+            multi_visit_reserve,
+            valid_reserve,
+        ],
+        selected_customer_ids={1, 2},
+        target_date=date(2026, 8, 28),
+        weights={
+            "sales": 25,
+            "gross_profit": 25,
+            "affinity": 15,
+            "urgency": 15,
+            "phase": 10,
+            "target_gap": 10,
+        },
+        target_gap_ratio=Decimal("0.5"),
+        max_visits=4,
+    )
+
+    assert [candidate.customer_id for candidate in options] == [1, 4]
+    assert options[1].planned_visit_count == 1
+    assert options[1].visit_sequence == 1
+    assert options[1].expected_sales == Decimal("7000")
+
+
+def test_unreachable_day_ai_revision_is_resolved_to_trusted_candidates() -> None:
+    a = _candidate(1, 1000, 100)
+    b = _candidate(2, 800, 80)
+    payload = _unreachable_day_ai_payload(
+        [a, b], originally_assigned_keys={(a.customer_id, a.visit_sequence)}
+    )
+
+    assert payload[0]["currently_assigned"] is True
+    assert payload[1]["currently_assigned"] is False
+    selected, reasons = _apply_unreachable_day_revision(
+        [a, b],
+        [
+            {
+                "customer_id": b.customer_id,
+                "visit_sequence": b.visit_sequence,
+                "reason": "期待粗利と移動負担のバランスが良い",
+            },
+            {
+                "customer_id": 999,
+                "visit_sequence": 1,
+                "reason": "LLMが作った存在しない候補",
+            },
+        ],
+    )
+
+    assert selected == [b]
+    assert reasons == {b.customer_id: "期待粗利と移動負担のバランスが良い"}
+
+
+def test_period_end_shortfall_is_independent_of_each_daily_target() -> None:
+    shortfalls = _target_gap_shortfalls(
+        {
+            "expected_sales": Decimal("950"),
+            "expected_gross_profit": Decimal("310"),
+        },
+        target_sales=Decimal("1000"),
+        target_gross_profit=Decimal("300"),
+    )
+
+    assert shortfalls == {
+        "expected_sales": Decimal("50"),
+        "expected_gross_profit": Decimal("0"),
+    }
+
+
+def test_target_gap_fill_options_use_unscheduled_single_visit_candidates() -> None:
+    scheduled = _candidate(1, 5_000, 100)
+    multi_visit = _candidate(2, 4_000, 90)
+    multi_visit.remaining_visit_count = 2
+    reserve = _candidate(3, 3_000, 80)
+
+    options = _target_gap_fill_options(
+        all_candidates=[scheduled, multi_visit, reserve],
+        scheduled_customer_ids={scheduled.customer_id},
+        eligible_dates=[date(2026, 8, 28), date(2026, 8, 31)],
+        weights={
+            "sales": 25,
+            "gross_profit": 25,
+            "affinity": 15,
+            "urgency": 15,
+            "phase": 10,
+            "target_gap": 10,
+        },
+        target_gap_ratio=Decimal("0.5"),
+        max_visits=4,
+    )
+
+    assert [candidate.customer_id for candidate in options] == [reserve.customer_id]
+    assert options[0].planned_visit_count == 1
+    assert options[0].expected_sales == Decimal("3000")
+
+
+def test_target_gap_fill_assignments_and_improvement_are_revalidated() -> None:
+    reserve = _candidate(3, 3_000, 80)
+    assigned, reasons = _apply_target_gap_fill_assignments(
+        [reserve],
+        [
+            {
+                "customer_id": reserve.customer_id,
+                "target_date": date(2026, 8, 28),
+                "reason": "月末売上と粗利を補う",
+            },
+            {
+                "customer_id": 999,
+                "target_date": date(2026, 8, 31),
+                "reason": "存在しない候補",
+            },
+        ],
+        eligible_dates={date(2026, 8, 28), date(2026, 8, 31)},
+    )
+
+    assert assigned == {date(2026, 8, 28): [reserve]}
+    assert reasons == {
+        (date(2026, 8, 28), reserve.customer_id): "月末売上と粗利を補う"
+    }
+    assert _target_gap_improved(
+        {
+            "expected_sales": Decimal("100"),
+            "expected_gross_profit": Decimal("50"),
+        },
+        {
+            "expected_sales": Decimal("0"),
+            "expected_gross_profit": Decimal("25"),
+        },
+        weights={"sales": 25, "gross_profit": 25},
+    )
+    assert not _target_gap_improved(
+        {
+            "expected_sales": Decimal("0"),
+            "expected_gross_profit": Decimal("50"),
+        },
+        {
+            "expected_sales": Decimal("10"),
+            "expected_gross_profit": Decimal("0"),
+        },
+        weights={"sales": 25, "gross_profit": 25},
+    )
+
+
+def test_round_trip_matrix_uses_real_distance_between_candidates_not_branch_sum() -> None:
+    # Both far from the branch (Tokyo) but close to each other (Yokohama):
+    # the old branch_distances[i]+branch_distances[j] formula would estimate
+    # roughly 2x their real ~3km separation.
+    near_tokyo = _candidate(1, 1000, 100)
+    near_tokyo.latitude, near_tokyo.longitude = 35.4437, 139.6380
+    near_tokyo.distance_from_branch_m = 27000
+    near_yokohama = _candidate(2, 1000, 100)
+    near_yokohama.latitude, near_yokohama.longitude = 35.4657, 139.6222
+    near_yokohama.distance_from_branch_m = 27500
+
+    result = _round_trip_matrix([near_tokyo, near_yokohama], speed_kmh=25)
+
+    inter_candidate_distance_m = result[1][2].distance_m
+    assert inter_candidate_distance_m < 5000  # real separation is ~3km
+    assert inter_candidate_distance_m < (
+        near_tokyo.distance_from_branch_m + near_yokohama.distance_from_branch_m
+    )
+    # Branch<->candidate legs are unchanged (still distance_from_branch_m).
+    assert result[0][1].distance_m == 27000
+    assert result[2][0].distance_m == 27500
+
+
+def test_cluster_candidates_by_region_groups_nearby_customers_together() -> None:
+    tokyo_a = _candidate(1, 1000, 100)
+    tokyo_a.latitude, tokyo_a.longitude = 35.681, 139.767
+    tokyo_b = _candidate(2, 1000, 100)
+    tokyo_b.latitude, tokyo_b.longitude = 35.690, 139.700
+    osaka_a = _candidate(3, 1000, 100)
+    osaka_a.latitude, osaka_a.longitude = 34.693, 135.502
+    osaka_b = _candidate(4, 1000, 100)
+    osaka_b.latitude, osaka_b.longitude = 34.702, 135.495
+
+    regions = _cluster_candidates_by_region(
+        [tokyo_a, tokyo_b, osaka_a, osaka_b], num_clusters=2
+    )
+
+    assert regions[1] == regions[2]
+    assert regions[3] == regions[4]
+    assert regions[1] != regions[3]
+
+
+def test_cluster_candidates_by_region_single_cluster_when_fewer_customers_than_clusters() -> None:
+    a = _candidate(1, 1000, 100)
+    regions = _cluster_candidates_by_region([a], num_clusters=5)
+    assert regions == {1: 0}
 
 
 class _AlwaysSucceedsMatrixProvider:
@@ -300,6 +668,30 @@ def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> 
                 Decimal("0"),
             ) == preview["planning_target_amount"]
             assert preview["detailed_days"] == 1
+
+            assert preview["selected_customers"], "expected at least one selected customer"
+            ongoing_customers = [
+                c for c in preview["selected_customers"] if c["customer_type"] == "ongoing"
+            ]
+            assert ongoing_customers, "expected at least one ongoing-deal customer"
+            for customer in preview["selected_customers"]:
+                assert customer["loss_risk"] in ("low", "medium", "high")
+                assert customer["delay_risk"] in ("low", "medium", "high")
+                # This DB is shared with other concurrent activity, so deals
+                # may or may not have expected_close_date set -- only check
+                # internal consistency, not a specific global risk level.
+                if customer["delay_risk"] == "low":
+                    assert "受注予定日が未設定" not in customer["risk_reasons"]
+
+            progress_goals = [
+                goal for week in preview["weeks"] for goal in week["deal_progress_goals"]
+            ]
+            assert progress_goals, "expected at least one weekly deal-progress goal"
+            for goal in progress_goals:
+                assert goal["current_phase_name"]
+                assert goal["target_phase_name"]
+                assert goal["current_phase_name"] != goal["target_phase_name"]
+                assert goal["rationale"]
 
             detailed_day = preview["days"][0]
             coarse_days = preview["days"][1:]

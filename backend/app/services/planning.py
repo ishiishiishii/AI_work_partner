@@ -350,7 +350,7 @@ _AI_DEAL_COLUMNS = """
     deal_phase_name, deal_result_status, product_name, subcategory_name,
     category_name, estimated_amount, win_probability, expected_visit_count,
     expected_effort_hours, deal_start_date, contract_date, product_id, deal_phase_id,
-    cost, profit
+    cost, profit, expected_close_date, next_action
 """
 
 
@@ -440,6 +440,8 @@ def create_deal(
     expected_visit_count: int,
     expected_effort_hours: Decimal,
     deal_start_date: date,
+    expected_close_date: date | None = None,
+    next_action: str | None = None,
 ) -> dict:
     # New deals (unlike imported/seeded history, which predates branch
     # assignment) must be logged by a rep whose branch covers the customer's
@@ -469,13 +471,14 @@ def create_deal(
         insert into deal (
           deal_id, customer_id, rep_id, deal_phase_id, deal_result_status_id,
           product_id, estimated_amount, cost, win_probability, expected_visit_count,
-          expected_effort_hours, deal_start_date, contract_date
+          expected_effort_hours, deal_start_date, contract_date,
+          expected_close_date, next_action
         )
         values (
           (select coalesce(max(deal_id), 0) + 1 from deal),
           %s, %s, %s,
           (select deal_result_status_id from deal_result_status where status_code = 'ongoing'),
-          %s, %s, %s, %s, %s, %s, %s, null
+          %s, %s, %s, %s, %s, %s, %s, null, %s, %s
         )
         returning deal_id
         """,
@@ -490,6 +493,8 @@ def create_deal(
             expected_visit_count,
             expected_effort_hours,
             deal_start_date,
+            expected_close_date,
+            next_action,
         ),
     ).fetchone()["deal_id"]
     # Re-read through the AI view so the response carries resolved names
@@ -513,6 +518,8 @@ def update_deal(
     win_probability: int,
     expected_visit_count: int,
     expected_effort_hours: Decimal,
+    expected_close_date: date | None = None,
+    next_action: str | None = None,
 ) -> dict:
     updated = conn.execute(
         """
@@ -522,7 +529,9 @@ def update_deal(
             estimated_amount = %s,
             win_probability = %s,
             expected_visit_count = %s,
-            expected_effort_hours = %s
+            expected_effort_hours = %s,
+            expected_close_date = %s,
+            next_action = %s
         where deal_id = %s and rep_id = %s
         returning deal_id
         """,
@@ -533,6 +542,8 @@ def update_deal(
             win_probability,
             expected_visit_count,
             expected_effort_hours,
+            expected_close_date,
+            next_action,
             deal_id,
             rep_id,
         ),
@@ -787,7 +798,7 @@ def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
                    d.customer_name, ca.industry_name, d.product_name,
                    ca.last_contact_date, ca.days_since_contact,
                    d.profit, dp.sort_order as deal_phase_sort_order,
-                   d.expected_effort_hours,
+                   d.expected_effort_hours, d.expected_close_date, d.next_action,
                    (
                      ca.last_contact_date is null
                      or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
@@ -889,6 +900,14 @@ def _rule_based_plan_decisions(
                 rationale += (
                     " また、これまで接点の記録がなく、顧客流出リスクの観点からも優先度を上げています。"
                 )
+        risk = target_simulation.assess_deal_risk(
+            win_probability=deal["win_probability"],
+            days_since_contact=deal["days_since_contact"],
+            expected_close_date=deal["expected_close_date"],
+            today=base,
+        )
+        if risk.loss_risk == "high" or risk.delay_risk == "high":
+            rationale += f" 注意: {'、'.join(risk.reasons)}ため、失注・延期リスクが高い状態です。"
         priority = min(index + 1, 5)
         decisions.append(
             {

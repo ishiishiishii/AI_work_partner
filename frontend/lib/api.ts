@@ -29,6 +29,17 @@ export function getApiBaseUrl(): string {
     const url = new URL(configured);
     const pageHost = window.location.hostname;
     const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1";
+    const isPrivateIpv4 = (host: string) => {
+      const octets = host.split(".").map(Number);
+      if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+        return false;
+      }
+      return (
+        octets[0] === 10 ||
+        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+        (octets[0] === 192 && octets[1] === 168)
+      );
+    };
     // Codespaces-style forwarding gives the web page and the API distinct
     // real hostnames on purpose (a separate subdomain per port -- see
     // .devcontainer/write-codespace-env.sh) -- leave those alone. Only
@@ -37,8 +48,13 @@ export function getApiBaseUrl(): string {
     // in as a LAN IP for direct-LAN demos, while this browser reached the
     // page through a localhost-forwarded tunnel instead (or the reverse,
     // the original case this handled) -- swap in whichever host the page
-    // itself was actually loaded from.
-    if (pageHost !== url.hostname && (isLoopback(pageHost) || isLoopback(url.hostname))) {
+    // itself was actually loaded from. A configured private-LAN address also
+    // follows the page host so the same build works over Tailscale when Wi-Fi
+    // client isolation blocks direct device-to-device traffic.
+    if (
+      pageHost !== url.hostname &&
+      (isLoopback(pageHost) || isLoopback(url.hostname) || isPrivateIpv4(url.hostname))
+    ) {
       url.hostname = pageHost;
     }
     return url.origin;
@@ -601,6 +617,8 @@ type ApiDeal = {
   deal_phase_id: number;
   cost: string | number;
   profit: string | number;
+  expected_close_date: string | null;
+  next_action: string | null;
 };
 
 function mapDeal(row: ApiDeal): Deal {
@@ -626,6 +644,8 @@ function mapDeal(row: ApiDeal): Deal {
     contract_date: row.contract_date,
     cost: Number(row.cost),
     profit: Number(row.profit),
+    expected_close_date: row.expected_close_date,
+    next_action: row.next_action,
   };
 }
 
@@ -648,6 +668,8 @@ export async function createDeal(
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
+    expected_close_date?: string;
+    next_action?: string;
   },
 ): Promise<Deal> {
   const base = getApiBaseUrl();
@@ -664,6 +686,8 @@ export async function createDeal(
       expected_visit_count: input.expected_visit_count,
       expected_effort_hours: input.expected_effort_hours,
       deal_start_date: input.deal_start_date || null,
+      expected_close_date: input.expected_close_date || null,
+      next_action: input.next_action || null,
     }),
   });
   if (!res.ok) {

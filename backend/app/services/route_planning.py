@@ -46,9 +46,18 @@ from app.services.route_optimization import (
     selection_reason,
     sum_totals,
 )
-from app.services import target_simulation
+from app.services import ai, target_simulation
 
 TOKYO = ZoneInfo("Asia/Tokyo")
+# No spec-given number; a tunable judgment call. Each candidate's CP-SAT
+# pre-filter cost uses its nearest link to ANY other point in the matrix --
+# which can be a candidate that CP-SAT doesn't end up selecting, understating
+# the real cost within whatever subset actually gets chosen. Scaling up
+# compensates for that bias (empirically, a real 3-stop scattered-candidate
+# tour ran ~15% over the unscaled nearest-link estimate); still far cheaper
+# than the original "every candidate's own round trip from the branch"
+# formula it replaced.
+_NEAREST_LINK_SAFETY_MARGIN = Decimal("1.5")
 TRAVEL_MODE_CACHE_KEYS = {
     "driving": "GOOGLE_DRIVE",
     "transit": "ODPT_OTP_TRANSIT_V3",
@@ -413,7 +422,8 @@ def _candidate_rows(
                    - progress.scheduled_visit_count,
                  case when d.must_visit then 1 else 0 end
                )::int as remaining_visit_count,
-               dp.deal_phase_name,
+               dp.deal_phase_name, dp.sort_order as deal_phase_sort_order,
+               d.expected_close_date, d.next_action,
                i.industry_name, pc.category_name,
                coalesce(fit.deal_count, 0) as affinity_deal_count,
                coalesce(fit.won_count, 0) as affinity_won_count,
@@ -763,6 +773,9 @@ def _group_candidates(rows: list[dict]) -> list[VisitCandidate]:
                 deal_ids=[],
                 phase_names=[],
                 economics=[],
+                deal_phase_sort_orders=[],
+                expected_close_dates=[],
+                next_actions=[],
                 distance_from_branch_m=row["branch_distance_m"],
                 customer_type="ongoing",
                 required_visit_count=0,
@@ -776,6 +789,9 @@ def _group_candidates(rows: list[dict]) -> list[VisitCandidate]:
         candidate = grouped[customer_id]
         candidate.deal_ids.append(row["deal_id"])
         candidate.phase_names.append(row["deal_phase_name"])
+        candidate.deal_phase_sort_orders.append(row["deal_phase_sort_order"])
+        candidate.expected_close_dates.append(row["expected_close_date"])
+        candidate.next_actions.append(row["next_action"])
         candidate.economics.append(
             DealEconomics(
                 estimated_amount=Decimal(row["estimated_amount"]),
@@ -1792,71 +1808,207 @@ def _solve_and_persist_day(
             "fixed_schedule_overflow",
             "固定予定だけで勤務可能時間を超えています。",
         )
-    portfolios = generate_portfolios(
-        candidates,
-        matrix,
-        max_visits=request.max_visits,
-        available_min=work_min - blocked_min,
-        min_expected_sales=request.min_expected_sales,
-        min_expected_gross_profit=request.min_expected_gross_profit,
-        limit=settings.route_portfolio_limit,
-        time_limit_sec=settings.route_solver_time_limit_sec,
-        travel_penalty_weight=30 if request.policy == "short_travel" else 0,
-        end_node_index=end_node_index,
-        turnaround_buffer_min=request.turnaround_buffer_min,
-    )
-    if not portfolios:
-        raise RoutePlanningError(
-            "target_not_reachable",
-            "必須訪問・勤務時間・最大訪問数を満たす訪問先セットがありません。",
+    # CP-SAT's default per-candidate estimate (its own round trip from the
+    # start/end point, summed independently per candidate -- see
+    # generate_portfolios) is meant only as a conservative pre-filter that
+    # RoutingModel corrects afterward with the real sequenced route. But when
+    # that pre-filter alone already rejects every subset (as it routinely
+    # does once a handful of candidates are geographically spread out -- the
+    # very failure "target_not_reachable" reports), RoutingModel never gets a
+    # chance to prove a real, correctly-sequenced tour would have fit. Reuse
+    # each candidate's nearest link in the matrix already fetched from Routes
+    # API (real travel time, not an estimate) instead, matching what a real
+    # tour visiting every stop once actually costs per stop -- scaled up by
+    # _NEAREST_LINK_SAFETY_MARGIN (see its own comment) since "nearest link"
+    # can point to a candidate that isn't even in the final chosen subset,
+    # which otherwise underestimates enough for scattered candidates that
+    # RoutingModel then can't sequence any CP-SAT-approved subset at all.
+    nearest_link_minutes = [
+        round(
+            min(
+                matrix[index + 1][other].duration_sec
+                for other in range(len(matrix))
+                if other != index + 1
+            )
+            * _NEAREST_LINK_SAFETY_MARGIN
+            / 60
         )
-    options = [
-        route_portfolio(
+        for index in range(len(candidates))
+    ]
+    # A tour of N stops needs N+1 edges (depart to the first stop, N-1 links
+    # between stops, return from the last stop) -- nearest_link_minutes only
+    # ever charges N (each candidate's own cheapest incident edge), so the
+    # CP-SAT estimate is missing roughly one edge's worth of cost and can
+    # under-estimate enough that RoutingModel then can't sequence any
+    # CP-SAT-chosen set within the real work window at all. Charging every
+    # candidate the single FARTHEST candidate's return trip (tried once,
+    # reverted) over-corrected the other way, rejecting cheap candidates
+    # over an expensive one CP-SAT might never even select. Use the
+    # cheapest candidate's branch distance instead -- a modest, always-true
+    # lower bound on "the tour needs at least one branch connection
+    # somewhere," without punishing every candidate for the pool's worst one.
+    return_leg_min = min(
+        (matrix[index + 1][end_node_index].duration_sec for index in range(len(candidates))),
+        default=0,
+    ) // 60
+    available_min = max(0, work_min - blocked_min - return_leg_min)
+
+    # must_visit no longer force-includes every such candidate (see
+    # generate_portfolios) -- it's a large score bonus instead, so CP-SAT
+    # naturally keeps as many as max_visits/available_min allow and drops
+    # the rest, by priority, rather than the whole day failing outright when
+    # there are too many. Priority only needs deciding when there's an
+    # actual conflict (>1 must_visit candidate); Qwen ranks them using
+    # deadline/next_action/expected_sales context, re-validated as a
+    # permutation of the input before use, and a deterministic
+    # nearest-deadline-first order stands in in AiPlanningError.
+    must_visit_candidates = [candidate for candidate in candidates if candidate.must_visit]
+    must_visit_rank_by_customer: dict[int, int] = {}
+    if len(must_visit_candidates) > 1:
+        try:
+            ranked_ids = ai.rank_must_visit_candidates(
+                conn,
+                rep_id=rep_id,
+                target_date=request.target_date,
+                candidates=[
+                    {
+                        "customer_id": candidate.customer_id,
+                        "customer_name": candidate.customer_name,
+                        "expected_sales": candidate.expected_sales,
+                        "visit_deadline": candidate.visit_deadline,
+                        "deals": [
+                            {"phase_name": phase_name, "next_action": next_action}
+                            for phase_name, next_action in zip(
+                                candidate.phase_names, candidate.next_actions
+                            )
+                        ],
+                    }
+                    for candidate in must_visit_candidates
+                ],
+            )
+        except ai.AiPlanningError:
+            ranked_ids = [
+                candidate.customer_id
+                for candidate in sorted(
+                    must_visit_candidates,
+                    key=lambda candidate: (
+                        candidate.visit_deadline or date.max,
+                        -candidate.expected_sales,
+                    ),
+                )
+            ]
+        must_visit_rank_by_customer = {
+            customer_id: rank for rank, customer_id in enumerate(ranked_ids)
+        }
+    must_visit_rank = [
+        must_visit_rank_by_customer.get(candidate.customer_id, 0) for candidate in candidates
+    ]
+
+    # CP-SAT's linear pre-filter (however well the estimate above is tuned)
+    # can never perfectly predict what RoutingModel's real sequenced route
+    # will cost -- for a rep whose candidates are genuinely spread across a
+    # wide area, even a scaled-up estimate can still let CP-SAT settle on a
+    # max_visits-sized set that no real tour fits in the work day, and every
+    # one of the `limit` alternatives it offers can share that same problem
+    # since they're all near-optimal by the same (mis-)estimate. Retry with
+    # one fewer visit slot each time every option comes back infeasible,
+    # down to a single stop, before concluding the day really has no room --
+    # mirrors what a rep would do by hand ("if 4 doesn't fit, try 3, then 2").
+    selected: RoutedOption | None = None
+    options: list[RoutedOption] = []
+    for attempted_max_visits in range(request.max_visits, 0, -1):
+        portfolios = generate_portfolios(
             candidates,
             matrix,
-            portfolio,
-            target_date=request.target_date,
-            work_start=request.work_start,
-            work_end=effective_work_end,
-            blocked_windows=blocked,
+            max_visits=attempted_max_visits,
+            available_min=available_min,
+            min_expected_sales=request.min_expected_sales,
+            min_expected_gross_profit=request.min_expected_gross_profit,
+            limit=settings.route_portfolio_limit,
             time_limit_sec=settings.route_solver_time_limit_sec,
+            travel_penalty_weight=30 if request.policy == "short_travel" else 0,
             end_node_index=end_node_index,
             turnaround_buffer_min=request.turnaround_buffer_min,
+            travel_minutes_override=nearest_link_minutes,
+            must_visit_rank=must_visit_rank,
         )
-        for portfolio in portfolios
-    ]
-    if request.travel_mode == "transit" and isinstance(
-        provider, OpenTripPlannerTransitMatrixProvider
-    ):
-        for option in options:
-            if option.routing_status != "feasible":
-                continue
-            try:
-                _refine_transit_option(
-                    option,
-                    provider=provider,
-                    candidates=candidates,
-                    start_location=start_location,
-                    end_location=end_location,
-                    target_date=request.target_date,
-                    work_start=request.work_start,
-                    work_end=effective_work_end,
-                    blocked_windows=blocked,
-                    turnaround_buffer_min=request.turnaround_buffer_min,
-                    travel_time_buffer_percent=request.travel_time_buffer_percent,
-                    access_buffer_min=request.access_buffer_min,
+        if not portfolios:
+            continue
+        options = [
+            route_portfolio(
+                candidates,
+                matrix,
+                portfolio,
+                target_date=request.target_date,
+                work_start=request.work_start,
+                work_end=effective_work_end,
+                blocked_windows=blocked,
+                time_limit_sec=settings.route_solver_time_limit_sec,
+                end_node_index=end_node_index,
+                turnaround_buffer_min=request.turnaround_buffer_min,
+            )
+            for portfolio in portfolios
+        ]
+        if request.travel_mode == "transit" and isinstance(
+            provider, OpenTripPlannerTransitMatrixProvider
+        ):
+            for option in options:
+                if option.routing_status != "feasible":
+                    continue
+                try:
+                    _refine_transit_option(
+                        option,
+                        provider=provider,
+                        candidates=candidates,
+                        start_location=start_location,
+                        end_location=end_location,
+                        target_date=request.target_date,
+                        work_start=request.work_start,
+                        work_end=effective_work_end,
+                        blocked_windows=blocked,
+                        turnaround_buffer_min=request.turnaround_buffer_min,
+                        travel_time_buffer_percent=request.travel_time_buffer_percent,
+                        access_buffer_min=request.access_buffer_min,
+                    )
+                except RoutePlanningError as error:
+                    if error.code == "otp_api_unavailable":
+                        raise
+                    option.routing_status = "routing_infeasible"
+                    option.rejection_reason = str(error)
+        if any(option.routing_status == "feasible" for option in options):
+            selected = evaluate_options(options)
+            if attempted_max_visits < request.max_visits:
+                warnings.append(
+                    f"移動時間の都合で、最大{request.max_visits}件ではなく"
+                    f"{attempted_max_visits}件までの訪問先セットで計画しました。"
                 )
-            except RoutePlanningError as error:
-                if error.code == "otp_api_unavailable":
-                    raise
-                option.routing_status = "routing_infeasible"
-                option.rejection_reason = str(error)
-    selected = evaluate_options(options)
+            break
+    if selected is None:
+        if not options:
+            raise RoutePlanningError(
+                "target_not_reachable",
+                "必須訪問・勤務時間・最大訪問数を満たす訪問先セットがありません。",
+            )
+        selected = evaluate_options(options)
     shortfalls = _shortfalls(selected, request)
     if not selected.target_met:
         warnings.append(
             "最低期待売上または最低期待粗利を満たせないため、条件緩和した代替案です。"
         )
+    if must_visit_candidates:
+        selected_customer_ids = {stop["customer_id"] for stop in selected.stops}
+        dropped = [
+            candidate
+            for candidate in must_visit_candidates
+            if candidate.customer_id not in selected_customer_ids
+        ]
+        if dropped:
+            names = "、".join(candidate.customer_name for candidate in dropped)
+            warnings.append(
+                f"必須訪問のうち{len(dropped)}件（{names}）は、件数または移動時間の"
+                "都合で本日の計画に含められませんでした。優先順位の低いものから"
+                "見送っています。別日での訪問を検討してください。"
+            )
     long_legs = [
         stop for stop in selected.stops if stop["leg_travel_min"] > 60
     ]
@@ -2033,6 +2185,13 @@ def _monthly_target_context(
     rep_id: int,
     target_date: date,
 ) -> dict[str, Decimal | None]:
+    """Return the target and month-to-date results as of ``target_date``.
+
+    A plan generated for the first day of a month must start with zero
+    achieved sales/profit.  Only contracts from earlier days in the same
+    month are therefore counted; contracts dated on or after the planning
+    start date are future results from that plan's point of view.
+    """
     row = conn.execute(
         """
         select st.target_amount, st.target_gross_profit,
@@ -2041,14 +2200,14 @@ def _monthly_target_context(
         from sales_target st
         left join deal d on d.rep_id = st.rep_id
           and d.contract_date >= date_trunc('month', st.target_month)
-          and d.contract_date < date_trunc('month', st.target_month) + interval '1 month'
+          and d.contract_date < %s::date
         left join deal_result_status drs
           on drs.deal_result_status_id = d.deal_result_status_id
         where st.rep_id = %s
           and st.target_month = date_trunc('month', %s::date)::date
         group by st.target_amount, st.target_gross_profit
         """,
-        (rep_id, target_date),
+        (target_date, rep_id, target_date),
     ).fetchone()
     if not row:
         return {
@@ -2104,6 +2263,16 @@ def _horizon_target_amount(
     return (
         remaining * Decimal(len(business_days)) / Decimal(len(month_days))
     ).quantize(Decimal("1"))
+
+
+# No spec-given number; a tunable judgment call. Was 1.10 -- raised because a
+# handful of large deals could satisfy that buffer alone, leaving too few
+# selected customers to fill each day up toward max_visits (see coverage()'s
+# packing preference below, and the "1日1件しか回らない" report this fixes
+# together with that change). Higher pulls in more lower-priority candidates
+# than strictly needed to hit the target, purely to give the day-packing
+# step enough volume to work with.
+_SELECTION_TARGET_BUFFER_RATIO = Decimal("1.30")
 
 
 def _select_target_customers(
@@ -2184,7 +2353,7 @@ def _select_target_customers(
     buffered_target = (
         Decimal("Infinity")
         if planning_target is None
-        else planning_target * Decimal("1.10")
+        else planning_target * _SELECTION_TARGET_BUFFER_RATIO
     )
     for candidate in optional:
         if candidate.customer_id in seeded_ids:
@@ -2229,18 +2398,85 @@ def _expand_visit_occurrences(
     return occurrences
 
 
+# No spec-given number; a tunable judgment call (see plan doc). Keeps a
+# customer needing several meetings this month from landing on back-to-back
+# or near-daily business days purely because that's wherever coverage() saw
+# the most slack -- the failure mode this constant exists to close.
+DEFAULT_MIN_REVISIT_GAP_BUSINESS_DAYS = 3
+
+
+def _cluster_candidates_by_region(
+    candidates: list[VisitCandidate], *, num_clusters: int
+) -> dict[int, int]:
+    """Assign each candidate's customer_id a rough geographic region id
+    (0..num_clusters-1), via farthest-point seeding + nearest-seed
+    assignment on straight-line distance. Not a precise clustering
+    algorithm (no external deps needed for a "roughly regional" grouping) --
+    used only to bias which week a customer's visits land in (see
+    _assign_target_customers_to_days' region_by_customer/week_region), so a
+    week's candidates stay geographically close together instead of mixing
+    customers tens of km apart on the same day.
+    """
+    unique = list({c.customer_id: c for c in candidates}.values())
+    if num_clusters <= 1 or len(unique) <= num_clusters:
+        return {c.customer_id: 0 for c in unique}
+
+    seeds = [unique[0]]
+    while len(seeds) < num_clusters:
+        farthest = max(
+            unique,
+            key=lambda c: min(
+                _haversine_distance_m(c.latitude, c.longitude, s.latitude, s.longitude)
+                for s in seeds
+            ),
+        )
+        seeds.append(farthest)
+
+    return {
+        c.customer_id: min(
+            range(len(seeds)),
+            key=lambda i: _haversine_distance_m(
+                c.latitude, c.longitude, seeds[i].latitude, seeds[i].longitude
+            ),
+        )
+        for c in unique
+    }
+
+
 def _assign_target_customers_to_days(
     candidates: list[VisitCandidate],
     *,
     business_days: list[date],
     day_targets: dict[date, Decimal],
     max_visits: int,
+    min_gap_business_days: int = DEFAULT_MIN_REVISIT_GAP_BUSINESS_DAYS,
+    region_by_customer: dict[int, int] | None = None,
+    week_region: dict[int, int] | None = None,
+    week_number_by_day: dict[date, int] | None = None,
 ) -> dict[date, list[VisitCandidate]]:
     """Distribute the month portfolio according to each day's target.
 
     A customer can appear on multiple dates when more meetings are required,
-    but never twice on the same date.  The least-covered eligible day is
-    filled first while preserving meeting order.
+    but never twice on the same date. Among the days that were already
+    eligible under the original rules (capacity, later-than-last-visit, no
+    same-day duplicate, deadline/pacing when the horizon allows it), this
+    prefers, in order:
+    1. a day whose week is that customer's assigned region (region_by_customer/
+       week_region/week_number_by_day -- all three or none; see
+       _cluster_candidates_by_region) -- keeps a week's visits geographically
+       close instead of mixing customers tens of km apart on the same day,
+       which was routinely making CP-SAT reject an otherwise-plannable day
+       as unreachable within working hours;
+    2. one at least min_gap_business_days business days after the customer's
+       previous meeting, when one exists;
+    3. the day already holding the most visits (packed toward max_visits
+       before moving to the next day) rather than spreading revenue evenly
+       across the whole horizon.
+    Every one of these is a soft preference inside the same eligible-days set
+    the original (pre-existing) two-tier fallback already computed -- never
+    an extra hard filter -- so none of them can cause a required meeting to
+    be dropped that would have been scheduled before these preferences
+    existed.
     """
     assigned: dict[date, list[VisitCandidate]] = {day: [] for day in business_days}
     assigned_sales = {day: Decimal("0") for day in business_days}
@@ -2265,6 +2501,11 @@ def _assign_target_customers_to_days(
     ]
     day_index = {day: index for index, day in enumerate(business_days)}
     last_assigned: dict[int, date] = {}
+
+    def gap_ok(customer_id: int, day: date) -> bool:
+        last = last_assigned.get(customer_id)
+        return last is None or day_index[day] - day_index[last] >= min_gap_business_days
+
     for candidate in ordered:
         remaining_after = candidate.planned_visit_count - candidate.visit_sequence
         eligible = [
@@ -2293,20 +2534,504 @@ def _assign_target_customers_to_days(
         if not eligible:
             continue
 
-        def coverage(day: date) -> tuple[Decimal, int, date]:
+        def region_mismatch(day: date) -> int:
+            if not (region_by_customer and week_region and week_number_by_day):
+                return 0
+            customer_region = region_by_customer.get(candidate.customer_id)
+            day_region = week_region.get(week_number_by_day.get(day))
+            if customer_region is None or day_region is None:
+                return 0
+            return 0 if customer_region == day_region else 1
+
+        def coverage(day: date) -> tuple[int, int, int, Decimal, date]:
+            # Pack each day up toward max_visits before opening the next one
+            # (prefer the day already holding the most visits, among days
+            # that still have room) rather than spreading revenue evenly
+            # across the whole horizon -- a handful of high-value candidates
+            # would otherwise land one-per-day across many mostly-empty days.
+            # day_targets/assigned_sales stay as reported metrics either way;
+            # the revenue ratio only breaks ties among equally-full days.
             target = day_targets.get(day, Decimal("0"))
             ratio = (
                 assigned_sales[day] / target
                 if target > 0
                 else Decimal(len(assigned[day]))
             )
-            return ratio, len(assigned[day]), day
+            gap_violation = 0 if gap_ok(candidate.customer_id, day) else 1
+            return gap_violation, region_mismatch(day), -len(assigned[day]), ratio, day
 
         chosen_day = min(eligible, key=coverage)
         assigned[chosen_day].append(candidate)
         assigned_sales[chosen_day] += candidate.expected_sales
         last_assigned[candidate.customer_id] = chosen_day
     return assigned
+
+
+def _schedule_adjustment_context(
+    day_pools: dict[date, list[VisitCandidate]],
+    *,
+    business_days: list[date],
+    max_visits: int,
+    min_gap_business_days: int,
+    today: date,
+) -> list[dict]:
+    """Build the payload ai.suggest_schedule_adjustments reasons over.
+
+    Only occurrences with an actual signal worth a second look (a high loss/
+    delay risk, a rep-written next_action note, or a must_visit deal) are
+    included -- most scheduled visits get no entry at all, so the LLM is
+    never asked to reconsider a placement that has nothing unusual about it.
+    must_visit occurrences are included because their placement across the
+    month is exactly where getting it right or wrong shows up directly in
+    monthly revenue/profit (a deadline-bound commitment landing on a bad day
+    can cost the deal entirely) -- the LLM may still leave one alone, same as
+    any other occurrence, but at least gets asked. For each included
+    occurrence, every OTHER business day that would still satisfy every hard
+    constraint (capacity, minimum gap, no double-booking, visit_deadline) if
+    the occurrence moved there is precomputed as eligible_dates -- the model
+    may only pick from this list, never invent a date, so its output can be
+    re-validated instead of trusted. (must_visit's own deadline already
+    narrows eligible_dates via the visit_deadline check below, so the model
+    can never suggest moving a must_visit deal past its own deadline.)
+    """
+    day_index = {day: index for index, day in enumerate(business_days)}
+    occurrence_dates: dict[int, list[date]] = {}
+    for day, candidates in day_pools.items():
+        for candidate in candidates:
+            occurrence_dates.setdefault(candidate.customer_id, []).append(day)
+
+    context: list[dict] = []
+    for day, candidates in day_pools.items():
+        for candidate in candidates:
+            risk = _candidate_deal_risk(candidate, today=today)
+            has_next_action = any(action for action in candidate.next_actions)
+            if (
+                risk["loss_risk"] != "high"
+                and risk["delay_risk"] != "high"
+                and not has_next_action
+                and not candidate.must_visit
+            ):
+                continue
+            other_dates = [d for d in occurrence_dates[candidate.customer_id] if d != day]
+            eligible_dates = [
+                alt_day
+                for alt_day in business_days
+                if alt_day != day
+                and len(day_pools.get(alt_day, [])) < max_visits
+                and all(c.customer_id != candidate.customer_id for c in day_pools.get(alt_day, []))
+                and (candidate.visit_deadline is None or alt_day <= candidate.visit_deadline)
+                and all(
+                    abs(day_index[alt_day] - day_index[other]) >= min_gap_business_days
+                    for other in other_dates
+                )
+            ]
+            if not eligible_dates:
+                continue
+            context.append(
+                {
+                    "customer_id": candidate.customer_id,
+                    "customer_name": candidate.customer_name,
+                    "visit_sequence": candidate.visit_sequence,
+                    "current_date": day,
+                    "eligible_dates": eligible_dates,
+                    "deals": [
+                        {"phase_name": phase_name, "next_action": next_action}
+                        for phase_name, next_action in zip(
+                            candidate.phase_names, candidate.next_actions
+                        )
+                    ],
+                    "loss_risk": risk["loss_risk"],
+                    "delay_risk": risk["delay_risk"],
+                    "risk_reasons": risk["risk_reasons"],
+                    "must_visit": candidate.must_visit,
+                    "visit_deadline": candidate.visit_deadline,
+                }
+            )
+    return context
+
+
+def _apply_schedule_adjustments(
+    day_pools: dict[date, list[VisitCandidate]],
+    adjustments: list[dict],
+    context: list[dict],
+    *,
+    max_visits: int,
+) -> tuple[dict[date, list[VisitCandidate]], dict[tuple[date, int], str]]:
+    """Move only the adjustments that are still valid against `context`'s
+    precomputed eligible_dates, applied one at a time so capacity is
+    re-checked live (two suggestions can't both overfill the same day just
+    because each looked valid against the pre-adjustment snapshot).
+
+    Returns the updated pools and a (new_date, customer_id) -> reason map --
+    keyed by day+customer rather than customer+visit_sequence because a
+    customer never appears twice on the same day, and that's all the stop
+    text needs to attach the reason to the right visit.
+    """
+    eligible_by_key = {
+        (entry["customer_id"], entry["visit_sequence"]): set(entry["eligible_dates"])
+        for entry in context
+    }
+    current_day_by_key = {
+        (entry["customer_id"], entry["visit_sequence"]): entry["current_date"]
+        for entry in context
+    }
+    pools = {day: list(candidates) for day, candidates in day_pools.items()}
+    reasons: dict[tuple[date, int], str] = {}
+    for adjustment in adjustments:
+        try:
+            key = (int(adjustment["customer_id"]), int(adjustment["visit_sequence"]))
+            new_date = date.fromisoformat(str(adjustment["new_date"]))
+            reason = str(adjustment["reason"]).strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not reason or key not in eligible_by_key or new_date not in eligible_by_key[key]:
+            continue
+        old_date = current_day_by_key[key]
+        if old_date not in pools or new_date not in pools:
+            continue
+        if len(pools[new_date]) >= max_visits:
+            continue
+        if any(c.customer_id == key[0] for c in pools[new_date]):
+            continue
+        match_index = next(
+            (
+                i
+                for i, c in enumerate(pools[old_date])
+                if c.customer_id == key[0] and c.visit_sequence == key[1]
+            ),
+            None,
+        )
+        if match_index is None:
+            continue
+        candidate = pools[old_date].pop(match_index)
+        pools[new_date].append(candidate)
+        reasons[(new_date, key[0])] = reason
+    return pools, reasons
+
+
+def _candidate_occurrence_key(candidate: VisitCandidate) -> tuple[int, int]:
+    return candidate.customer_id, candidate.visit_sequence
+
+
+def _unreachable_day_revision_options(
+    *,
+    day_candidates: list[VisitCandidate],
+    all_candidates: list[VisitCandidate],
+    selected_customer_ids: set[int],
+    target_date: date,
+    weights: dict[str, int],
+    target_gap_ratio: Decimal,
+    max_visits: int,
+) -> list[VisitCandidate]:
+    """Build a bounded, economically useful pool for an infeasible day.
+
+    Candidates already selected for another day are deliberately excluded:
+    copying one of those visits into the failed day would double-count the
+    same monthly opportunity.  A reserve candidate is eligible only when one
+    remaining meeting can complete its currently unscheduled sequence; adding
+    a single visit for a deal that still needs several meetings would inflate
+    this month's expected revenue.  The real route solver remains the final
+    authority on working hours, fixed appointments, and travel feasibility.
+    """
+    current_keys = {_candidate_occurrence_key(candidate) for candidate in day_candidates}
+    reserves = [
+        replace(
+            candidate,
+            score_components=dict(candidate.score_components),
+            planned_visit_count=1,
+            visit_sequence=1,
+            sales_credit_fraction=Decimal("1"),
+        )
+        for candidate in all_candidates
+        if candidate.customer_id not in selected_customer_ids
+        and candidate.remaining_visit_count == 1
+        and (candidate.visit_deadline is None or target_date <= candidate.visit_deadline)
+        and (candidate.customer_id, 1) not in current_keys
+    ]
+    score_candidates(
+        reserves,
+        target_date=target_date,
+        weights=weights,
+        target_gap_ratio=target_gap_ratio,
+    )
+    reserves.sort(
+        key=lambda candidate: (
+            candidate.value_score,
+            candidate.expected_sales,
+            (
+                candidate.expected_gross_profit
+                if candidate.expected_gross_profit is not None
+                else Decimal("-1")
+            ),
+            -candidate.distance_from_branch_m,
+        ),
+        reverse=True,
+    )
+    # Qwen needs alternatives, but sending the full month-wide pool adds
+    # latency and makes its ranking less reliable.  Keep all original choices
+    # plus the strongest bounded reserve set; CP-SAT will reduce this to the
+    # requested max_visits afterward.
+    reserve_limit = max(_day_pool_capacity(max_visits), settings.route_candidate_limit)
+    options = list(day_candidates) + reserves[:reserve_limit]
+    unique: dict[tuple[int, int], VisitCandidate] = {}
+    for candidate in options:
+        unique.setdefault(_candidate_occurrence_key(candidate), candidate)
+    return list(unique.values())
+
+
+def _unreachable_day_ai_payload(
+    candidates: list[VisitCandidate],
+    *,
+    originally_assigned_keys: set[tuple[int, int]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "customer_id": candidate.customer_id,
+            "visit_sequence": candidate.visit_sequence,
+            "customer_name": candidate.customer_name,
+            "currently_assigned": (
+                _candidate_occurrence_key(candidate) in originally_assigned_keys
+            ),
+            "must_visit": candidate.must_visit,
+            "visit_deadline": (
+                candidate.visit_deadline.isoformat()
+                if candidate.visit_deadline is not None
+                else None
+            ),
+            "expected_sales": float(candidate.expected_sales),
+            "expected_gross_profit": (
+                float(candidate.expected_gross_profit)
+                if candidate.expected_gross_profit is not None
+                else None
+            ),
+            "opportunity_expected_sales": float(
+                candidate.opportunity_expected_sales
+            ),
+            "opportunity_expected_gross_profit": (
+                float(candidate.opportunity_expected_gross_profit)
+                if candidate.opportunity_expected_gross_profit is not None
+                else None
+            ),
+            "visit_duration_min": candidate.visit_duration_min,
+            "distance_from_branch_m": candidate.distance_from_branch_m,
+            "phase_names": candidate.phase_names,
+            "next_actions": candidate.next_actions,
+        }
+        for candidate in candidates
+    ]
+
+
+def _apply_unreachable_day_revision(
+    candidates: list[VisitCandidate],
+    revisions: list[dict[str, Any]],
+) -> tuple[list[VisitCandidate], dict[int, str]]:
+    """Resolve Qwen occurrence keys back to trusted candidate objects."""
+    by_key = {
+        _candidate_occurrence_key(candidate): candidate for candidate in candidates
+    }
+    selected: list[VisitCandidate] = []
+    reasons: dict[int, str] = {}
+    seen: set[tuple[int, int]] = set()
+    for revision in revisions:
+        try:
+            key = (
+                int(revision["customer_id"]),
+                int(revision["visit_sequence"]),
+            )
+            reason = str(revision["reason"]).strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidate = by_key.get(key)
+        if candidate is None or key in seen or not reason:
+            continue
+        seen.add(key)
+        selected.append(candidate)
+        reasons[candidate.customer_id] = reason
+    return selected, reasons
+
+
+def _target_gap_shortfalls(
+    totals: dict[str, Any],
+    *,
+    target_sales: Decimal | None,
+    target_gross_profit: Decimal | None,
+) -> dict[str, Decimal]:
+    expected_sales = Decimal(str(totals.get("expected_sales") or 0))
+    expected_gross_profit = Decimal(
+        str(totals.get("expected_gross_profit") or 0)
+    )
+    return {
+        "expected_sales": max(
+            Decimal("0"), (target_sales or Decimal("0")) - expected_sales
+        ),
+        "expected_gross_profit": max(
+            Decimal("0"),
+            (target_gross_profit or Decimal("0")) - expected_gross_profit,
+        ),
+    }
+
+
+def _batch_totals_from_days(days: list[dict[str, Any]]) -> dict[str, Any]:
+    totals: dict[str, Any] = {
+        "planned_sales": Decimal("0"),
+        "planned_gross_profit": Decimal("0"),
+        "expected_sales": Decimal("0"),
+        "expected_gross_profit": Decimal("0"),
+        "total_travel_min": 0,
+        "total_distance_m": 0,
+        "visit_count": 0,
+    }
+    for day in days:
+        _accumulate_totals(totals, day.get("totals") or {})
+    return totals
+
+
+def _target_gap_fill_options(
+    *,
+    all_candidates: list[VisitCandidate],
+    scheduled_customer_ids: set[int],
+    eligible_dates: list[date],
+    weights: dict[str, int],
+    target_gap_ratio: Decimal,
+    max_visits: int,
+) -> list[VisitCandidate]:
+    """Return real, one-visit reserve opportunities for LLM gap filling."""
+    if not eligible_dates:
+        return []
+    first_day = eligible_dates[0]
+    reserves = [
+        replace(
+            candidate,
+            score_components=dict(candidate.score_components),
+            planned_visit_count=1,
+            visit_sequence=1,
+            sales_credit_fraction=Decimal("1"),
+        )
+        for candidate in all_candidates
+        if candidate.customer_id not in scheduled_customer_ids
+        and candidate.remaining_visit_count == 1
+        and any(
+            candidate.visit_deadline is None or day <= candidate.visit_deadline
+            for day in eligible_dates
+        )
+    ]
+    score_candidates(
+        reserves,
+        target_date=first_day,
+        weights=weights,
+        target_gap_ratio=target_gap_ratio,
+    )
+    reserves.sort(
+        key=lambda candidate: (
+            candidate.value_score,
+            candidate.expected_sales,
+            (
+                candidate.expected_gross_profit
+                if candidate.expected_gross_profit is not None
+                else Decimal("-1")
+            ),
+            -candidate.distance_from_branch_m,
+        ),
+        reverse=True,
+    )
+    option_limit = max(
+        settings.route_candidate_limit * 2,
+        max_visits * len(eligible_dates),
+    )
+    return reserves[:option_limit]
+
+
+def _target_gap_fill_ai_payload(
+    candidates: list[VisitCandidate], *, eligible_dates: list[date]
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "customer_id": candidate.customer_id,
+            "customer_name": candidate.customer_name,
+            "eligible_dates": [
+                day.isoformat()
+                for day in eligible_dates
+                if candidate.visit_deadline is None or day <= candidate.visit_deadline
+            ],
+            "must_visit": candidate.must_visit,
+            "visit_deadline": (
+                candidate.visit_deadline.isoformat()
+                if candidate.visit_deadline is not None
+                else None
+            ),
+            "expected_sales": float(candidate.expected_sales),
+            "expected_gross_profit": (
+                float(candidate.expected_gross_profit)
+                if candidate.expected_gross_profit is not None
+                else None
+            ),
+            "visit_duration_min": candidate.visit_duration_min,
+            "distance_from_branch_m": candidate.distance_from_branch_m,
+            "phase_names": candidate.phase_names,
+            "next_actions": candidate.next_actions,
+        }
+        for candidate in candidates
+    ]
+
+
+def _apply_target_gap_fill_assignments(
+    candidates: list[VisitCandidate],
+    assignments: list[dict[str, Any]],
+    *,
+    eligible_dates: set[date],
+) -> tuple[dict[date, list[VisitCandidate]], dict[tuple[date, int], str]]:
+    """Resolve validated LLM assignments back to trusted candidate objects."""
+    by_customer = {candidate.customer_id: candidate for candidate in candidates}
+    assigned: dict[date, list[VisitCandidate]] = {}
+    reasons: dict[tuple[date, int], str] = {}
+    seen_customers: set[int] = set()
+    for assignment in assignments:
+        try:
+            customer_id = int(assignment["customer_id"])
+            target_date = assignment["target_date"]
+            if not isinstance(target_date, date):
+                target_date = date.fromisoformat(str(target_date))
+            reason = str(assignment["reason"]).strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        candidate = by_customer.get(customer_id)
+        if (
+            candidate is None
+            or customer_id in seen_customers
+            or target_date not in eligible_dates
+            or (
+                candidate.visit_deadline is not None
+                and target_date > candidate.visit_deadline
+            )
+            or not reason
+        ):
+            continue
+        seen_customers.add(customer_id)
+        assigned.setdefault(target_date, []).append(candidate)
+        reasons[(target_date, customer_id)] = reason
+    return assigned, reasons
+
+
+def _target_gap_improved(
+    before: dict[str, Decimal],
+    after: dict[str, Decimal],
+    *,
+    weights: dict[str, int],
+) -> bool:
+    # Once either period-end goal has been met, a supplement must not make it
+    # unmet again merely to improve the other metric.
+    for key in ("expected_sales", "expected_gross_profit"):
+        if before[key] == 0 and after[key] > 0:
+            return False
+    before_score = (
+        before["expected_sales"] * weights["sales"]
+        + before["expected_gross_profit"] * weights["gross_profit"]
+    )
+    after_score = (
+        after["expected_sales"] * weights["sales"]
+        + after["expected_gross_profit"] * weights["gross_profit"]
+    )
+    return after_score < before_score
 
 
 def _day_pool_capacity(max_visits: int) -> int:
@@ -2401,14 +3126,37 @@ def _assign_candidates_to_days(
     return day_pools
 
 
+_EARTH_RADIUS_M = 6_371_000
+
+
+def _haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    )
+    return round(_EARTH_RADIUS_M * 2 * math.asin(min(1, math.sqrt(a))))
+
+
 def _round_trip_matrix(
     candidates: list[VisitCandidate], *, speed_kmh: int
 ) -> list[list[MatrixCell]]:
-    """A branch-hub distance estimate used only to keep generate_portfolios'
+    """A straight-line distance estimate used only to keep generate_portfolios'
     time-budget constraint meaningful for a batch's coarse (far-future) days,
     without an external Routes API call. Never used for RoutingModel
-    sequencing -- coarse days skip that step -- so inter-candidate cells are
-    rough placeholders, not real routes."""
+    sequencing -- coarse days skip that step -- so travel time is still an
+    as-the-crow-flies approximation, not a real route.
+
+    Branch<->candidate legs reuse distance_from_branch_m (already computed via
+    PostGIS). Candidate<->candidate legs use straight-line (haversine)
+    distance between the two, not branch_distances[i]+branch_distances[j] --
+    summing each candidate's own distance from the branch systematically
+    overestimates inter-candidate travel whenever candidates sit on the same
+    side of the branch (i.e. are actually close to each other), which was
+    routinely rejecting entire feasible days as unreachable.
+    """
     speed_m_per_sec = speed_kmh * 1000 / 3600
     branch_distances = [0] + [candidate.distance_from_branch_m for candidate in candidates]
     size = len(branch_distances)
@@ -2416,11 +3164,11 @@ def _round_trip_matrix(
     def cell(i: int, j: int) -> MatrixCell:
         if i == j:
             return MatrixCell(0, 0)
-        distance = (
-            branch_distances[i] + branch_distances[j]
-            if i and j
-            else max(branch_distances[i], branch_distances[j])
-        )
+        if i == 0 or j == 0:
+            distance = branch_distances[j] if i == 0 else branch_distances[i]
+        else:
+            a, b = candidates[i - 1], candidates[j - 1]
+            distance = _haversine_distance_m(a.latitude, a.longitude, b.latitude, b.longitude)
         return MatrixCell(max(60, round(distance / speed_m_per_sec)), distance)
 
     return [[cell(i, j) for j in range(size)] for i in range(size)]
@@ -2459,13 +3207,46 @@ def _solve_coarse_day(
         work_end.hour * 60 + work_end.minute
         - work_start.hour * 60 - work_start.minute
     )
+    # generate_portfolios' default per-candidate estimate (its own round trip
+    # from the branch, summed independently per candidate) assumes CP-SAT's
+    # pick gets corrected by RoutingModel afterward -- coarse days skip that
+    # step, so that default was routinely rejecting an entire feasible day as
+    # unreachable. Use each candidate's nearest link instead (to the branch or
+    # to whichever other candidate is closest), matching what a real
+    # nearest-branch-order tour actually costs per stop. A tour of N stops
+    # needs N+1 edges (depart, N-1 links between stops, return), and
+    # nearest_link only ever charges N, so add back the cheapest candidate's
+    # own branch distance as a modest, always-true floor for "at least one
+    # branch connection exists somewhere" -- charging every candidate the
+    # single farthest one's return trip (tried once, reverted) rejected
+    # cheap candidates over an expensive one CP-SAT might never even select.
+    # Scaled by _NEAREST_LINK_SAFETY_MARGIN for the same reason as the
+    # single-day flow above (nearest link can point to an unselected
+    # candidate, understating cost for scattered candidate sets).
+    nearest_link_minutes = [
+        round(
+            min(
+                matrix[index + 1][other].duration_sec
+                for other in range(len(matrix))
+                if other != index + 1
+            )
+            * _NEAREST_LINK_SAFETY_MARGIN
+            / 60
+        )
+        for index in range(len(candidates))
+    ]
+    return_leg_min = min(
+        (matrix[index + 1][0].duration_sec for index in range(len(candidates))), default=0
+    ) // 60
     portfolios = generate_portfolios(
-        candidates, matrix, max_visits=max_visits, available_min=work_min,
+        candidates, matrix, max_visits=max_visits,
+        available_min=max(0, work_min - return_leg_min),
         min_expected_sales=min_expected_sales,
         min_expected_gross_profit=min_expected_gross_profit,
         limit=1,
         time_limit_sec=2, travel_penalty_weight=0, end_node_index=0,
         turnaround_buffer_min=turnaround_buffer_min,
+        travel_minutes_override=nearest_link_minutes,
     )
     if not portfolios:
         return None
@@ -2631,6 +3412,116 @@ def _persist_coarse_day(
     }
 
 
+_RISK_SEVERITY = {"low": 0, "medium": 1, "high": 2}
+
+
+def _candidate_deal_risk(candidate: VisitCandidate, *, today: date) -> dict:
+    """Per-customer 失注/延期risk = the worst risk among that customer's open
+    deals. days_since_contact is not tracked by _candidate_rows' query (that
+    signal already feeds route selection separately via score_candidates'
+    neglect_risk), so only win_probability/expected_close_date drive this."""
+    worst_loss, worst_delay, reasons = "low", "low", []
+    for economics, expected_close_date in zip(
+        candidate.economics, candidate.expected_close_dates
+    ):
+        risk = target_simulation.assess_deal_risk(
+            win_probability=economics.win_probability,
+            days_since_contact=None,
+            expected_close_date=expected_close_date,
+            today=today,
+        )
+        if _RISK_SEVERITY[risk.loss_risk] > _RISK_SEVERITY[worst_loss]:
+            worst_loss = risk.loss_risk
+        if _RISK_SEVERITY[risk.delay_risk] > _RISK_SEVERITY[worst_delay]:
+            worst_delay = risk.delay_risk
+        reasons.extend(risk.reasons)
+    return {
+        "loss_risk": worst_loss,
+        "delay_risk": worst_delay,
+        "risk_reasons": list(dict.fromkeys(reasons)),
+    }
+
+
+# deal_phase.sort_order=1's name ("初回接触" in seed.sql) -- a prospect with
+# no deal yet has no deal_phase row to read this from, so this names the
+# first real step for it explicitly rather than leaving it blank.
+_FIRST_CONTACT_PHASE_NAME = "初回接触"
+
+
+def _deal_progress_goals(
+    week_candidates: list[VisitCandidate],
+    *,
+    phase_name_by_sort_order: dict[int, str],
+    today: date,
+) -> list[dict]:
+    """One 商談進行目標 per deal assigned this week: current phase -> next
+    phase (or "受注" if already at the final phase), so the week reads as
+    concrete milestones rather than only a revenue number.
+
+    A "new" (新規開拓) candidate has no deal yet -- deal_ids/phase_names are
+    empty/["新規開拓"] rather than deal-linked (see the prospect-candidate
+    branch of load_candidates) -- so it gets its own entry here instead of
+    being silently skipped by the deal_ids-keyed loop below, with a rationale
+    naming the historically-estimated visit count (required_visit_count,
+    computed in _prospect_candidates from same-industry/company-size history)
+    instead of a phase transition.
+    """
+    entries: list[dict] = []
+    for candidate in week_candidates:
+        if candidate.customer_type == "new":
+            rationale = (
+                f"新規開拓先です。過去の同業種・同規模企業の実績から、初回接触までに"
+                f"平均{candidate.required_visit_count}回の訪問が必要と推定しています。"
+            )
+            entries.append(
+                {
+                    "customer_id": candidate.customer_id,
+                    "deal_id": None,
+                    "customer_name": candidate.customer_name,
+                    "current_phase_name": "新規開拓",
+                    "target_phase_name": _FIRST_CONTACT_PHASE_NAME,
+                    "rationale": rationale,
+                    "expected_sales": candidate.expected_sales,
+                }
+            )
+            continue
+        for deal_id, phase_name, sort_order, expected_close_date, economics in zip(
+            candidate.deal_ids,
+            candidate.phase_names,
+            candidate.deal_phase_sort_orders,
+            candidate.expected_close_dates,
+            candidate.economics,
+        ):
+            if sort_order >= target_simulation.MAX_DEAL_PHASE_SORT_ORDER:
+                target_phase = "受注(契約締結)"
+            else:
+                target_phase = phase_name_by_sort_order.get(sort_order + 1, "次フェーズ")
+            rationale = f"現在「{phase_name}」のため、今週中に「{target_phase}」へ進めることを目指します。"
+            risk = target_simulation.assess_deal_risk(
+                win_probability=economics.win_probability,
+                days_since_contact=None,
+                expected_close_date=expected_close_date,
+                today=today,
+            )
+            if risk.loss_risk == "high" or risk.delay_risk == "high":
+                rationale += f" {'、'.join(risk.reasons)}ため要注意です。"
+            entries.append(
+                {
+                    "customer_id": candidate.customer_id,
+                    "deal_id": deal_id,
+                    "customer_name": candidate.customer_name,
+                    "current_phase_name": phase_name,
+                    "target_phase_name": target_phase,
+                    "rationale": rationale,
+                    "expected_sales": economics.expected_sales,
+                }
+            )
+    entries.sort(key=lambda entry: entry["expected_sales"], reverse=True)
+    for entry in entries:
+        del entry["expected_sales"]
+    return entries[:5]
+
+
 def create_batch_preview(
     conn: Connection,
     *,
@@ -2652,6 +3543,13 @@ def create_batch_preview(
     search_area = _resolve_search_area(
         branch, request.search_area, start_location=start_location, conn=conn,
     )
+    today = date.today()
+    phase_name_by_sort_order = {
+        row["sort_order"]: row["deal_phase_name"]
+        for row in conn.execute(
+            "select sort_order, deal_phase_name from deal_phase order by sort_order"
+        ).fetchall()
+    }
 
     business_days = _business_days(request.start_date, request.horizon)
     if not business_days:
@@ -2746,12 +3644,67 @@ def create_batch_preview(
         max_visits_per_customer=len(business_days),
     )
     visit_occurrences = _expand_visit_occurrences(selected_candidates)
+
+    # Bias each week toward one rough geographic region (see
+    # _cluster_candidates_by_region) so a week's visits stay close together
+    # instead of mixing customers tens of km apart on the same day -- the
+    # latter was routinely making the coarse-day CP-SAT feasibility check
+    # reject an otherwise-plannable day as unreachable within working hours.
+    region_by_customer = _cluster_candidates_by_region(
+        selected_candidates, num_clusters=max(1, len(business_weeks))
+    )
+    region_demand: dict[int, Decimal] = {}
+    for candidate in selected_candidates:
+        region = region_by_customer[candidate.customer_id]
+        region_demand[region] = region_demand.get(region, Decimal("0")) + candidate.expected_sales
+    ranked_regions = sorted(region_demand, key=lambda r: -region_demand[r]) or [0]
+    week_region = {
+        week_number: ranked_regions[(week_number - 1) % len(ranked_regions)]
+        for week_number in range(1, len(business_weeks) + 1)
+    }
+    week_number_by_day = {
+        day: week_number
+        for week_number, week_days in enumerate(business_weeks, start=1)
+        for day in week_days
+    }
+
     day_pools = _assign_target_customers_to_days(
         visit_occurrences,
         business_days=business_days,
         day_targets=day_targets,
         max_visits=request.max_visits,
+        region_by_customer=region_by_customer,
+        week_region=week_region,
+        week_number_by_day=week_number_by_day,
     )
+
+    # LLM fine-tuning layer (optional, additive): may only move a visit to a
+    # date the deterministic scheduler already proved valid for it -- see
+    # _schedule_adjustment_context's docstring. Silently skipped (deterministic
+    # day_pools stand as-is) whenever there's nothing worth asking about, or
+    # Qwen is unreachable -- this is a replaceable enhancement, never a
+    # dependency of the core schedule.
+    adjustment_reasons: dict[tuple[date, int], str] = {}
+    schedule_adjustment_candidates = _schedule_adjustment_context(
+        day_pools,
+        business_days=business_days,
+        max_visits=request.max_visits,
+        min_gap_business_days=DEFAULT_MIN_REVISIT_GAP_BUSINESS_DAYS,
+        today=today,
+    )
+    if schedule_adjustment_candidates:
+        try:
+            suggested_adjustments = ai.suggest_schedule_adjustments(
+                conn, rep_id=rep_id, occurrences=schedule_adjustment_candidates,
+            )
+            day_pools, adjustment_reasons = _apply_schedule_adjustments(
+                day_pools,
+                suggested_adjustments,
+                schedule_adjustment_candidates,
+                max_visits=request.max_visits,
+            )
+        except ai.AiPlanningError:
+            pass
 
     batch_row = conn.execute(
         """
@@ -2830,9 +3783,197 @@ def create_batch_preview(
                     batch_id=batch_id,
                 )
         except RoutePlanningError as error:
-            day_result = _empty_day_result(
-                day, "detailed" if is_detailed else "coarse", error=error,
-            )
+            day_result = None
+            if is_detailed and error.code == "target_not_reachable":
+                originally_assigned_keys = {
+                    _candidate_occurrence_key(candidate)
+                    for candidate in day_candidates
+                }
+                scheduled_customer_ids = {
+                    candidate.customer_id
+                    for pool in day_pools.values()
+                    for candidate in pool
+                }
+                revision_options = _unreachable_day_revision_options(
+                    day_candidates=day_candidates,
+                    all_candidates=candidates,
+                    selected_customer_ids=scheduled_customer_ids,
+                    target_date=day,
+                    weights=weights,
+                    target_gap_ratio=target_gap_ratio,
+                    max_visits=request.max_visits,
+                )
+                revision_limit = min(
+                    len(revision_options),
+                    max(request.max_visits, _day_pool_capacity(request.max_visits)),
+                )
+                ai_candidates: list[VisitCandidate] = []
+                ai_reasons: dict[int, str] = {}
+                if revision_options and revision_limit:
+                    plan_occurrences = [
+                        candidate
+                        for pool in day_pools.values()
+                        for candidate in pool
+                    ]
+                    known_profits = [
+                        candidate.expected_gross_profit
+                        for candidate in plan_occurrences
+                    ]
+                    fixed_windows = _blocked_windows(
+                        conn, rep_id=rep_id, target_date=day
+                    )
+                    if request.break_enabled:
+                        fixed_windows.append((request.break_start, request.break_end))
+                    try:
+                        revisions = ai.revise_unreachable_day(
+                            conn,
+                            rep_id=rep_id,
+                            target_date=day,
+                            error_message=str(error),
+                            constraints={
+                                "work_start": request.work_start.isoformat(),
+                                "work_end": request.work_end.isoformat(),
+                                "fixed_windows": [
+                                    {
+                                        "start": start.isoformat(),
+                                        "end": end.isoformat(),
+                                    }
+                                    for start, end in _merge_windows(fixed_windows)
+                                ],
+                                "max_visits": request.max_visits,
+                                "travel_mode": request.travel_mode,
+                                "return_buffer_min": request.return_buffer_min,
+                            },
+                            objective={
+                                "policy": request.policy,
+                                "sales_weight": weights["sales"],
+                                "gross_profit_weight": weights["gross_profit"],
+                            },
+                            monthly_plan={
+                                "monthly_target_amount": _jsonable(
+                                    target_context["target_amount"]
+                                ),
+                                "monthly_target_gross_profit": _jsonable(
+                                    target_context["target_gross_profit"]
+                                ),
+                                "expected_sales_before_revision": _jsonable(
+                                    sum(
+                                        (
+                                            candidate.expected_sales
+                                            for candidate in plan_occurrences
+                                        ),
+                                        Decimal("0"),
+                                    )
+                                ),
+                                "expected_gross_profit_before_revision": (
+                                    _jsonable(
+                                        sum(
+                                            (
+                                                profit
+                                                for profit in known_profits
+                                                if profit is not None
+                                            ),
+                                            Decimal("0"),
+                                        )
+                                    )
+                                    if all(
+                                        profit is not None
+                                        for profit in known_profits
+                                    )
+                                    else None
+                                ),
+                            },
+                            candidates=_unreachable_day_ai_payload(
+                                revision_options,
+                                originally_assigned_keys=originally_assigned_keys,
+                            ),
+                            candidate_limit=revision_limit,
+                        )
+                        ai_candidates, ai_reasons = _apply_unreachable_day_revision(
+                            revision_options, revisions
+                        )
+                    except ai.AiPlanningError:
+                        pass
+
+                # Qwen selects the business-priority pool; CP-SAT and the
+                # routing solver still make the hard feasibility decision.
+                # If Qwen is unavailable or its pool is physically impossible,
+                # retry once with the complete bounded option pool so an AI
+                # outage or imperfect distance judgment does not leave a day
+                # failed when the deterministic solver can find a valid route.
+                revision_attempts: list[
+                    tuple[list[VisitCandidate], dict[int, str], bool]
+                ] = []
+                if ai_candidates:
+                    revision_attempts.append((ai_candidates, ai_reasons, True))
+                if revision_options and {
+                    _candidate_occurrence_key(candidate)
+                    for candidate in revision_options
+                } != {
+                    _candidate_occurrence_key(candidate)
+                    for candidate in ai_candidates
+                }:
+                    revision_attempts.append((revision_options, {}, False))
+
+                for revised_candidates, revision_reasons, used_ai_pool in revision_attempts:
+                    try:
+                        revised_result = _solve_and_persist_day(
+                            conn,
+                            rep_id=rep_id,
+                            branch=branch,
+                            start_location=start_location,
+                            end_location=end_location,
+                            search_area=search_area,
+                            candidates=revised_candidates,
+                            weights=weights,
+                            request=day_request,
+                            matrix_provider=matrix_provider,
+                            warnings=[
+                                "当初の候補セットがtarget_not_reachableとなったため、"
+                                + (
+                                    "AIが月間の期待売上・期待粗利を基準に候補を入れ替え、"
+                                    if used_ai_pool
+                                    else "予備候補全体から実行可能な組合せを再探索し、"
+                                )
+                                + "勤務時間・固定予定・最大訪問数を再検証しました。"
+                            ],
+                            batch_id=batch_id,
+                            detail_level="detailed",
+                        )
+                    except RoutePlanningError:
+                        continue
+
+                    routed_customer_ids = {
+                        stop["customer_id"] for stop in revised_result.get("stops", [])
+                    }
+                    routed_candidates = [
+                        candidate
+                        for candidate in revised_candidates
+                        if candidate.customer_id in routed_customer_ids
+                    ]
+                    day_pools[day] = routed_candidates
+                    for candidate in routed_candidates:
+                        if candidate.customer_id not in {
+                            selected.customer_id for selected in selected_candidates
+                        }:
+                            selected_candidates.append(candidate)
+                    for customer_id in routed_customer_ids:
+                        reason = revision_reasons.get(customer_id)
+                        if reason:
+                            adjustment_reasons[(day, customer_id)] = reason
+                    day_result = revised_result
+                    break
+
+            if day_result is None:
+                day_result = _empty_day_result(
+                    day, "detailed" if is_detailed else "coarse", error=error,
+                )
+        for stop in day_result.get("stops", []):
+            reason = adjustment_reasons.get((day, stop["customer_id"]))
+            if reason:
+                stop["selection_reason"] = (
+                    f"{stop['selection_reason']} ／AIが商談状況を踏まえて訪問日を調整: {reason}"
+                )
         expected_sales = Decimal(
             str((day_result.get("totals") or {}).get("expected_sales") or 0)
         )
@@ -2848,6 +3989,266 @@ def create_batch_preview(
         day_result["target_gross_profit"] = day_gross_profit_targets.get(day, Decimal("0"))
         days_out.append(day_result)
         _accumulate_totals(batch_totals, day_result.get("totals") or {})
+
+    # Post-processing only: keep the existing deterministic month/day plans
+    # intact, then ask Qwen to fill whatever period-end sales/profit gap the
+    # actually routed stops still leave. Daily targets remain reporting-only;
+    # a proposed replacement is accepted only after the same hard route
+    # solvers validate it and the combined period-end gap strictly improves.
+    gap_fill_applied_count = 0
+    gap_fill_reasons: dict[tuple[date, int], str] = {}
+    period_shortfalls = _target_gap_shortfalls(
+        batch_totals,
+        target_sales=planning_target,
+        target_gross_profit=planning_target_gross_profit,
+    )
+    initial_period_shortfalls = dict(period_shortfalls)
+    eligible_gap_fill_dates = [
+        day_result["target_date"]
+        for day_result in days_out
+        if day_result["detail_level"] == "detailed"
+    ]
+    if (
+        eligible_gap_fill_dates
+        and (
+            period_shortfalls["expected_sales"] > 0
+            or period_shortfalls["expected_gross_profit"] > 0
+        )
+    ):
+        routed_customer_ids = {
+            stop["customer_id"]
+            for day_result in days_out
+            for stop in day_result.get("stops", [])
+        }
+        gap_fill_options = _target_gap_fill_options(
+            all_candidates=candidates,
+            scheduled_customer_ids=routed_customer_ids,
+            eligible_dates=eligible_gap_fill_dates,
+            weights=weights,
+            target_gap_ratio=target_gap_ratio,
+            max_visits=request.max_visits,
+        )
+        gap_fill_assignments: list[dict[str, Any]] = []
+        if gap_fill_options:
+            days_for_ai: list[dict[str, Any]] = []
+            day_result_by_date = {
+                day_result["target_date"]: day_result for day_result in days_out
+            }
+            for day in eligible_gap_fill_dates:
+                day_result = day_result_by_date[day]
+                fixed_windows = _blocked_windows(
+                    conn, rep_id=rep_id, target_date=day
+                )
+                if request.break_enabled:
+                    fixed_windows.append((request.break_start, request.break_end))
+                days_for_ai.append(
+                    {
+                        "target_date": day.isoformat(),
+                        "daily_target": _jsonable(day_targets.get(day, Decimal("0"))),
+                        "daily_gross_profit_target": _jsonable(
+                            day_gross_profit_targets.get(day, Decimal("0"))
+                        ),
+                        "current_expected_sales": _jsonable(
+                            (day_result.get("totals") or {}).get("expected_sales") or 0
+                        ),
+                        "current_expected_gross_profit": _jsonable(
+                            (day_result.get("totals") or {}).get(
+                                "expected_gross_profit"
+                            )
+                        ),
+                        "current_visit_count": int(
+                            (day_result.get("totals") or {}).get("visit_count") or 0
+                        ),
+                        "max_visits": request.max_visits,
+                        "work_start": request.work_start.isoformat(),
+                        "work_end": request.work_end.isoformat(),
+                        "fixed_windows": [
+                            {
+                                "start": start.isoformat(),
+                                "end": end.isoformat(),
+                            }
+                            for start, end in _merge_windows(fixed_windows)
+                        ],
+                    }
+                )
+            try:
+                gap_fill_assignments = ai.suggest_target_gap_fill(
+                    conn,
+                    rep_id=rep_id,
+                    period={
+                        "start_date": business_days[0].isoformat(),
+                        "end_date": business_days[-1].isoformat(),
+                        "target_expected_sales": _jsonable(planning_target),
+                        "target_expected_gross_profit": _jsonable(
+                            planning_target_gross_profit
+                        ),
+                        "current_expected_sales": _jsonable(
+                            batch_totals["expected_sales"]
+                        ),
+                        "current_expected_gross_profit": _jsonable(
+                            batch_totals["expected_gross_profit"]
+                        ),
+                        "sales_shortfall": _jsonable(
+                            period_shortfalls["expected_sales"]
+                        ),
+                        "gross_profit_shortfall": _jsonable(
+                            period_shortfalls["expected_gross_profit"]
+                        ),
+                    },
+                    objective={
+                        "policy": request.policy,
+                        "sales_weight": weights["sales"],
+                        "gross_profit_weight": weights["gross_profit"],
+                    },
+                    days=days_for_ai,
+                    candidates=_target_gap_fill_ai_payload(
+                        gap_fill_options,
+                        eligible_dates=eligible_gap_fill_dates,
+                    ),
+                    assignment_limit=min(
+                        len(gap_fill_options),
+                        request.max_visits * len(eligible_gap_fill_dates),
+                    ),
+                )
+            except ai.AiPlanningError:
+                pass
+
+        assignments_by_day, proposed_gap_fill_reasons = (
+            _apply_target_gap_fill_assignments(
+                gap_fill_options,
+                gap_fill_assignments,
+                eligible_dates=set(eligible_gap_fill_dates),
+            )
+            if gap_fill_options and gap_fill_assignments
+            else ({}, {})
+        )
+        day_position = {
+            day_result["target_date"]: position
+            for position, day_result in enumerate(days_out)
+        }
+        for day in eligible_gap_fill_dates:
+            additions = assignments_by_day.get(day, [])
+            if not additions:
+                continue
+            position = day_position[day]
+            old_result = days_out[position]
+            current_customer_ids = {
+                stop["customer_id"] for stop in old_result.get("stops", [])
+            }
+            current_candidates = [
+                candidate
+                for candidate in day_pools.get(day, [])
+                if candidate.customer_id in current_customer_ids
+            ]
+            revised_candidates = list(current_candidates)
+            revised_customer_ids = {
+                candidate.customer_id for candidate in revised_candidates
+            }
+            revised_candidates.extend(
+                candidate
+                for candidate in additions
+                if candidate.customer_id not in revised_customer_ids
+            )
+            day_request = RoutePlanPreviewRequest(
+                target_date=day,
+                min_expected_sales=(
+                    request.min_expected_sales
+                    if request.min_expected_sales
+                    and request.min_expected_sales > 0
+                    else None
+                ),
+                **shared_fields,
+            )
+            try:
+                revised_result = _solve_and_persist_day(
+                    conn,
+                    rep_id=rep_id,
+                    branch=branch,
+                    start_location=start_location,
+                    end_location=end_location,
+                    search_area=search_area,
+                    candidates=revised_candidates,
+                    weights=weights,
+                    request=day_request,
+                    matrix_provider=matrix_provider,
+                    warnings=[
+                        "日目標の未達は許容し、期間末の期待売上・期待粗利を補填するため、"
+                        "AIが追加候補を提案しました。勤務時間・固定予定・最大訪問数は"
+                        "再検証済みです。"
+                    ],
+                    batch_id=batch_id,
+                    detail_level="detailed",
+                )
+            except RoutePlanningError:
+                continue
+
+            candidate_days = list(days_out)
+            candidate_days[position] = revised_result
+            candidate_totals = _batch_totals_from_days(candidate_days)
+            candidate_shortfalls = _target_gap_shortfalls(
+                candidate_totals,
+                target_sales=planning_target,
+                target_gross_profit=planning_target_gross_profit,
+            )
+            if not _target_gap_improved(
+                period_shortfalls, candidate_shortfalls, weights=weights
+            ):
+                conn.execute(
+                    "delete from route_plan where route_plan_id = %s",
+                    (revised_result["plan_id"],),
+                )
+                conn.commit()
+                continue
+
+            old_plan_id = old_result.get("plan_id")
+            if old_plan_id is not None:
+                conn.execute(
+                    "delete from route_plan where route_plan_id = %s",
+                    (old_plan_id,),
+                )
+            routed_ids = {
+                stop["customer_id"] for stop in revised_result.get("stops", [])
+            }
+            day_pools[day] = [
+                candidate
+                for candidate in revised_candidates
+                if candidate.customer_id in routed_ids
+            ]
+            for candidate in day_pools[day]:
+                if candidate.customer_id not in {
+                    selected.customer_id for selected in selected_candidates
+                }:
+                    selected_candidates.append(candidate)
+            for stop in revised_result.get("stops", []):
+                reason = proposed_gap_fill_reasons.get((day, stop["customer_id"]))
+                if reason:
+                    gap_fill_reasons[(day, stop["customer_id"])] = reason
+                    stop["selection_reason"] = (
+                        f"{stop['selection_reason']} ／AIが期間末目標の不足を補填: {reason}"
+                    )
+            expected_sales = Decimal(
+                str((revised_result.get("totals") or {}).get("expected_sales") or 0)
+            )
+            derived_day_target = day_targets.get(day, Decimal("0"))
+            revised_result["target_amount"] = derived_day_target
+            revised_result["shortfall_amount"] = max(
+                Decimal("0"), derived_day_target - expected_sales
+            )
+            revised_result["attainment_rate"] = (
+                float(expected_sales / derived_day_target)
+                if derived_day_target > 0
+                else 0
+            )
+            revised_result["target_gross_profit"] = day_gross_profit_targets.get(
+                day, Decimal("0")
+            )
+            days_out[position] = revised_result
+            batch_totals = candidate_totals
+            period_shortfalls = candidate_shortfalls
+            gap_fill_applied_count += len(
+                routed_ids - current_customer_ids
+            )
+            conn.commit()
 
     assigned_dates_by_customer: dict[int, list[date]] = {}
     for day, day_candidates in day_pools.items():
@@ -2875,6 +4276,7 @@ def create_batch_preview(
             "assigned_date": assigned_dates_by_customer[candidate.customer_id][0],
             "assigned_dates": assigned_dates_by_customer[candidate.customer_id],
             "selection_reason": selection_reason(candidate),
+            **_candidate_deal_risk(candidate, today=today),
         }
         for candidate in selected_candidates
         if assigned_dates_by_customer.get(candidate.customer_id)
@@ -2938,9 +4340,29 @@ def create_batch_preview(
                     candidate.customer_name for candidate in week_candidates
                 )),
                 "focus": focus,
+                "focus_is_ai_generated": False,
+                "deal_progress_goals": _deal_progress_goals(
+                    week_candidates,
+                    phase_name_by_sort_order=phase_name_by_sort_order,
+                    today=today,
+                ),
                 "days": week_day_results,
             }
         )
+
+    # LLM narrative layer (optional, additive): rewrites the templated
+    # `focus` text into a natural-language summary. Falls back to the
+    # template untouched (focus_is_ai_generated stays False) when Qwen is
+    # unreachable -- never blocks the batch preview.
+    try:
+        week_narratives = ai.generate_week_narratives(conn, rep_id=rep_id, weeks=weeks_out)
+        for week in weeks_out:
+            narrative = week_narratives.get(week["week_number"])
+            if narrative:
+                week["focus"] = narrative
+                week["focus_is_ai_generated"] = True
+    except ai.AiPlanningError:
+        pass
 
     portfolio_expected_sales = sum(
         (candidate.expected_sales for candidate in selected_candidates), Decimal("0")
@@ -2977,6 +4399,33 @@ def create_batch_preview(
             f"対象期間の日数上限により、残り商談のうち{deferred_required_visits}回は"
             "翌期間での計画が必要です。"
         )
+    if adjustment_reasons:
+        target_warnings.append(
+            f"{len(adjustment_reasons)}件の訪問日をAIが商談状況に応じて調整しました。"
+        )
+    if gap_fill_applied_count:
+        target_warnings.append(
+            f"既存計画の最終集計後、期間末目標の不足を補うためAIが"
+            f"{gap_fill_applied_count}件の訪問候補を追加しました。日目標はソフト目標のまま、"
+            "期間末の期待売上・期待粗利を優先しています。"
+        )
+    if (
+        initial_period_shortfalls["expected_sales"] > 0
+        or initial_period_shortfalls["expected_gross_profit"] > 0
+    ):
+        if (
+            period_shortfalls["expected_sales"] == 0
+            and period_shortfalls["expected_gross_profit"] == 0
+        ):
+            target_warnings.append(
+                "AI補填後の計画で、期間末の期待売上・期待粗利目標を満たしました。"
+            )
+        else:
+            target_warnings.append(
+                "AI補填後も、実行可能な訪問枠と候補の範囲では期間末目標に"
+                f"期待売上{period_shortfalls['expected_sales']:,.0f}円、"
+                f"期待粗利{period_shortfalls['expected_gross_profit']:,.0f}円不足します。"
+            )
     monthly_target = target_context["target_amount"]
     achieved_amount = target_context["achieved_amount"] or Decimal("0")
     remaining_target = target_context["remaining_target_amount"]

@@ -180,9 +180,105 @@ def test_cp_sat_generates_unique_sets_and_keeps_must_visit() -> None:
     )
     assert portfolios
     assert len({item.candidate_indexes for item in portfolios}) == len(portfolios)
-    assert all(0 in item.candidate_indexes for item in portfolios)
+    # must_visit is a huge score bonus, not a hard force (see
+    # generate_portfolios): the single best portfolio always includes a
+    # feasible must_visit candidate, since excluding it costs far more
+    # objective value than any other trade-off could recover, but weaker
+    # alternative portfolios (found by excluding the previous choice) aren't
+    # guaranteed to.
+    assert 0 in portfolios[0].candidate_indexes
     assert all(len(item.candidate_indexes) <= 3 for item in portfolios)
     assert all(not item.target_constraints_relaxed for item in portfolios)
+
+
+def test_too_many_must_visit_candidates_degrade_gracefully_by_rank() -> None:
+    # 3 must_visit candidates but max_visits=2: the old hard-force design
+    # made this mathematically infeasible (RoutePlanningError). Now CP-SAT
+    # should still return a solution, keeping the two highest-priority
+    # (lowest rank number) must_visit candidates and dropping the third.
+    candidates = [
+        candidate(1, "1000", "400", "80", must_visit=True),
+        candidate(2, "900", "300", "70", must_visit=True),
+        candidate(3, "700", "500", "50", must_visit=True),
+    ]
+    score_candidates(
+        candidates,
+        target_date=date(2026, 8, 26),
+        weights={"sales": 25, "gross_profit": 35, "urgency": 20, "phase": 10, "target_gap": 10},
+    )
+    portfolios = generate_portfolios(
+        candidates,
+        matrix(4),
+        max_visits=2,
+        available_min=480,
+        min_expected_sales=None,
+        min_expected_gross_profit=None,
+        limit=1,
+        time_limit_sec=1,
+        must_visit_rank=[0, 1, 2],
+    )
+    assert portfolios
+    assert set(portfolios[0].candidate_indexes) == {0, 1}
+
+
+def test_must_visit_with_no_ranking_still_degrades_instead_of_failing() -> None:
+    candidates = [
+        candidate(1, "1000", "400", "80", must_visit=True),
+        candidate(2, "900", "300", "70", must_visit=True),
+        candidate(3, "700", "500", "50", must_visit=True),
+    ]
+    score_candidates(
+        candidates,
+        target_date=date(2026, 8, 26),
+        weights={"sales": 25, "gross_profit": 35, "urgency": 20, "phase": 10, "target_gap": 10},
+    )
+    portfolios = generate_portfolios(
+        candidates,
+        matrix(4),
+        max_visits=2,
+        available_min=480,
+        min_expected_sales=None,
+        min_expected_gross_profit=None,
+        limit=1,
+        time_limit_sec=1,
+    )
+    assert portfolios
+    assert len(portfolios[0].candidate_indexes) == 2
+
+
+def test_travel_minutes_override_replaces_the_default_branch_round_trip_estimate() -> None:
+    # A large uniform matrix (200 min every leg) makes each candidate's own
+    # round trip from the branch (400 min) alone eat nearly the whole 480-min
+    # budget under the default estimate -- two candidates together (800+ min)
+    # can't fit. This is the correct, deliberately conservative behavior for
+    # the single-day flow (RoutingModel corrects it afterward), but a coarse
+    # batch day has no such correction and would wrongly reject an
+    # otherwise-feasible day. travel_minutes_override lets a caller (route_
+    # planning._solve_coarse_day) supply its own, more realistic per-candidate
+    # estimate instead.
+    candidates = [candidate(1, "1000", "400", "80"), candidate(2, "900", "300", "70")]
+    score_candidates(
+        candidates,
+        target_date=date(2026, 8, 26),
+        weights={"sales": 25, "gross_profit": 35, "urgency": 20, "phase": 10, "target_gap": 10},
+    )
+    big_matrix = matrix(3, minutes=200)
+
+    without_override = generate_portfolios(
+        candidates, big_matrix, max_visits=2, available_min=480,
+        min_expected_sales=None, min_expected_gross_profit=None,
+        limit=1, time_limit_sec=1,
+    )
+    assert not any(len(p.candidate_indexes) == 2 for p in without_override)
+
+    with_override = generate_portfolios(
+        candidates, big_matrix, max_visits=2, available_min=480,
+        min_expected_sales=None, min_expected_gross_profit=None,
+        limit=1, time_limit_sec=1,
+        travel_minutes_override=[10, 10],
+    )
+    assert with_override
+    assert with_override[0].candidate_indexes == (0, 1)
 
 
 def test_unreachable_target_returns_explicit_relaxed_alternatives() -> None:

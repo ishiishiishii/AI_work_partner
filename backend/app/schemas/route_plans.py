@@ -90,9 +90,9 @@ class RoutePlanBatchPreviewRequest(BaseModel):
     """Month-to-week-to-day integrated planning request.
 
     ``horizon=week`` remains available for API compatibility, while the
-    dashboard uses ``month`` and asks every business day to reuse the existing
-    single-day route solver. ``detailed_days`` can still cap the expensive
-    route calculation for non-dashboard callers.
+    dashboard keeps a month-wide objective and uses ``detailed_days`` to run
+    the expensive single-day route solver only for the next business week.
+    Later business days remain coarse until the plan is regenerated.
     """
 
     start_date: date
@@ -211,6 +211,16 @@ class RoutePlanBatchDayOut(BaseModel):
     solver: dict[str, Any] = Field(default_factory=dict)
 
 
+class WeekDealProgressGoalOut(BaseModel):
+    customer_id: int
+    # None for a "new" (新規開拓) prospect, which has no deal yet.
+    deal_id: int | None = None
+    customer_name: str
+    current_phase_name: str
+    target_phase_name: str
+    rationale: str
+
+
 class RoutePlanWeekOut(BaseModel):
     week_number: int
     start_date: date
@@ -224,6 +234,8 @@ class RoutePlanWeekOut(BaseModel):
     visit_count: int
     customer_names: list[str] = Field(default_factory=list)
     focus: str
+    focus_is_ai_generated: bool = False
+    deal_progress_goals: list[WeekDealProgressGoalOut] = Field(default_factory=list)
     days: list[RoutePlanBatchDayOut] = Field(default_factory=list)
 
 
@@ -244,6 +256,9 @@ class RoutePlanPortfolioCustomerOut(BaseModel):
     assigned_date: date
     assigned_dates: list[date] = Field(default_factory=list)
     selection_reason: str
+    loss_risk: Literal["low", "medium", "high"] = "low"
+    delay_risk: Literal["low", "medium", "high"] = "low"
+    risk_reasons: list[str] = Field(default_factory=list)
 
 
 class RoutePlanBatchPreviewOut(BaseModel):

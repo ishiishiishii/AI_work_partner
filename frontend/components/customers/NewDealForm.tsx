@@ -13,6 +13,8 @@ type NewDealFormProps = {
     expected_visit_count: number;
     expected_effort_hours: number;
     deal_start_date?: string;
+    expected_close_date?: string;
+    next_action?: string;
   }) => Promise<void>;
 };
 
@@ -24,6 +26,8 @@ const initialDraft = {
   expected_visit_count: "",
   expected_effort_hours: "",
   deal_start_date: "",
+  expected_close_date: "",
+  next_action: "",
 };
 
 export function NewDealForm({ onCreate }: NewDealFormProps) {
@@ -74,6 +78,8 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
         expected_visit_count: Number(draft.expected_visit_count),
         expected_effort_hours: Number(draft.expected_effort_hours),
         deal_start_date: draft.deal_start_date || undefined,
+        expected_close_date: draft.expected_close_date || undefined,
+        next_action: draft.next_action || undefined,
       });
       setDraft({ ...initialDraft, product_id: draft.product_id, deal_phase_id: draft.deal_phase_id });
     } catch (err) {
@@ -161,6 +167,23 @@ export function NewDealForm({ onCreate }: NewDealFormProps) {
             type="date"
             value={draft.deal_start_date}
             onChange={(event) => setDraft({ ...draft, deal_start_date: event.target.value })}
+          />
+        </label>
+        <label className="goal-card__field">
+          <span>受注予定日</span>
+          <input
+            type="date"
+            value={draft.expected_close_date}
+            onChange={(event) => setDraft({ ...draft, expected_close_date: event.target.value })}
+          />
+        </label>
+        <label className="goal-card__field">
+          <span>次のアクション</span>
+          <input
+            type="text"
+            value={draft.next_action}
+            onChange={(event) => setDraft({ ...draft, next_action: event.target.value })}
+            placeholder="例: 見積書を送付する"
           />
         </label>
       </div>

@@ -2439,6 +2439,41 @@ a {
   background: color-mix(in srgb, var(--warn) 16%, var(--surface));
 }
 
+.route-plan-batch__risk-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.route-plan-batch__badge--risk-medium {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--surface));
+}
+
+.route-plan-batch__badge--risk-high {
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 16%, var(--surface));
+}
+
+.route-plan-batch__progress-goals {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-plan-batch__progress-goals li {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface);
+}
+
+.route-plan-batch__progress-goals small {
+  color: var(--muted);
+}
+
 .route-plan-batch__day-figures {
   color: var(--muted);
   font-size: 0.85rem;

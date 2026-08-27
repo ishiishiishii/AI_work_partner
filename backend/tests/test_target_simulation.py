@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from app.services.target_simulation import (
+    assess_deal_risk,
     classify_gap_situation,
     score_candidates,
     simulate_achievement,
@@ -136,6 +137,93 @@ def test_classify_gap_situation_threshold_is_strictly_less_than() -> None:
     # Exactly at the threshold does NOT count as short.
     assert classify_gap_situation(sales_probability=0.7, profit_probability=0.7) == "on_track"
     assert classify_gap_situation(sales_probability=0.6999, profit_probability=0.7) == "sales_only_short"
+
+
+# ---------------------------------------------------------------------------
+# assess_deal_risk
+# ---------------------------------------------------------------------------
+
+
+def test_assess_deal_risk_low_confidence_is_high_loss_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("20"),
+        days_since_contact=0,
+        expected_close_date=date(2026, 9, 1),
+        today=date(2026, 8, 1),
+    )
+    assert risk.loss_risk == "high"
+
+
+def test_assess_deal_risk_stale_contact_is_high_loss_risk_even_with_good_probability() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("80"),
+        days_since_contact=60,
+        expected_close_date=None,
+        today=date(2026, 8, 1),
+    )
+    assert risk.loss_risk == "high"
+
+
+def test_assess_deal_risk_mid_confidence_is_medium_loss_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("45"),
+        days_since_contact=0,
+        expected_close_date=date(2026, 9, 1),
+        today=date(2026, 8, 1),
+    )
+    assert risk.loss_risk == "medium"
+
+
+def test_assess_deal_risk_high_confidence_recent_contact_is_low_loss_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("90"),
+        days_since_contact=1,
+        expected_close_date=date(2026, 9, 1),
+        today=date(2026, 8, 1),
+    )
+    assert risk.loss_risk == "low"
+
+
+def test_assess_deal_risk_no_expected_close_date_is_medium_delay_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("80"),
+        days_since_contact=0,
+        expected_close_date=None,
+        today=date(2026, 8, 1),
+    )
+    assert risk.delay_risk == "medium"
+    assert "受注予定日が未設定" in risk.reasons
+
+
+def test_assess_deal_risk_overdue_close_date_is_high_delay_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("80"),
+        days_since_contact=0,
+        expected_close_date=date(2026, 7, 20),
+        today=date(2026, 8, 1),
+    )
+    assert risk.delay_risk == "high"
+    assert any("12日超過" in reason for reason in risk.reasons)
+
+
+def test_assess_deal_risk_approaching_close_date_is_medium_delay_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("80"),
+        days_since_contact=0,
+        expected_close_date=date(2026, 8, 5),
+        today=date(2026, 8, 1),
+    )
+    assert risk.delay_risk == "medium"
+
+
+def test_assess_deal_risk_distant_close_date_is_low_delay_risk() -> None:
+    risk = assess_deal_risk(
+        win_probability=Decimal("80"),
+        days_since_contact=0,
+        expected_close_date=date(2026, 9, 30),
+        today=date(2026, 8, 1),
+    )
+    assert risk.delay_risk == "low"
 
 
 # ---------------------------------------------------------------------------

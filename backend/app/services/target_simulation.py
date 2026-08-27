@@ -184,6 +184,71 @@ _WEIGHT_PROFILES: dict[str, dict[str, int]] = {
 DEFAULT_NEGLECT_THRESHOLD_DAYS = 60
 
 
+# Thresholds for assess_deal_risk. No spec-given numbers; tunable judgment
+# calls consistent with _ACHIEVEMENT_PROBABILITY_THRESHOLD/
+# DEFAULT_NEGLECT_THRESHOLD_DAYS above -- rule-based, not learned (AGENTS.md
+# section 9: "ルールベースで期待成果...と負担を計算").
+_LOSS_RISK_HIGH_PROBABILITY = 30
+_LOSS_RISK_MEDIUM_PROBABILITY = 50
+_DELAY_RISK_APPROACHING_DAYS = 7
+
+
+@dataclass(frozen=True)
+class DealRisk:
+    loss_risk: str  # "low" | "medium" | "high"
+    delay_risk: str  # "low" | "medium" | "high"
+    reasons: list[str]
+
+
+def assess_deal_risk(
+    *,
+    win_probability: Decimal | int,
+    days_since_contact: int | None,
+    expected_close_date: date | None,
+    today: date,
+    neglect_threshold_days: int = DEFAULT_NEGLECT_THRESHOLD_DAYS,
+) -> DealRisk:
+    """Rule-based per-deal 失注リスク(loss_risk)/延期リスク(delay_risk), each
+    "low"/"medium"/"high". Independent of score_candidates' value_score: this
+    answers "is this specific deal in trouble" rather than "how much should
+    today's plan favor it", so a deal can be top-ranked and still carry a
+    risk flag the rationale text should mention.
+    """
+    reasons: list[str] = []
+
+    stale_high = days_since_contact is not None and days_since_contact >= neglect_threshold_days
+    stale_medium = (
+        days_since_contact is not None
+        and days_since_contact >= neglect_threshold_days // 2
+    )
+    if win_probability < _LOSS_RISK_HIGH_PROBABILITY or stale_high:
+        loss_risk = "high"
+    elif win_probability < _LOSS_RISK_MEDIUM_PROBABILITY or stale_medium:
+        loss_risk = "medium"
+    else:
+        loss_risk = "low"
+    if win_probability < _LOSS_RISK_MEDIUM_PROBABILITY:
+        reasons.append(f"成約確度が{int(win_probability)}%と低い")
+    if stale_medium:
+        reasons.append(f"前回接点から{days_since_contact}日以上経過している")
+
+    if expected_close_date is None:
+        delay_risk = "medium"
+        reasons.append("受注予定日が未設定")
+    else:
+        days_over = (today - expected_close_date).days
+        if days_over > 0:
+            delay_risk = "high"
+            reasons.append(f"受注予定日を{days_over}日超過している")
+        elif -days_over <= _DELAY_RISK_APPROACHING_DAYS:
+            delay_risk = "medium"
+            reasons.append("受注予定日が近づいている")
+        else:
+            delay_risk = "low"
+
+    return DealRisk(loss_risk=loss_risk, delay_risk=delay_risk, reasons=reasons)
+
+
 def _normalize(values: list[Decimal]) -> list[Decimal]:
     if not values:
         return []

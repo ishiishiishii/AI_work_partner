@@ -196,6 +196,8 @@ def post_deal(body: DealCreate) -> DealOut:
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
                 deal_start_date=body.deal_start_date or date.today(),
+                expected_close_date=body.expected_close_date,
+                next_action=body.next_action,
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -216,6 +218,8 @@ def patch_deal(deal_id: int, body: DealUpdate, rep_id: int = Query(...)) -> Deal
                 win_probability=body.win_probability,
                 expected_visit_count=body.expected_visit_count,
                 expected_effort_hours=body.expected_effort_hours,
+                expected_close_date=body.expected_close_date,
+                next_action=body.next_action,
             )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -8,7 +8,6 @@ import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel";
-import { RoutePlanPanel } from "@/components/dashboard/RoutePlanPanel";
 import {
   cancelPlan,
   createManualPlan,
@@ -46,7 +45,6 @@ import type {
   Forecast,
   RepAffinity,
   ReplanInfo,
-  RoutePlanPreview,
   SalesTarget,
   Territory,
 } from "@/types";
@@ -87,7 +85,9 @@ export default function DashboardPage() {
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   // plan_id -> バックエンドに登録済みの result_id（取り消し時にどれを消すか特定するため）
   const [resultIdByPlan, setResultIdByPlan] = useState<Record<number, number>>({});
-  const [routePlan, setRoutePlan] = useState<RoutePlanPreview | null>(null);
+  // 商談結果が変化するたびインクリメントし、月間バッチプラン(RouteBatchPlanPanel)を
+  // 自動で再計算させるためのシグナル(値そのものに意味はない)
+  const [planRefreshTick, setPlanRefreshTick] = useState(0);
 
   // 目標(sales_target)がまだ無い月は 404 になるため、その場合はクライアント側計算に
   // フォールバックする(forecastAmount/achievementRate の算出箇所を参照)
@@ -273,6 +273,7 @@ export default function DashboardPage() {
       );
       setResultIdByPlan((prev) => ({ ...prev, [planId]: result.result_id }));
       await refreshForecast(REP_ID);
+      setPlanRefreshTick((tick) => tick + 1);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "結果の登録に失敗しました");
       setPlans(plans); // ロールバック
@@ -588,12 +589,7 @@ export default function DashboardPage() {
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
-          <RoutePlanPanel
-            plan={routePlan}
-            onPlanChange={setRoutePlan}
-            onApproved={handleRouteApproved}
-          />
-          <RouteBatchPlanPanel onApproved={handleRouteApproved} />
+          <RouteBatchPlanPanel onApproved={handleRouteApproved} refreshSignal={planRefreshTick} />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
           {needsInitialPlan ? (

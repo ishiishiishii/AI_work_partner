@@ -10,6 +10,8 @@ export type DealEditFields = {
   win_probability: number;
   expected_visit_count: number;
   expected_effort_hours: number;
+  expected_close_date: string | null;
+  next_action: string | null;
 };
 
 type DealHistoryListProps = {
@@ -60,6 +62,8 @@ export function DealHistoryList({
       win_probability: deal.win_probability,
       expected_visit_count: deal.expected_visit_count,
       expected_effort_hours: deal.expected_effort_hours,
+      expected_close_date: deal.expected_close_date,
+      next_action: deal.next_action,
     });
   }
 
@@ -177,6 +181,30 @@ export function DealHistoryList({
                       }
                     />
                   </label>
+                  <label>
+                    受注予定日
+                    <input
+                      type="date"
+                      value={editDraft.expected_close_date ?? ""}
+                      onChange={(event) =>
+                        setEditDraft({
+                          ...editDraft,
+                          expected_close_date: event.target.value || null,
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    次のアクション
+                    <input
+                      type="text"
+                      value={editDraft.next_action ?? ""}
+                      onChange={(event) =>
+                        setEditDraft({ ...editDraft, next_action: event.target.value || null })
+                      }
+                      placeholder="例: 見積書を送付する"
+                    />
+                  </label>
                   <div className="activity-plan-list__edit-actions">
                     <button type="button" className="activity-plan-list__result-button" onClick={saveEdit}>
                       保存
@@ -192,6 +220,14 @@ export function DealHistoryList({
                     {deal.deal_phase_name}・成約確率{deal.win_probability}%
                     {deal.contract_date && `・契約日 ${formatDate(deal.contract_date)}`}
                   </p>
+                  {deal.expected_close_date && (
+                    <p className="deal-history__note">
+                      受注予定日 {formatDate(deal.expected_close_date)}
+                    </p>
+                  )}
+                  {deal.next_action && (
+                    <p className="deal-history__note">次のアクション: {deal.next_action}</p>
+                  )}
                   <p className="deal-history__note">原価 {formatYen(deal.cost)}</p>
                   <div className="activity-plan-list__edit-actions">
                     <button

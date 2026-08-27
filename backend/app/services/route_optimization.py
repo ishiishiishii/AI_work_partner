@@ -89,6 +89,13 @@ class VisitCandidate:
     deal_ids: list[int]
     phase_names: list[str]
     economics: list[DealEconomics]
+    # Parallel to deal_ids/phase_names (same index = same deal), used only by
+    # route_planning.create_batch_preview for per-deal risk (target_simulation.
+    # assess_deal_risk) and weekly phase-progression goals -- not read by any
+    # scoring/optimization code in this module.
+    deal_phase_sort_orders: list[int] = field(default_factory=list)
+    expected_close_dates: list[date | None] = field(default_factory=list)
+    next_actions: list[str | None] = field(default_factory=list)
     visit_duration_min: int = 60
     window_start: time | None = None
     window_end: time | None = None
@@ -310,6 +317,14 @@ def _money_int(value: Decimal | None) -> int:
     return int(value.quantize(YEN, rounding=ROUND_HALF_UP))
 
 
+# A must_visit candidate's score bonus (see _solve_portfolios) so that
+# excluding it always costs more objective value than including it, whenever
+# it's actually feasible to include -- comfortably larger than any realistic
+# sum of ordinary value_score-based scores (each capped at 10000).
+_MUST_VISIT_BASE_BONUS = 1_000_000
+_MUST_VISIT_RANK_STEP = 1_000
+
+
 def generate_portfolios(
     candidates: list[VisitCandidate],
     matrix: list[list[MatrixCell]],
@@ -323,6 +338,8 @@ def generate_portfolios(
     travel_penalty_weight: int = 0,
     end_node_index: int = 0,
     turnaround_buffer_min: int = 0,
+    travel_minutes_override: list[int] | None = None,
+    must_visit_rank: list[int] | None = None,
 ) -> list[Portfolio]:
     strict = _solve_portfolios(
         candidates,
@@ -337,6 +354,8 @@ def generate_portfolios(
         end_node_index=end_node_index,
         turnaround_buffer_min=turnaround_buffer_min,
         relaxed=False,
+        travel_minutes_override=travel_minutes_override,
+        must_visit_rank=must_visit_rank,
     )
     if strict or (min_expected_sales is None and min_expected_gross_profit is None):
         return strict
@@ -353,6 +372,8 @@ def generate_portfolios(
         end_node_index=end_node_index,
         turnaround_buffer_min=turnaround_buffer_min,
         relaxed=True,
+        travel_minutes_override=travel_minutes_override,
+        must_visit_rank=must_visit_rank,
     )
 
 
@@ -370,6 +391,8 @@ def _solve_portfolios(
     end_node_index: int,
     turnaround_buffer_min: int,
     relaxed: bool,
+    travel_minutes_override: list[int] | None = None,
+    must_visit_rank: list[int] | None = None,
 ) -> list[Portfolio]:
     if not candidates:
         return []
@@ -378,23 +401,31 @@ def _solve_portfolios(
     model.add(sum(selected) <= max_visits)
     model.add(sum(selected) >= 1)
 
-    for index, candidate in enumerate(candidates):
-        if candidate.must_visit:
-            model.add(selected[index] == 1)
-
-    # CP-SAT only needs a conservative order-free estimate; RoutingModel makes
-    # the final feasibility decision using the complete road matrix.
-    estimated_minutes = []
-    for index, candidate in enumerate(candidates):
-        endpoint_travel = (
-            matrix[0][index + 1].duration_sec
-            + matrix[index + 1][end_node_index].duration_sec
-        ) // 60
-        estimated_minutes.append(
-            candidate.visit_duration_min
-            + turnaround_buffer_min
-            + endpoint_travel
-        )
+    if travel_minutes_override is not None:
+        # Caller (a coarse batch day with no RoutingModel step to correct
+        # this later, unlike the single-day flow below) supplies a per-
+        # candidate travel estimate of its own -- see route_planning.
+        # _solve_coarse_day, which uses each candidate's nearest-neighbor
+        # link instead of its own round trip from the branch.
+        endpoint_minutes = travel_minutes_override
+    else:
+        # CP-SAT only needs a conservative order-free estimate here;
+        # RoutingModel makes the final feasibility decision afterward using
+        # the complete road matrix -- so summing each candidate's own round
+        # trip from the branch, though far pricier than any real shared
+        # tour, is a deliberately safe over-estimate for this pre-filter.
+        endpoint_minutes = [
+            (
+                matrix[0][index + 1].duration_sec
+                + matrix[index + 1][end_node_index].duration_sec
+            )
+            // 60
+            for index in range(len(candidates))
+        ]
+    estimated_minutes = [
+        candidates[index].visit_duration_min + turnaround_buffer_min + endpoint_minutes[index]
+        for index in range(len(candidates))
+    ]
     model.add(
         sum(selected[index] * estimated_minutes[index] for index in range(len(candidates)))
         <= available_min
@@ -424,6 +455,20 @@ def _solve_portfolios(
     max_distance = max(
         (candidate.distance_from_branch_m for candidate in candidates), default=1
     )
+    # must_visit no longer forces selected[index]==1 (see this function's
+    # docstring note below) -- instead it adds a bonus large enough that
+    # excluding any must_visit candidate always costs more objective value
+    # than including it, so CP-SAT still includes every must_visit candidate
+    # whenever max_visits/available_min allow it (preserving today's
+    # behavior in the common case), while gracefully dropping the
+    # lowest-priority ones -- by rank, or arbitrarily if no ranking was
+    # given -- instead of the whole day becoming infeasible when there
+    # simply isn't room for all of them.
+    must_visit_bonus = [
+        0 if not candidate.must_visit
+        else _MUST_VISIT_BASE_BONUS - (must_visit_rank[index] if must_visit_rank else 0) * _MUST_VISIT_RANK_STEP
+        for index, candidate in enumerate(candidates)
+    ]
     scores = [
         max(
             0,
@@ -435,7 +480,8 @@ def _solve_portfolios(
                 // max(1, max_distance)
             ),
         )
-        for candidate in candidates
+        + must_visit_bonus[index]
+        for index, candidate in enumerate(candidates)
     ]
     model.maximize(sum(selected[index] * scores[index] for index in range(len(candidates))))
 

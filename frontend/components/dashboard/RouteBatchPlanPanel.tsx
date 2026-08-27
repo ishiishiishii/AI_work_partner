@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   approveSalesRoutePlan,
   previewSalesRouteBatch,
@@ -17,7 +17,14 @@ import type { RoutePlanBatchPreview, RoutePlanPreview } from "@/types";
 
 type Props = {
   onApproved: () => Promise<void>;
+  // Bumped by the dashboard whenever a 商談結果 changes (won/lost/postponed/
+  // etc.), so this panel's month/week numbers stay in sync with the day-level
+  // plan's own auto-replan instead of only updating when the user clicks the
+  // generate button again.
+  refreshSignal?: number;
 };
+
+const RISK_LABEL: Record<"medium" | "high", string> = { medium: "中", high: "高" };
 
 function dayLabel(dateStr: string): string {
   const date = new Date(`${dateStr}T00:00:00+09:00`);
@@ -29,7 +36,7 @@ function dayLabel(dateStr: string): string {
   }).format(date);
 }
 
-export function RouteBatchPlanPanel({ onApproved }: Props) {
+export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
   const [startDate, setStartDate] = useState(tomorrowInTokyo);
   const [policy, setPolicy] = useState<RoutePlanBatchPreview["policy"]>("balanced");
   const [salesWeightPercent, setSalesWeightPercent] = useState(50);
@@ -50,6 +57,20 @@ export function RouteBatchPlanPanel({ onApproved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const grossProfitWeightPercent = 100 - salesWeightPercent;
+  const isFirstRefreshSignal = useRef(true);
+
+  useEffect(() => {
+    if (isFirstRefreshSignal.current) {
+      isFirstRefreshSignal.current = false;
+      return;
+    }
+    // Only re-run if a preview already exists -- a deal-result change
+    // shouldn't trigger the first, unrequested API call for this panel.
+    if (batch) {
+      void createBatchPreview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal]);
 
   function changePolicy(nextPolicy: RoutePlanBatchPreview["policy"]) {
     setPolicy(nextPolicy);
@@ -83,9 +104,11 @@ export function RouteBatchPlanPanel({ onApproved }: Props) {
         await previewSalesRouteBatch({
           start_date: startDate,
           horizon: "month",
-          // The integrated view promises a detailed route for every business
-          // day. The backend clamps this to the actual days left in the month.
-          detailed_days: 31,
+          // Keep the optimization objective monthly, but calculate expensive
+          // travel-aware routes only for the next business week. Later days
+          // stay as coarse plans and are recalculated in detail the following
+          // week from the then-current results and remaining monthly target.
+          detailed_days: 5,
           policy,
           sales_weight_percent: salesWeightPercent,
           gross_profit_weight_percent: grossProfitWeightPercent,
@@ -313,7 +336,7 @@ export function RouteBatchPlanPanel({ onApproved }: Props) {
               <small>1. 月の逆算</small>
               <strong>{yen(batch.remaining_target_amount)}</strong>
               <span>
-                月目標 {yen(batch.monthly_target_amount)}・成約済み {yen(batch.achieved_amount)}
+                月目標 {yen(batch.monthly_target_amount)}・開始日前までの成約済み {yen(batch.achieved_amount)}
               </span>
             </article>
             <article>
@@ -356,6 +379,24 @@ export function RouteBatchPlanPanel({ onApproved }: Props) {
                   <strong>
                     {customer.customer_type === "new" ? "新規" : "商談中"}・{customer.customer_name}
                   </strong>
+                  {(customer.loss_risk !== "low" || customer.delay_risk !== "low") && (
+                    <span className="route-plan-batch__risk-badges">
+                      {customer.loss_risk !== "low" && (
+                        <span
+                          className={`route-plan-batch__badge route-plan-batch__badge--risk-${customer.loss_risk}`}
+                        >
+                          失注リスク{RISK_LABEL[customer.loss_risk]}
+                        </span>
+                      )}
+                      {customer.delay_risk !== "low" && (
+                        <span
+                          className={`route-plan-batch__badge route-plan-batch__badge--risk-${customer.delay_risk}`}
+                        >
+                          延期リスク{RISK_LABEL[customer.delay_risk]}
+                        </span>
+                      )}
+                    </span>
+                  )}
                   <span>{customer.assigned_dates.map(dayLabel).join("、")}に割当</span>
                   <span>
                     必要{customer.required_visit_count}回・完了{customer.completed_visit_count}回・
@@ -363,6 +404,9 @@ export function RouteBatchPlanPanel({ onApproved }: Props) {
                   </span>
                   <span>期待売上 {yen(customer.expected_sales)}</span>
                   <small>{customer.selection_reason}</small>
+                  {customer.risk_reasons.length > 0 && (
+                    <small>{customer.risk_reasons.join("、")}</small>
+                  )}
                 </article>
               ))}
               {batch.selected_customers.length === 0 && (
@@ -387,7 +431,27 @@ export function RouteBatchPlanPanel({ onApproved }: Props) {
                   </span>
                 </summary>
                 <div className="route-plan-batch__week-body">
-                  <p>{week.focus}</p>
+                  <p>
+                    {week.focus_is_ai_generated && (
+                      <span className="route-plan-batch__badge route-plan-batch__badge--detailed">
+                        AI
+                      </span>
+                    )}{" "}
+                    {week.focus}
+                  </p>
+                  {week.deal_progress_goals.length > 0 && (
+                    <ul className="route-plan-batch__progress-goals">
+                      {week.deal_progress_goals.map((goal) => (
+                        <li key={goal.deal_id ?? `new-${goal.customer_id}`}>
+                          <strong>
+                            {goal.customer_name}: {goal.current_phase_name} → {goal.target_phase_name}
+                          </strong>
+                          <br />
+                          <small>{goal.rationale}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {week.shortfall_amount > 0 && (
                     <p className="route-plan__warning">週目標まで {yen(week.shortfall_amount)} 不足する見込みです。</p>
                   )}

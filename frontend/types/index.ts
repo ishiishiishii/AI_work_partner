@@ -161,6 +161,8 @@ export type Deal = {
   contract_date: string | null;
   cost: number; // 原価。ユーザー入力ではなくバックエンドが自動算出(見込み金額の50〜95%)
   profit: number; // 見込み利益 = estimated_amount - cost(DB側のgenerated column)
+  expected_close_date: string | null; // "YYYY-MM-DD"。受注予定日(見込み)。契約済みのcontract_dateとは別
+  next_action: string | null; // 次のアクション（自由記述）
 };
 
 export type DealResultStatus = "pending" | "won" | "lost" | "postponed";
@@ -396,6 +398,17 @@ export type RoutePlanBatchDay = {
   solver: { cp_sat?: string; routing?: string };
 };
 
+export type RiskLevel = "low" | "medium" | "high";
+
+export type DealProgressGoal = {
+  customer_id: number;
+  deal_id: number | null; // 新規開拓（まだ商談が無い）先はnull
+  customer_name: string;
+  current_phase_name: string;
+  target_phase_name: string;
+  rationale: string;
+};
+
 export type RoutePlanWeek = {
   week_number: number;
   start_date: string;
@@ -407,6 +420,8 @@ export type RoutePlanWeek = {
   visit_count: number;
   customer_names: string[];
   focus: string;
+  focus_is_ai_generated: boolean;
+  deal_progress_goals: DealProgressGoal[];
   days: RoutePlanBatchDay[];
 };
 
@@ -427,6 +442,9 @@ export type RoutePlanPortfolioCustomer = {
   assigned_date: string;
   assigned_dates: string[];
   selection_reason: string;
+  loss_risk: RiskLevel;
+  delay_risk: RiskLevel;
+  risk_reasons: string[];
 };
 
 export type RoutePlanBatchPreview = {

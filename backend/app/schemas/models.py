@@ -126,6 +126,8 @@ class DealCreate(BaseModel):
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
     deal_start_date: date | None = None
+    expected_close_date: date | None = None
+    next_action: str | None = None
 
 
 class DealOut(OrmModel):
@@ -149,6 +151,8 @@ class DealOut(OrmModel):
     deal_phase_id: int
     cost: Decimal
     profit: Decimal
+    expected_close_date: date | None = None
+    next_action: str | None = None
 
 
 class DealUpdate(BaseModel):
@@ -158,6 +162,8 @@ class DealUpdate(BaseModel):
     win_probability: int = Field(ge=0, le=100)
     expected_visit_count: int = Field(ge=0)
     expected_effort_hours: Decimal = Field(ge=0)
+    expected_close_date: date | None = None
+    next_action: str | None = None
 
 
 class RepAffinityOut(OrmModel):
