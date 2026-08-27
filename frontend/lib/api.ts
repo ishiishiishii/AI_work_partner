@@ -1,6 +1,6 @@
 import type { DealEditFields } from "@/components/customers/DealHistoryList";
 import { getAccessToken } from "@/lib/supabase";
-import type { RoutePlanPreview } from "@/types";
+import type { RoutePlanBatchPreview, RoutePlanPreview } from "@/types";
 import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
@@ -28,11 +28,17 @@ export function getApiBaseUrl(): string {
   try {
     const url = new URL(configured);
     const pageHost = window.location.hostname;
-    if (
-      pageHost !== "localhost" &&
-      pageHost !== "127.0.0.1" &&
-      (url.hostname === "localhost" || url.hostname === "127.0.0.1")
-    ) {
+    const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1";
+    // Codespaces-style forwarding gives the web page and the API distinct
+    // real hostnames on purpose (a separate subdomain per port -- see
+    // .devcontainer/write-codespace-env.sh) -- leave those alone. Only
+    // rewrite when either side is a bare loopback address that doesn't
+    // actually describe where the browser is: e.g. NEXT_PUBLIC_API_URL baked
+    // in as a LAN IP for direct-LAN demos, while this browser reached the
+    // page through a localhost-forwarded tunnel instead (or the reverse,
+    // the original case this handled) -- swap in whichever host the page
+    // itself was actually loaded from.
+    if (pageHost !== url.hostname && (isLoopback(pageHost) || isLoopback(url.hostname))) {
       url.hostname = pageHost;
     }
     return url.origin;
@@ -93,6 +99,7 @@ type ApiTarget = {
   target_month: string;
   target_amount: string | number;
   target_deal_count: number;
+  target_gross_profit: string | number | null;
 };
 
 function mapTarget(row: ApiTarget): SalesTarget {
@@ -101,6 +108,7 @@ function mapTarget(row: ApiTarget): SalesTarget {
     target_month: row.target_month,
     target_amount: Number(row.target_amount),
     target_deal_count: row.target_deal_count,
+    target_gross_profit: row.target_gross_profit === null ? null : Number(row.target_gross_profit),
   };
 }
 
@@ -119,7 +127,10 @@ export async function fetchSalesTarget(
 export async function saveSalesTarget(
   repId: number,
   targetMonth: string,
-  input: { target_amount: number; target_deal_count: number },
+  // バックエンドはPATCHではなく全量upsertなので、この画面で編集していない
+  // フィールドも呼び出し側が必ず現在値を詰めて送ること。target_gross_profit を
+  // 省略すると、次の保存で無条件にNULL(粗利目標なし)へ消えてしまう。
+  input: { target_amount: number; target_deal_count: number; target_gross_profit: number | null },
 ): Promise<SalesTarget> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/targets`, {
@@ -130,6 +141,7 @@ export async function saveSalesTarget(
       target_month: targetMonth,
       target_amount: input.target_amount,
       target_deal_count: input.target_deal_count,
+      target_gross_profit: input.target_gross_profit,
     }),
   });
   if (!res.ok) throw new Error(`目標の保存に失敗しました (HTTP ${res.status})`);
@@ -724,6 +736,14 @@ type ApiForecast = {
   expected_amount: string | number;
   attainment_ratio: number;
   open_plan_count: number;
+  target_gross_profit: string | number | null;
+  expected_gross_profit: string | number;
+  gross_profit_attainment_ratio: number | null;
+  sales_achievement_probability: number;
+  profit_achievement_probability: number | null;
+  joint_achievement_probability: number;
+  sales_gap_amount: string | number;
+  profit_gap_amount: string | number | null;
 };
 
 // sales_target がまだ登録されていない月は 404 になる(呼び出し側でフォールバックすること)
@@ -742,6 +762,16 @@ export async function fetchForecast(repId: number, targetMonth: string): Promise
     forecast_amount: Number(row.expected_amount),
     achievement_rate: row.attainment_ratio * 100,
     open_plan_count: row.open_plan_count,
+    target_gross_profit: row.target_gross_profit === null ? null : Number(row.target_gross_profit),
+    forecast_profit_amount: Number(row.expected_gross_profit),
+    gross_profit_achievement_rate:
+      row.gross_profit_attainment_ratio === null ? null : row.gross_profit_attainment_ratio * 100,
+    sales_achievement_probability: row.sales_achievement_probability * 100,
+    profit_achievement_probability:
+      row.profit_achievement_probability === null ? null : row.profit_achievement_probability * 100,
+    joint_achievement_probability: row.joint_achievement_probability * 100,
+    sales_gap_amount: Number(row.sales_gap_amount),
+    profit_gap_amount: row.profit_gap_amount === null ? null : Number(row.profit_gap_amount),
   };
 }
 
@@ -876,4 +906,39 @@ export async function rejectSalesRoutePlan(planId: number): Promise<void> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw await routePlanError(res, "営業ルート案の却下に失敗しました");
+}
+
+export async function previewSalesRouteBatch(input: {
+  start_date: string;
+  horizon: RoutePlanBatchPreview["horizon"];
+  detailed_days?: number;
+  policy: RoutePlanBatchPreview["policy"];
+  sales_weight_percent?: number;
+  gross_profit_weight_percent?: number;
+  max_visits: number;
+  travel_mode: RoutePlanPreview["travel_mode"];
+  start_location: { kind: "branch" | "custom"; address?: string };
+  end_location: { kind: "branch" | "custom"; address?: string };
+  search_area: { kind: "auto" | "custom"; query?: string; radius_km?: number };
+  break_enabled: boolean;
+  break_start: string;
+  break_end: string;
+  turnaround_buffer_min: number;
+  travel_time_buffer_percent: number;
+  access_buffer_min: number;
+  return_buffer_min: number;
+  min_expected_sales?: number;
+  min_expected_gross_profit?: number;
+}): Promise<RoutePlanBatchPreview> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/api/route-plans/batch-preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await routePlanError(res, "週・月の営業ルート案の作成に失敗しました");
+  return res.json();
 }

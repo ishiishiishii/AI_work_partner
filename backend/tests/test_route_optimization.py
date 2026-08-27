@@ -117,6 +117,45 @@ def test_salesperson_affinity_changes_candidate_value_for_equal_deals() -> None:
     assert "過去10件中7件成約" in selection_reason(strong)
 
 
+def test_selection_reason_explains_visit_count_for_new_and_ongoing_customers() -> None:
+    prospect = candidate(1, "1000", "500", "50")
+    prospect.customer_type = "new"
+    prospect.required_visit_count = 4
+    prospect.remaining_visit_count = 4
+    prospect.visit_count_history_size = 25
+    assert "新規候補" in selection_reason(prospect)
+    assert "過去25件から必要商談4回と推定" in selection_reason(prospect)
+
+    ongoing = candidate(2, "1000", "500", "50")
+    ongoing.required_visit_count = 5
+    ongoing.completed_visit_count = 2
+    ongoing.scheduled_visit_count = 1
+    ongoing.remaining_visit_count = 2
+    assert "必要5回、完了2回、確定済み1回、未予定の残り2回" in selection_reason(ongoing)
+
+
+def test_intermediate_meeting_keeps_opportunity_value_for_scoring() -> None:
+    intermediate = candidate(1, "1000", "500", "50")
+    intermediate.planned_visit_count = 3
+    intermediate.visit_sequence = 1
+    intermediate.sales_credit_fraction = Decimal("0.333333")
+    closing = candidate(2, "1000", "500", "50")
+    closing.planned_visit_count = 3
+    closing.visit_sequence = 3
+    closing.sales_credit_fraction = Decimal("0.333333")
+
+    score_candidates(
+        [intermediate, closing],
+        target_date=date(2026, 8, 26),
+        weights={"sales": 100},
+    )
+
+    assert intermediate.expected_sales == Decimal("0")
+    assert closing.expected_sales == Decimal("500")
+    assert intermediate.opportunity_expected_sales == Decimal("500")
+    assert intermediate.value_score == closing.value_score == Decimal("100.00")
+
+
 def test_cp_sat_generates_unique_sets_and_keeps_must_visit() -> None:
     candidates = [
         candidate(1, "1000", "400", "80", must_visit=True),

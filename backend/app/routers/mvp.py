@@ -75,6 +75,7 @@ def post_target(body: TargetCreate) -> TargetOut:
             target_month=body.target_month,
             target_amount=body.target_amount,
             target_deal_count=body.target_deal_count,
+            target_gross_profit=body.target_gross_profit,
         )
     return TargetOut.model_validate(row)
 

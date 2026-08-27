@@ -4,6 +4,8 @@ from app.auth import get_authenticated_rep_id
 from app.db import get_connection
 from app.schemas.route_plans import (
     RoutePlanApproveOut,
+    RoutePlanBatchPreviewOut,
+    RoutePlanBatchPreviewRequest,
     RoutePlanPreviewOut,
     RoutePlanPreviewRequest,
     RoutePlanRejectOut,
@@ -24,7 +26,11 @@ def _raise_http(error: RoutePlanningError) -> None:
         status = 503
     elif error.code in {"plan_not_found", "rep_not_found"}:
         status = 404
-    elif error.code in {"schedule_conflict", "invalid_plan_status"}:
+    elif error.code in {
+        "schedule_conflict",
+        "invalid_plan_status",
+        "coarse_plan_not_approvable",
+    }:
         status = 409
     raise HTTPException(
         status_code=status,
@@ -43,6 +49,19 @@ def preview_route_plan(
         except RoutePlanningError as error:
             _raise_http(error)
     return RoutePlanPreviewOut.model_validate(result)
+
+
+@router.post("/route-plans/batch-preview", response_model=RoutePlanBatchPreviewOut)
+def preview_route_plan_batch(
+    body: RoutePlanBatchPreviewRequest,
+    rep_id: int = Depends(get_authenticated_rep_id),
+) -> RoutePlanBatchPreviewOut:
+    with get_connection() as conn:
+        try:
+            result = route_planning.create_batch_preview(conn, rep_id=rep_id, request=body)
+        except RoutePlanningError as error:
+            _raise_http(error)
+    return RoutePlanBatchPreviewOut.model_validate(result)
 
 
 @router.post("/route-plans/{plan_id}/approve", response_model=RoutePlanApproveOut)

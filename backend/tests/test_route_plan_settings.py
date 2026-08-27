@@ -16,6 +16,7 @@ from app.services.route_planning import (
     TRAVEL_MODE_CACHE_KEYS,
     _add_realistic_travel_time,
     _limit_scored_candidates,
+    _merge_windows,
     _refine_transit_option,
     _resolve_search_area,
     policy_weights,
@@ -34,6 +35,15 @@ def test_route_plan_realistic_defaults() -> None:
     assert request.travel_time_buffer_percent == 20
     assert request.access_buffer_min == 10
     assert request.return_buffer_min == 30
+
+
+def test_merge_windows_normalizes_database_text_times() -> None:
+    assert _merge_windows(
+        [
+            ("10:00", "11:00"),
+            (time(9, 0), time(10, 30)),
+        ]
+    ) == [(time(9, 0), time(11, 0))]
 
 
 def test_custom_endpoint_requires_address() -> None:

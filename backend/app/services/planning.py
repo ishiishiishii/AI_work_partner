@@ -7,7 +7,7 @@ from decimal import Decimal
 from psycopg import Connection
 
 from app.schemas.models import PlanOut
-from app.services import affinity, ai, geocoding
+from app.services import affinity, ai, geocoding, target_simulation
 
 # A customer counts as "stale" (churn-risk, company-wide) with no visit or
 # deal in this many days. Shared by list_stale_customers and the plan
@@ -57,7 +57,8 @@ def list_targets(conn: Connection, rep_id: int | None = None) -> list[dict]:
     if rep_id:
         rows = conn.execute(
             """
-            select target_id, rep_id, target_month, target_amount, target_deal_count
+            select target_id, rep_id, target_month, target_amount, target_deal_count,
+                   target_gross_profit
             from sales_target
             where rep_id = %s
             order by target_month desc
@@ -67,7 +68,8 @@ def list_targets(conn: Connection, rep_id: int | None = None) -> list[dict]:
     else:
         rows = conn.execute(
             """
-            select target_id, rep_id, target_month, target_amount, target_deal_count
+            select target_id, rep_id, target_month, target_amount, target_deal_count,
+                   target_gross_profit
             from sales_target
             order by target_month desc
             """
@@ -82,17 +84,22 @@ def upsert_target(
     target_month: str,
     target_amount: Decimal,
     target_deal_count: int,
+    target_gross_profit: Decimal | None = None,
 ) -> dict:
     row = conn.execute(
         """
-        insert into sales_target (rep_id, target_month, target_amount, target_deal_count)
-        values (%s, %s, %s, %s)
+        insert into sales_target (
+          rep_id, target_month, target_amount, target_deal_count, target_gross_profit
+        )
+        values (%s, %s, %s, %s, %s)
         on conflict (rep_id, target_month) do update
           set target_amount = excluded.target_amount,
-              target_deal_count = excluded.target_deal_count
-        returning target_id, rep_id, target_month, target_amount, target_deal_count
+              target_deal_count = excluded.target_deal_count,
+              target_gross_profit = excluded.target_gross_profit
+        returning target_id, rep_id, target_month, target_amount, target_deal_count,
+                  target_gross_profit
         """,
-        (rep_id, _month_to_date(target_month), target_amount, target_deal_count),
+        (rep_id, _month_to_date(target_month), target_amount, target_deal_count, target_gross_profit),
     ).fetchone()
     conn.commit()
     return _format_target(row)
@@ -766,17 +773,21 @@ def update_plan_progress(
 
 
 def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
-    # Priority order: how far along the deal is (deal_phase.sort_order, closer
-    # to close first), then stale (churn-risk) customers within the same
-    # phase -- this only reorders the rep's own deals, it never reassigns a
-    # deal to a different rep (see AGENTS.md: team-wide assignment
-    # optimization is an explicit Later feature, out of MVP scope).
+    # Base ordering here is just a stable, deterministic starting point (deal_phase
+    # progress, then staleness, then amount) -- generate_plans/forecast re-rank this
+    # list via target_simulation.score_candidates once a target is known. This SQL
+    # order is what's used when no re-ranking happens (e.g. no sales_target row yet).
+    # Only reorders the rep's own deals, never reassigns a deal to a different rep
+    # (see AGENTS.md: team-wide assignment optimization is an explicit Later
+    # feature, out of MVP scope).
     return list(
         conn.execute(
             """
             select d.deal_id, d.customer_id, d.estimated_amount, d.win_probability,
                    d.customer_name, ca.industry_name, d.product_name,
-                   ca.last_contact_date,
+                   ca.last_contact_date, ca.days_since_contact,
+                   d.profit, dp.sort_order as deal_phase_sort_order,
+                   d.expected_effort_hours,
                    (
                      ca.last_contact_date is null
                      or ca.last_contact_date < current_date - %(threshold_days)s * interval '1 day'
@@ -796,6 +807,24 @@ def _candidate_deals(conn: Connection, rep_id: int) -> list[dict]:
             {"rep_id": rep_id, "threshold_days": STALE_THRESHOLD_DAYS},
         ).fetchall()
     )
+
+
+def _won_this_month(conn: Connection, *, rep_id: int, target_month: str) -> dict:
+    """Revenue/profit already closed (won, contract_date in target_month) --
+    the fixed baseline that target_simulation.simulate_achievement adds to
+    every trial before probabilistically summing the still-open deals."""
+    row = conn.execute(
+        """
+        select coalesce(sum(d.estimated_amount), 0) as won_amount,
+               coalesce(sum(d.profit), 0) as won_profit
+        from ai.deal d
+        where d.rep_id = %(rep_id)s
+          and d.deal_result_status = 'won'
+          and to_char(d.contract_date, 'YYYY-MM') = %(target_month)s
+        """,
+        {"rep_id": rep_id, "target_month": target_month},
+    ).fetchone()
+    return {"won_amount": Decimal(row["won_amount"]), "won_profit": Decimal(row["won_profit"])}
 
 
 def _cap_candidates_to_target(candidates: list[dict], target_amount: Decimal | None) -> list[dict]:
@@ -819,12 +848,25 @@ def _cap_candidates_to_target(candidates: list[dict], target_amount: Decimal | N
 
 _FALLBACK_FOLLOWUP_TYPES = ("資料作成", "電話", "メール")
 
+# Appended to each rule-based rationale so it explains *why* this month's gap
+# situation drove the ranking (target_simulation.classify_gap_situation),
+# matching what the AI path is asked to describe via generate_plan_selection's
+# situation payload. "on_track" gets no suffix -- nothing unusual to flag.
+_SITUATION_RATIONALE_SUFFIX = {
+    "both_short": "また、今月は売上・粗利ともに目標達成確率が低いため、両方に貢献する案件として優先度を上げています。",
+    "sales_only_short": "また、今月は売上目標の達成確率が低いため、見込み金額の大きい案件として優先度を上げています。",
+    "profit_only_short": "また、今月は粗利目標の達成確率が低いため、粗利率の高い案件として優先度を上げています。",
+}
 
-def _rule_based_plan_decisions(candidates: list[dict], base: date, month: int) -> list[dict]:
+
+def _rule_based_plan_decisions(
+    candidates: list[dict], base: date, month: int, situation: str = "on_track"
+) -> list[dict]:
     """Fallback used when the AI planner is unreachable or returns nothing
-    usable: same expected-value ordering the AI is asked to reproduce, one
-    visit per business day plus a same-day follow-up task so the day isn't
-    left mostly idle after a single short visit."""
+    usable: same gap-aware ordering the AI is asked to reproduce (see
+    generate_plans' target_simulation.score_candidates call), one visit per
+    business day plus a same-day follow-up task so the day isn't left mostly
+    idle after a single short visit."""
     decisions = []
     for index, deal in enumerate(candidates):
         plan_date = base + timedelta(days=index)
@@ -836,6 +878,7 @@ def _rule_based_plan_decisions(candidates: list[dict], base: date, month: int) -
             f"{deal['customer_name']} は見込み {expected:,.0f} 円・確度 {probability}% "
             f"（業界: {deal['industry_name'] or '未設定'}、商品: {deal['product_name']}）のため優先しています。"
         )
+        rationale += _SITUATION_RATIONALE_SUFFIX.get(situation, "")
         if deal["is_stale"]:
             if deal["last_contact_date"]:
                 rationale += (
@@ -1034,13 +1077,45 @@ def generate_plans(
 
     all_candidates = _candidate_deals(conn, rep_id)
     sales_target = conn.execute(
-        "select target_amount, target_deal_count from sales_target where rep_id = %s and target_month = %s",
+        """
+        select target_amount, target_deal_count, target_gross_profit
+        from sales_target where rep_id = %s and target_month = %s
+        """,
         (rep_id, _month_to_date(target_month)),
     ).fetchone()
     target_amount = Decimal(sales_target["target_amount"]) if sales_target else None
-    # all_candidates is already ranked by priority (deal_phase progress, then
-    # stale/amount); cap it to the deals needed to land the plan in the
-    # 100-120% achievement range instead of pulling in every open deal.
+    situation = "on_track"
+
+    if sales_target and all_candidates:
+        target_gross_profit = (
+            Decimal(sales_target["target_gross_profit"])
+            if sales_target["target_gross_profit"] is not None
+            else None
+        )
+        won = _won_this_month(conn, rep_id=rep_id, target_month=target_month)
+        simulation = target_simulation.simulate_achievement(
+            all_candidates,
+            already_won_amount=won["won_amount"],
+            already_won_profit=won["won_profit"],
+            target_amount=target_amount,
+            target_gross_profit=target_gross_profit,
+        )
+        situation = target_simulation.classify_gap_situation(
+            sales_probability=simulation.sales_probability,
+            profit_probability=simulation.profit_probability,
+        )
+        # Re-rank by the gap-aware priority score (spec sections 9.3/10) instead
+        # of _candidate_deals' plain SQL ORDER BY; _cap_candidates_to_target
+        # below stays a generic "walk the ranked list, stop at 120% of target"
+        # step regardless of how that ranking was produced.
+        target_simulation.score_candidates(
+            all_candidates, situation=situation, today=base, month_end=month_end,
+        )
+        all_candidates.sort(key=lambda deal: deal["value_score"], reverse=True)
+
+    # all_candidates is now ranked by priority; cap it to the deals needed to
+    # land the plan in the 100-120% achievement range instead of pulling in
+    # every open deal.
     candidates = _cap_candidates_to_target(all_candidates, target_amount)
     candidates_by_id = {deal["deal_id"]: deal for deal in candidates}
 
@@ -1059,10 +1134,11 @@ def generate_plans(
                 # 100+ open deals without dropping the deals worth planning.
                 candidates=candidates[:40],
                 sales_target=sales_target,
+                situation=situation,
             )
             used_ai = True
         except ai.AiPlanningError:
-            decisions = _rule_based_plan_decisions(candidates, base, month)
+            decisions = _rule_based_plan_decisions(candidates, base, month, situation)
 
     _fill_idle_days(decisions, candidates)
     _assign_time_slots(decisions)
@@ -1225,7 +1301,7 @@ def delete_result(conn: Connection, *, result_id: int, rep_id: int) -> dict:
 def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     target = conn.execute(
         """
-        select target_amount
+        select target_amount, target_gross_profit
         from sales_target
         where rep_id = %s and target_month = %s
         """,
@@ -1238,7 +1314,9 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     # 確率按分せずそのまま計上する(確度は候補選定の優先順位づけにのみ使う)。
     # plan_status='done' の予定は活動結果(activity_result)を紐づけて実際の結果を反映し、
     # 未対応(scheduled)のままの予定は expected_amount をそのまま計上する
-    # (フロントの calcForecastAmount と同じ考え方)。
+    # (フロントの calcForecastAmount と同じ考え方)。粗利も同じ考え方でdeal.profitを
+    # 合算する(フロントの calcForecastProfit と同じ考え方 -- 従来はクライアント側だけの
+    # 計算だった)。
     plan_stats = conn.execute(
         """
         select
@@ -1248,8 +1326,15 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
               else ap.expected_amount
             end
           ), 0) as expected_amount,
+          coalesce(sum(
+            case
+              when ap.plan_status = 'done' and latest.outcome = 'lost' then 0
+              else coalesce(d.profit, 0)
+            end
+          ), 0) as expected_gross_profit,
           count(*) filter (where ap.plan_status = 'scheduled')::int as open_plan_count
         from activity_plan ap
+        left join deal d on d.deal_id = ap.deal_id
         left join lateral (
           select ar.outcome
           from activity_result ar
@@ -1265,8 +1350,32 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
     ).fetchone()
 
     target_amount = Decimal(target["target_amount"])
+    target_gross_profit = (
+        Decimal(target["target_gross_profit"]) if target["target_gross_profit"] is not None else None
+    )
     expected_amount = Decimal(plan_stats["expected_amount"])
+    expected_gross_profit = Decimal(plan_stats["expected_gross_profit"])
     ratio = float(expected_amount / target_amount) if target_amount > 0 else 0.0
+    gross_profit_ratio = (
+        float(expected_gross_profit / target_gross_profit)
+        if target_gross_profit is not None and target_gross_profit > 0
+        else None
+    )
+
+    # Distinct from expected_amount/expected_gross_profit above (which only
+    # count what's already on the calendar this month): the simulation looks
+    # at every open deal in the pipeline, scheduled or not, to answer "what's
+    # our shot at the target by month end" (spec section 9.1/11).
+    open_deals = _candidate_deals(conn, rep_id)
+    won = _won_this_month(conn, rep_id=rep_id, target_month=target_month)
+    simulation = target_simulation.simulate_achievement(
+        open_deals,
+        already_won_amount=won["won_amount"],
+        already_won_profit=won["won_profit"],
+        target_amount=target_amount,
+        target_gross_profit=target_gross_profit,
+    )
+
     return {
         "rep_id": rep_id,
         "target_month": target_month,
@@ -1274,4 +1383,12 @@ def forecast(conn: Connection, *, rep_id: int, target_month: str) -> dict:
         "expected_amount": expected_amount,
         "attainment_ratio": ratio,
         "open_plan_count": plan_stats["open_plan_count"],
+        "target_gross_profit": target_gross_profit,
+        "expected_gross_profit": expected_gross_profit,
+        "gross_profit_attainment_ratio": gross_profit_ratio,
+        "sales_achievement_probability": simulation.sales_probability,
+        "profit_achievement_probability": simulation.profit_probability,
+        "joint_achievement_probability": simulation.joint_probability,
+        "sales_gap_amount": simulation.sales_gap,
+        "profit_gap_amount": simulation.profit_gap,
     }

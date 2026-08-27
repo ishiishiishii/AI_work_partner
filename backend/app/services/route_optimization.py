@@ -98,35 +98,87 @@ class VisitCandidate:
     value_score: Decimal = Decimal("0")
     score_components: dict[str, Decimal] = field(default_factory=dict)
     affinity_evidence: list[AffinityEvidence] = field(default_factory=list)
+    customer_type: str = "ongoing"
+    required_visit_count: int = 1
+    completed_visit_count: int = 0
+    scheduled_visit_count: int = 0
+    remaining_visit_count: int = 1
+    visit_count_source: str = "deal"
+    visit_count_history_size: int = 0
+    planned_visit_count: int = 1
+    visit_sequence: int = 1
+    sales_credit_fraction: Decimal = Decimal("1")
+
+    def _credited_money(self, value: Decimal) -> Decimal:
+        rounded = value.quantize(YEN, rounding=ROUND_HALF_UP)
+        if self.sales_credit_fraction == Decimal("1") or self.planned_visit_count <= 1:
+            return rounded
+        # Revenue is realized only when the planned negotiation sequence
+        # reaches its final meeting. Intermediate meetings still retain the
+        # full opportunity value for prioritization (properties below), but
+        # contribute zero to that day's revenue forecast.
+        return rounded if self.visit_sequence == self.planned_visit_count else Decimal("0")
 
     @property
-    def planned_sales(self) -> Decimal:
-        return sum((item.estimated_amount for item in self.economics), Decimal("0")).quantize(YEN)
+    def opportunity_planned_sales(self) -> Decimal:
+        return sum(
+            (item.estimated_amount for item in self.economics), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
 
     @property
-    def planned_gross_profit(self) -> Decimal | None:
+    def opportunity_planned_gross_profit(self) -> Decimal | None:
         values = [item.planned_gross_profit for item in self.economics]
         if any(value is None for value in values):
             return None
-        return sum((value for value in values if value is not None), Decimal("0")).quantize(YEN)
+        return sum(
+            (value for value in values if value is not None), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
 
     @property
-    def expected_sales(self) -> Decimal:
-        return sum((item.expected_sales for item in self.economics), Decimal("0")).quantize(YEN)
+    def opportunity_expected_sales(self) -> Decimal:
+        return sum(
+            (item.expected_sales for item in self.economics), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
 
     @property
-    def expected_gross_profit(self) -> Decimal | None:
+    def opportunity_expected_gross_profit(self) -> Decimal | None:
         values = [item.expected_gross_profit for item in self.economics]
         if any(value is None for value in values):
             return None
-        return sum((value for value in values if value is not None), Decimal("0")).quantize(YEN)
+        return sum(
+            (value for value in values if value is not None), Decimal("0")
+        ).quantize(YEN, rounding=ROUND_HALF_UP)
+
+    @property
+    def planned_sales(self) -> Decimal:
+        return self._credited_money(self.opportunity_planned_sales)
+
+    @property
+    def planned_gross_profit(self) -> Decimal | None:
+        total = self.opportunity_planned_gross_profit
+        if total is None:
+            return None
+        return self._credited_money(total)
+
+    @property
+    def expected_sales(self) -> Decimal:
+        return self._credited_money(self.opportunity_expected_sales)
+
+    @property
+    def expected_gross_profit(self) -> Decimal | None:
+        total = self.opportunity_expected_gross_profit
+        if total is None:
+            return None
+        return self._credited_money(total)
 
     @property
     def gross_profit_margin(self) -> Decimal | None:
-        profit = self.planned_gross_profit
-        if profit is None or self.planned_sales <= 0:
+        profit = self.opportunity_planned_gross_profit
+        if profit is None or self.opportunity_planned_sales <= 0:
             return None
-        return (profit / self.planned_sales * Decimal("100")).quantize(Decimal("0.01"))
+        return (
+            profit / self.opportunity_planned_sales * Decimal("100")
+        ).quantize(Decimal("0.01"))
 
     @property
     def best_affinity(self) -> AffinityEvidence | None:
@@ -195,9 +247,12 @@ def score_candidates(
     weights: dict[str, int],
     target_gap_ratio: Decimal = Decimal("0"),
 ) -> None:
-    sales_scores = _normalize([candidate.expected_sales for candidate in candidates])
+    sales_scores = _normalize([
+        candidate.opportunity_expected_sales for candidate in candidates
+    ])
     profit_scores = _normalize([
-        candidate.expected_gross_profit or Decimal("0") for candidate in candidates
+        candidate.opportunity_expected_gross_profit or Decimal("0")
+        for candidate in candidates
     ])
     phase_scores = _normalize([
         Decimal(max((_phase_value(name) for name in candidate.phase_names), default=0))
@@ -240,6 +295,7 @@ def score_candidates(
 
 def _phase_value(name: str) -> int:
     return {
+        "新規開拓": 10,
         "初回接触": 20,
         "ヒアリング": 40,
         "提案": 60,
@@ -414,7 +470,7 @@ def _solve_portfolios(
     return portfolios
 
 
-def _sum_totals(candidates: list[VisitCandidate], indexes: tuple[int, ...]) -> dict:
+def sum_totals(candidates: list[VisitCandidate], indexes: tuple[int, ...]) -> dict:
     chosen = [candidates[index] for index in indexes]
     known_profit = all(candidate.planned_gross_profit is not None for candidate in chosen)
     known_expected_profit = all(candidate.expected_gross_profit is not None for candidate in chosen)
@@ -446,7 +502,7 @@ def route_portfolio(
     turnaround_buffer_min: int = 0,
 ) -> RoutedOption:
     candidate_indexes = portfolio.candidate_indexes
-    totals = _sum_totals(candidates, candidate_indexes)
+    totals = sum_totals(candidates, candidate_indexes)
     if not candidate_indexes:
         return RoutedOption(portfolio, "routing_infeasible", [], 0, 0, 0, False, totals)
 
@@ -684,9 +740,22 @@ def candidate_economics_dict(candidate: VisitCandidate) -> dict:
         "gross_profit_margin": candidate.gross_profit_margin,
         "expected_sales": candidate.expected_sales,
         "expected_gross_profit": candidate.expected_gross_profit,
+        "opportunity_planned_sales": candidate.opportunity_planned_sales,
+        "opportunity_planned_gross_profit": candidate.opportunity_planned_gross_profit,
+        "opportunity_expected_sales": candidate.opportunity_expected_sales,
+        "opportunity_expected_gross_profit": candidate.opportunity_expected_gross_profit,
         "value_score": candidate.value_score,
         "gross_profit_available": candidate.planned_gross_profit is not None,
         "salesperson_fit_score": candidate.salesperson_fit_score,
+        "customer_type": candidate.customer_type,
+        "required_visit_count": candidate.required_visit_count,
+        "completed_visit_count": candidate.completed_visit_count,
+        "scheduled_visit_count": candidate.scheduled_visit_count,
+        "remaining_visit_count": candidate.remaining_visit_count,
+        "planned_visit_count": candidate.planned_visit_count,
+        "visit_sequence": candidate.visit_sequence,
+        "visit_count_source": candidate.visit_count_source,
+        "visit_count_history_size": candidate.visit_count_history_size,
         "affinity_matches": [
             {
                 "industry_name": evidence.industry_name,
@@ -706,7 +775,7 @@ def candidate_economics_dict(candidate: VisitCandidate) -> dict:
 
 
 def selection_reason(candidate: VisitCandidate) -> str:
-    profit = candidate.expected_gross_profit
+    profit = candidate.opportunity_expected_gross_profit
     profit_text = "粗利評価不可" if profit is None else f"期待粗利{profit:,.0f}円"
     best_affinity = candidate.best_affinity
     if best_affinity is None:
@@ -717,8 +786,26 @@ def selection_reason(candidate: VisitCandidate) -> str:
             f"過去{best_affinity.deal_count}件中{best_affinity.won_count}件成約"
             f"（成約率{best_affinity.win_rate * Decimal('100'):.0f}%）"
         )
+    if candidate.customer_type == "new":
+        visit_text = (
+            f"新規候補のため、同業・同規模などの過去"
+            f"{candidate.visit_count_history_size}件から必要商談"
+            f"{candidate.required_visit_count}回と推定"
+        )
+    else:
+        visit_text = (
+            f"商談中で必要{candidate.required_visit_count}回、"
+            f"完了{candidate.completed_visit_count}回、"
+            f"確定済み{candidate.scheduled_visit_count}回、"
+            f"未予定の残り{candidate.remaining_visit_count}回"
+        )
+    if candidate.planned_visit_count > 1:
+        visit_text += (
+            f"（この計画では{candidate.planned_visit_count}回中"
+            f"{candidate.visit_sequence}回目）"
+        )
     return (
-        f"期待売上{candidate.expected_sales:,.0f}円、{profit_text}、"
+        f"{visit_text}。案件期待売上{candidate.opportunity_expected_sales:,.0f}円、{profit_text}、"
         f"{affinity_text}、候補エリア内の移動効率を総合評価しました。"
     )
 

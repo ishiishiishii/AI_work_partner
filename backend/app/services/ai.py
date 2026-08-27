@@ -131,6 +131,14 @@ _VALID_CATEGORIES = {"visit", "task"}
 _MAX_PLAN_ITEMS = 60
 
 
+_SITUATION_LABELS = {
+    "both_short": "売上・粗利ともに目標達成確率が低い",
+    "sales_only_short": "売上目標の達成確率のみ低い",
+    "profit_only_short": "粗利目標の達成確率のみ低い",
+    "on_track": "売上・粗利とも目標達成確率は十分高い",
+}
+
+
 def generate_plan_selection(
     conn: Connection,
     *,
@@ -140,13 +148,18 @@ def generate_plan_selection(
     month_end: date,
     candidates: list[dict],
     sales_target: dict | None,
+    situation: str = "on_track",
 ) -> list[dict]:
     """Ask Qwen for this month's full activity mix -- not just which deals to
     visit, but also prep/follow-up/prospecting tasks (資料作成・電話・メール・
     新規開拓) -- with date, priority, and rationale for each. Only selection/
     scheduling/rationale come from the model -- amounts and probabilities for
     deal-linked items are always re-read from the deal row by the caller,
-    never trusted from model output.
+    never trusted from model output. `situation` (from
+    target_simulation.classify_gap_situation) is passed only so rationale text
+    can describe *why* today's ranking looks the way it does -- the model is
+    told not to use it to re-rank, since candidates already arrive pre-ranked
+    for exactly that gap situation.
     """
     candidate_payload = [
         {
@@ -165,6 +178,11 @@ def generate_plan_selection(
         {
             "target_amount": float(sales_target["target_amount"]),
             "target_deal_count": sales_target["target_deal_count"],
+            "target_gross_profit": (
+                float(sales_target["target_gross_profit"])
+                if sales_target.get("target_gross_profit") is not None
+                else None
+            ),
         }
         if sales_target
         else None
@@ -172,6 +190,9 @@ def generate_plan_selection(
     user_payload = {
         "target_month": target_month,
         "sales_target": target_payload,
+        # 順位づけには使わせない(candidate_dealsが既にこの状況を反映して並んでいる)、
+        # rationaleの説明文だけをこの状況に即した内容にするための読み取り専用の文脈。
+        "situation": _SITUATION_LABELS.get(situation, situation),
         "candidate_deals": candidate_payload,
     }
 
@@ -190,10 +211,14 @@ def generate_plan_selection(
         "従うべきルール:\n"
         f"- plan_date は{base_date.isoformat()}〜{month_end.isoformat()}の範囲の日付にすること\n"
         "- 同じ deal_id + activity_type の組み合わせを重複させないこと\n"
-        "- candidate_deals は商談ステージが進んでいる順(クロージングに近い順)に"
-        "既に並んでいるので、基本的にこの順番を優先すること。"
+        "- candidate_deals は、今月の売上・粗利目標の達成確率(sales_target.situation)を"
+        "踏まえた優先順位で既に並んでいるので、基本的にこの順番を優先すること。"
         "同程度の優先度であれば is_stale が true(長期間接点が無い)の顧客や、"
         "見込み金額(estimated_amount)が大きい商談を優先すること\n"
+        "- situation は候補の並び順に既に反映済みなので、並び替えの根拠として"
+        "使わないこと。rationale の文章表現を状況に合わせて説明する目的にのみ使うこと"
+        "(例: situationがsales_only_shortなら「売上目標達成確率が低いため、"
+        "見込み金額の大きい本案件を優先」のように説明する)\n"
         "- 訪問だけに偏らせず、商談前の資料作成、停滞している商談への電話・メール、"
         "新規開拓の時間なども適度に配置すること\n"
         "- 稼働日に1件だけ予定を置いて残りを空けたままにしないこと。"

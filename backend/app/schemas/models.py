@@ -45,6 +45,9 @@ class TargetCreate(BaseModel):
     target_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     target_amount: Decimal = Field(ge=0)
     target_deal_count: int = Field(default=0, ge=0)
+    # None = 粗利目標を設定しない(0円目標という意味ではない)。上流のUI/DBどちらでも
+    # NULLと0円を混同しないこと。
+    target_gross_profit: Decimal | None = Field(default=None, ge=0)
 
 
 class TargetOut(OrmModel):
@@ -52,6 +55,7 @@ class TargetOut(OrmModel):
     target_month: str
     target_amount: Decimal
     target_deal_count: int
+    target_gross_profit: Decimal | None = None
 
 
 class CustomerCreate(BaseModel):
@@ -278,6 +282,15 @@ class ForecastOut(BaseModel):
     expected_amount: Decimal
     attainment_ratio: float
     open_plan_count: int
+    # 粗利・達成確率まわりは目標に粗利設定が無ければNone(0%達成という意味ではない)。
+    target_gross_profit: Decimal | None = None
+    expected_gross_profit: Decimal = Decimal("0")
+    gross_profit_attainment_ratio: float | None = None
+    sales_achievement_probability: float = 0.0
+    profit_achievement_probability: float | None = None
+    joint_achievement_probability: float = 0.0
+    sales_gap_amount: Decimal = Decimal("0")
+    profit_gap_amount: Decimal | None = None
 
 class DeadlineCreate(BaseModel):
     rep_id: int

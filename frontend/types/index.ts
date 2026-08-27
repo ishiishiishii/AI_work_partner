@@ -14,6 +14,7 @@ export type SalesTarget = {
   target_month: string; // "YYYY-MM"
   target_amount: number;
   target_deal_count: number;
+  target_gross_profit: number | null; // null = 粗利目標を設定しない(0円目標ではない)
 };
 
 export type Forecast = {
@@ -23,6 +24,17 @@ export type Forecast = {
   forecast_amount: number;
   achievement_rate: number;
   open_plan_count: number; // まだ結果未入力の予定件数
+  target_gross_profit: number | null;
+  forecast_profit_amount: number;
+  gross_profit_achievement_rate: number | null; // target_gross_profitがnullならnull
+  // 以下3つはモンテカルロシミュレーションによる月末達成"確率"(0-100)で、
+  // achievement_rate(=予定済み活動の金額÷目標)とは別物。予定の有無に関わらず
+  // 進行中の商談パイプライン全体から算出する。
+  sales_achievement_probability: number;
+  profit_achievement_probability: number | null;
+  joint_achievement_probability: number;
+  sales_gap_amount: number;
+  profit_gap_amount: number | null;
 };
 
 // AI 参照用の第一正規形ビュー(ai.rep_affinity)の形にそのまま対応させている。
@@ -238,9 +250,22 @@ export type RoutePlanStop = {
     gross_profit_margin: number | null;
     expected_sales: number;
     expected_gross_profit: number | null;
+    opportunity_planned_sales: number;
+    opportunity_planned_gross_profit: number | null;
+    opportunity_expected_sales: number;
+    opportunity_expected_gross_profit: number | null;
     value_score: number;
     gross_profit_available: boolean;
     salesperson_fit_score: number;
+    customer_type: "new" | "ongoing";
+    required_visit_count: number;
+    completed_visit_count: number;
+    scheduled_visit_count: number;
+    remaining_visit_count: number;
+    planned_visit_count: number;
+    visit_sequence: number;
+    visit_count_source: string;
+    visit_count_history_size: number;
     affinity_matches: Array<{
       industry_name: string;
       category_name: string;
@@ -253,6 +278,9 @@ export type RoutePlanStop = {
   selection_reason: string;
   latitude: number;
   longitude: number;
+  // 週・月プレビューの概算プラン(detail_level="coarse")の立ち寄り先はtrue。
+  // 実移動時間で計算した順序・時刻ではなく、支店距離ベースの見積もりであることを示す。
+  estimated?: boolean;
 };
 
 export type RoutePlanEndpoint = {
@@ -338,6 +366,103 @@ export type RoutePlanPreview = {
   }>;
   selection_reason: string;
   excluded_reasons: string[];
+  warnings: string[];
+};
+
+// 月目標から顧客を選び、週・日目標へ配分した統合営業計画。
+// 各詳細日は1日プレビューと同じCP-SAT+RoutingModelを使う。APIで
+// detailed_daysを絞った場合だけ、それ以降は概算(detail_level="coarse")になる。
+export type RoutePlanBatchDayTotals = {
+  planned_sales: number;
+  planned_gross_profit: number | null;
+  expected_sales: number;
+  expected_gross_profit: number | null;
+  total_travel_min: number;
+  total_distance_m: number;
+  visit_count: number;
+};
+
+export type RoutePlanBatchDay = {
+  plan_id: number | null;
+  target_date: string;
+  detail_level: "detailed" | "coarse";
+  status: "proposed" | "failed";
+  target_amount: number;
+  shortfall_amount: number;
+  attainment_rate: number;
+  totals: RoutePlanBatchDayTotals;
+  stops: RoutePlanStop[];
+  warnings: string[];
+  solver: { cp_sat?: string; routing?: string };
+};
+
+export type RoutePlanWeek = {
+  week_number: number;
+  start_date: string;
+  end_date: string;
+  target_amount: number;
+  expected_sales: number;
+  shortfall_amount: number;
+  attainment_rate: number;
+  visit_count: number;
+  customer_names: string[];
+  focus: string;
+  days: RoutePlanBatchDay[];
+};
+
+export type RoutePlanPortfolioCustomer = {
+  customer_id: number;
+  customer_name: string;
+  customer_type: "new" | "ongoing";
+  planned_sales: number;
+  expected_sales: number;
+  expected_gross_profit: number | null;
+  salesperson_fit_score: number;
+  required_visit_count: number;
+  completed_visit_count: number;
+  scheduled_visit_count: number;
+  remaining_visit_count: number;
+  planned_visit_count: number;
+  visit_count_source: string;
+  assigned_date: string;
+  assigned_dates: string[];
+  selection_reason: string;
+};
+
+export type RoutePlanBatchPreview = {
+  batch_id: number;
+  rep_id: number;
+  rep_name: string;
+  horizon: "week" | "month";
+  start_date: string;
+  end_date: string;
+  detailed_days: number;
+  branch: {
+    branch_id: number;
+    branch_name: string;
+    location: string;
+    latitude: number;
+    longitude: number;
+  };
+  policy: "balanced" | "sales" | "gross_profit" | "short_travel";
+  weights: {
+    sales: number;
+    gross_profit: number;
+    affinity: number;
+    urgency: number;
+    phase: number;
+    target_gap: number;
+  };
+  days: RoutePlanBatchDay[];
+  weeks: RoutePlanWeek[];
+  selected_customers: RoutePlanPortfolioCustomer[];
+  totals: RoutePlanBatchDayTotals;
+  monthly_target_amount: number | null;
+  achieved_amount: number;
+  remaining_target_amount: number | null;
+  planning_target_amount: number | null;
+  portfolio_expected_sales: number;
+  portfolio_coverage_rate: number;
   warnings: string[];
 };
 

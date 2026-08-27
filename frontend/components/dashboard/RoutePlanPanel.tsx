@@ -14,7 +14,8 @@ type Props = {
   onApproved: () => Promise<void>;
 };
 
-function tomorrowInTokyo(): string {
+// 週・月バッチプレビュー(RouteBatchPlanPanel)も同じ書式・ラベルを使うため export する。
+export function tomorrowInTokyo(): string {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo",
     year: "numeric",
@@ -24,11 +25,11 @@ function tomorrowInTokyo(): string {
   return formatter.format(new Date(Date.now() + 24 * 60 * 60 * 1000));
 }
 
-function yen(value: number | null): string {
+export function yen(value: number | null): string {
   return value === null ? "粗利評価不可" : `${value.toLocaleString("ja-JP")}円`;
 }
 
-function clock(value: string): string {
+export function clock(value: string): string {
   return new Intl.DateTimeFormat("ja-JP", {
     timeZone: "Asia/Tokyo",
     hour: "2-digit",
@@ -37,11 +38,11 @@ function clock(value: string): string {
   }).format(new Date(value));
 }
 
-function shortClock(value: string): string {
+export function shortClock(value: string): string {
   return value.slice(0, 5);
 }
 
-function googleTransitDirectionsUrl(
+export function googleTransitDirectionsUrl(
   origin?: { latitude: number; longitude: number },
   destination?: { latitude: number; longitude: number },
 ): string {
@@ -51,7 +52,7 @@ function googleTransitDirectionsUrl(
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
-const TRAVEL_MODE_LABELS: Record<RoutePlanPreview["travel_mode"], string> = {
+export const TRAVEL_MODE_LABELS: Record<RoutePlanPreview["travel_mode"], string> = {
   driving: "車",
   transit: "公共交通（徒歩＋電車・バス）",
   walking: "徒歩",
@@ -76,7 +77,7 @@ const TOEI_ROUTE_LABELS: Record<string, string> = {
   "Tokyo Sakura Tram (Arakawa Line)": "東京さくらトラム（都電荒川線）",
 };
 
-function TransitItineraryDetails({ title, itinerary }: { title: string; itinerary: TransitItinerary }) {
+export function TransitItineraryDetails({ title, itinerary }: { title: string; itinerary: TransitItinerary }) {
   return (
     <div className="route-plan__transit-itinerary">
       <strong>
@@ -472,9 +473,12 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
               <li key={stop.customer_id}>
                 <strong>{clock(stop.arrival_at)}–{clock(stop.departure_at)} {stop.customer_name}</strong>
                 <span>
+                  {stop.economics.customer_type === "new" ? "新規" : "商談中"}・
+                  必要{stop.economics.required_visit_count}回・
+                  未予定残り{stop.economics.remaining_visit_count}回・
                   前区間 {stop.leg_travel_min}分 / {(stop.leg_distance_m / 1000).toFixed(1)}km・
-                  期待売上 {yen(stop.economics.expected_sales)}・
-                  期待粗利 {yen(stop.economics.expected_gross_profit)}・
+                  案件期待売上 {yen(stop.economics.opportunity_expected_sales)}・
+                  今回の売上見込 {yen(stop.economics.expected_sales)}・
                   担当者適合度 {Math.round(stop.economics.salesperson_fit_score)}/100
                 </span>
                 <small>商談後の準備・記録時間 {stop.turnaround_buffer_min}分</small>

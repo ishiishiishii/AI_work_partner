@@ -2306,6 +2306,164 @@ a {
   gap: 0.75rem;
 }
 
+.route-plan-batch__days {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.route-plan-batch__flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.route-plan-batch__flow article,
+.route-plan-batch__customer-grid article {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent));
+}
+
+.route-plan-batch__flow small,
+.route-plan-batch__flow span,
+.route-plan-batch__customer-grid span,
+.route-plan-batch__customer-grid small {
+  color: var(--muted);
+}
+
+.route-plan-batch__flow strong {
+  font-size: 1.15rem;
+}
+
+.route-plan-batch__portfolio {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.route-plan-batch__portfolio h3,
+.route-plan-batch__portfolio p {
+  margin: 0;
+}
+
+.route-plan-batch__customer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem;
+}
+
+.route-plan-batch__weeks {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.route-plan-batch__week {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 95%, var(--accent));
+}
+
+.route-plan-batch__week-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.route-plan-batch__week-summary::-webkit-details-marker {
+  display: none;
+}
+
+.route-plan-batch__week-summary > span:first-child {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.route-plan-batch__week-summary > span:last-child {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.route-plan-batch__week-body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.route-plan-batch__day {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface);
+}
+
+.route-plan-batch__day-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.route-plan-batch__day-summary::-webkit-details-marker {
+  display: none;
+}
+
+.route-plan-batch__day-date {
+  font-weight: 700;
+  min-width: 6.5rem;
+}
+
+.route-plan-batch__badge {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.route-plan-batch__badge--detailed {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 16%, var(--surface));
+}
+
+.route-plan-batch__badge--coarse {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, var(--surface));
+}
+
+.route-plan-batch__day-figures {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.route-plan-batch__day-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.route-plan-batch__day-body {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 760px) {
+  .route-plan-batch__flow {
+    grid-template-columns: 1fr;
+  }
+}
+
 ::selection {
   background: rgba(34, 211, 238, 0.3);
   color: #fff;

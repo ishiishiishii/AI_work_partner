@@ -14,11 +14,12 @@ export function getSupabaseBrowserClient(): SupabaseClient | null {
     try {
       const parsed = new URL(url);
       const pageHost = window.location.hostname;
-      if (
-        pageHost !== "localhost" &&
-        pageHost !== "127.0.0.1" &&
-        (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")
-      ) {
+      const isLoopback = (host: string) => host === "localhost" || host === "127.0.0.1";
+      // Same reasoning as getApiBaseUrl (lib/api.ts): only rewrite when
+      // either side is a bare loopback address that doesn't describe where
+      // this browser actually is. Leaves Codespaces-style per-port
+      // subdomains (both sides real, non-loopback hostnames) untouched.
+      if (pageHost !== parsed.hostname && (isLoopback(pageHost) || isLoopback(parsed.hostname))) {
         parsed.hostname = pageHost;
         url = parsed.origin;
       }

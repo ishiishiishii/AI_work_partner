@@ -7,6 +7,7 @@ import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
+import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel";
 import { RoutePlanPanel } from "@/components/dashboard/RoutePlanPanel";
 import {
   cancelPlan,
@@ -142,6 +143,7 @@ export default function DashboardPage() {
             target_month: TARGET_MONTH,
             target_amount: 0,
             target_deal_count: 0,
+            target_gross_profit: null,
           },
         );
         setPlans(initialVisitPlans);
@@ -166,7 +168,11 @@ export default function DashboardPage() {
     };
   }, [REP_ID]);
 
-  async function handleTargetSave(input: { target_amount: number; target_deal_count: number }) {
+  async function handleTargetSave(input: {
+    target_amount: number;
+    target_deal_count: number;
+    target_gross_profit: number | null;
+  }) {
     if (REP_ID === null) return;
     const repId = REP_ID;
     const updated = await saveSalesTarget(repId, TARGET_MONTH, input);
@@ -549,9 +555,15 @@ export default function DashboardPage() {
   const forecastAmount = forecast ? forecast.forecast_amount : calcForecastAmount(plans);
   const achievementRate = forecast ? forecast.achievement_rate : calcAchievementRate(plans, target.target_amount);
 
-  // 見込み粗利。バックエンドのforecastにはまだ粗利が無いため、
-  // planに紐づくdeal.profitからクライアント側で算出する
-  const forecastProfitAmount = calcForecastProfit(plans, deals);
+  // 見込み粗利。バックエンドのforecastが粗利も返すようになったので、
+  // そちらを優先し、未登録月のフォールバックのみクライアント計算を使う
+  const forecastProfitAmount = forecast ? forecast.forecast_profit_amount : calcForecastProfit(plans, deals);
+
+  // 達成"確率"(モンテカルロシミュレーション)。フォールバック計算を持たないため、
+  // forecastが無い(目標未登録)月は「算出不可」として0%扱いにする
+  const salesAchievementProbability = forecast ? forecast.sales_achievement_probability : 0;
+  const profitAchievementProbability = forecast ? forecast.profit_achievement_probability : null;
+  const jointAchievementProbability = forecast ? forecast.joint_achievement_probability : 0;
 
   // 「現在の実績」は成約(won)確定分のみの金額。バックエンドのforecastには
   // 見込み(未対応・延期分含む)しか無いため、常にplansから算出する
@@ -570,6 +582,9 @@ export default function DashboardPage() {
             forecastProfitAmount={forecastProfitAmount}
             actualAchievedAmount={actualAchievedAmount}
             actualAchievementRate={actualAchievementRate}
+            salesAchievementProbability={salesAchievementProbability}
+            profitAchievementProbability={profitAchievementProbability}
+            jointAchievementProbability={jointAchievementProbability}
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
@@ -578,6 +593,7 @@ export default function DashboardPage() {
             onPlanChange={setRoutePlan}
             onApproved={handleRouteApproved}
           />
+          <RouteBatchPlanPanel onApproved={handleRouteApproved} />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
           {needsInitialPlan ? (

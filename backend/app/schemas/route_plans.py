@@ -28,6 +28,36 @@ class RouteSearchAreaInput(BaseModel):
         return self
 
 
+def _validate_common_route_settings(model: BaseModel) -> None:
+    """Shared by RoutePlanPreviewRequest and RoutePlanBatchPreviewRequest,
+    which duplicate the same work-hours/weight/break fields for a single day
+    vs. a whole horizon respectively."""
+    custom_weights = (
+        model.sales_weight_percent,
+        model.gross_profit_weight_percent,
+    )
+    if any(value is not None for value in custom_weights):
+        if any(value is None for value in custom_weights):
+            raise ValueError(
+                "sales_weight_percent and gross_profit_weight_percent must be set together"
+            )
+        if sum(value for value in custom_weights if value is not None) != 100:
+            raise ValueError("sales and gross-profit weights must add up to 100")
+    if model.work_start >= model.work_end:
+        raise ValueError("work_start must be earlier than work_end")
+    if model.break_enabled:
+        if model.break_start >= model.break_end:
+            raise ValueError("break_start must be earlier than break_end")
+        if model.break_start < model.work_start or model.break_end > model.work_end:
+            raise ValueError("break must be within working hours")
+    work_minutes = (
+        model.work_end.hour * 60 + model.work_end.minute
+        - model.work_start.hour * 60 - model.work_start.minute
+    )
+    if model.return_buffer_min >= work_minutes:
+        raise ValueError("return_buffer_min must be shorter than working hours")
+
+
 class RoutePlanPreviewRequest(BaseModel):
     target_date: date
     policy: Literal["balanced", "sales", "gross_profit", "short_travel"] = "balanced"
@@ -52,30 +82,45 @@ class RoutePlanPreviewRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "RoutePlanPreviewRequest":
-        custom_weights = (
-            self.sales_weight_percent,
-            self.gross_profit_weight_percent,
-        )
-        if any(value is not None for value in custom_weights):
-            if any(value is None for value in custom_weights):
-                raise ValueError(
-                    "sales_weight_percent and gross_profit_weight_percent must be set together"
-                )
-            if sum(value for value in custom_weights if value is not None) != 100:
-                raise ValueError("sales and gross-profit weights must add up to 100")
-        if self.work_start >= self.work_end:
-            raise ValueError("work_start must be earlier than work_end")
-        if self.break_enabled:
-            if self.break_start >= self.break_end:
-                raise ValueError("break_start must be earlier than break_end")
-            if self.break_start < self.work_start or self.break_end > self.work_end:
-                raise ValueError("break must be within working hours")
-        work_minutes = (
-            self.work_end.hour * 60 + self.work_end.minute
-            - self.work_start.hour * 60 - self.work_start.minute
-        )
-        if self.return_buffer_min >= work_minutes:
-            raise ValueError("return_buffer_min must be shorter than working hours")
+        _validate_common_route_settings(self)
+        return self
+
+
+class RoutePlanBatchPreviewRequest(BaseModel):
+    """Month-to-week-to-day integrated planning request.
+
+    ``horizon=week`` remains available for API compatibility, while the
+    dashboard uses ``month`` and asks every business day to reuse the existing
+    single-day route solver. ``detailed_days`` can still cap the expensive
+    route calculation for non-dashboard callers.
+    """
+
+    start_date: date
+    horizon: Literal["week", "month"] = "week"
+    detailed_days: int | None = Field(default=None, ge=1, le=31)
+    policy: Literal["balanced", "sales", "gross_profit", "short_travel"] = "balanced"
+    sales_weight_percent: int | None = Field(default=None, ge=0, le=100)
+    gross_profit_weight_percent: int | None = Field(default=None, ge=0, le=100)
+    max_visits: int = Field(default=4, ge=1, le=10)
+    work_start: time = time(9, 0)
+    work_end: time = time(18, 0)
+    travel_mode: Literal["driving", "transit", "walking", "cycling"] = "driving"
+    start_location: RouteEndpointInput = Field(default_factory=RouteEndpointInput)
+    end_location: RouteEndpointInput = Field(default_factory=RouteEndpointInput)
+    search_area: RouteSearchAreaInput = Field(default_factory=RouteSearchAreaInput)
+    break_enabled: bool = True
+    break_start: time = time(12, 0)
+    break_end: time = time(13, 0)
+    turnaround_buffer_min: int = Field(default=20, ge=0, le=60)
+    travel_time_buffer_percent: int = Field(default=20, ge=0, le=100)
+    access_buffer_min: int = Field(default=10, ge=0, le=60)
+    return_buffer_min: int = Field(default=30, ge=0, le=120)
+    min_expected_sales: Decimal | None = Field(default=None, ge=0)
+    min_expected_gross_profit: Decimal | None = None
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> "RoutePlanBatchPreviewRequest":
+        _validate_common_route_settings(self)
         return self
 
 
@@ -96,6 +141,7 @@ class RoutePlanStopOut(BaseModel):
     selection_reason: str
     latitude: float
     longitude: float
+    estimated: bool = False
 
 
 class RoutePlanOptionOut(BaseModel):
@@ -146,6 +192,90 @@ class RoutePlanApproveOut(BaseModel):
 class RoutePlanRejectOut(BaseModel):
     plan_id: int
     status: Literal["rejected"]
+
+
+class RoutePlanBatchDayOut(BaseModel):
+    plan_id: int | None
+    target_date: date
+    detail_level: Literal["detailed", "coarse"]
+    status: Literal["proposed", "failed"]
+    target_amount: Decimal = Decimal("0")
+    shortfall_amount: Decimal = Decimal("0")
+    attainment_rate: float = 0
+    # 0円 = 粗利目標が未設定/その日への配分が無いという意味(月全体で
+    # 粗利目標がnullなら常に0)。売上のtarget_amountと同じ配分ロジックを流用。
+    target_gross_profit: Decimal = Decimal("0")
+    totals: dict[str, Any]
+    stops: list[RoutePlanStopOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    solver: dict[str, Any] = Field(default_factory=dict)
+
+
+class RoutePlanWeekOut(BaseModel):
+    week_number: int
+    start_date: date
+    end_date: date
+    target_amount: Decimal
+    expected_sales: Decimal
+    shortfall_amount: Decimal
+    attainment_rate: float
+    target_gross_profit: Decimal = Decimal("0")
+    expected_gross_profit: Decimal = Decimal("0")
+    visit_count: int
+    customer_names: list[str] = Field(default_factory=list)
+    focus: str
+    days: list[RoutePlanBatchDayOut] = Field(default_factory=list)
+
+
+class RoutePlanPortfolioCustomerOut(BaseModel):
+    customer_id: int
+    customer_name: str
+    customer_type: Literal["new", "ongoing"] = "ongoing"
+    planned_sales: Decimal
+    expected_sales: Decimal
+    expected_gross_profit: Decimal | None = None
+    salesperson_fit_score: Decimal
+    required_visit_count: int = 1
+    completed_visit_count: int = 0
+    scheduled_visit_count: int = 0
+    remaining_visit_count: int = 1
+    planned_visit_count: int = 1
+    visit_count_source: str = "deal.expected_visit_count"
+    assigned_date: date
+    assigned_dates: list[date] = Field(default_factory=list)
+    selection_reason: str
+
+
+class RoutePlanBatchPreviewOut(BaseModel):
+    batch_id: int
+    rep_id: int
+    rep_name: str
+    horizon: Literal["week", "month"]
+    start_date: date
+    end_date: date
+    detailed_days: int
+    branch: dict[str, Any]
+    policy: str
+    weights: dict[str, int]
+    days: list[RoutePlanBatchDayOut]
+    weeks: list[RoutePlanWeekOut] = Field(default_factory=list)
+    selected_customers: list[RoutePlanPortfolioCustomerOut] = Field(default_factory=list)
+    totals: dict[str, Any]
+    monthly_target_amount: Decimal | None = None
+    achieved_amount: Decimal = Decimal("0")
+    remaining_target_amount: Decimal | None = None
+    planning_target_amount: Decimal | None = None
+    portfolio_expected_sales: Decimal = Decimal("0")
+    portfolio_coverage_rate: float = 0
+    # 粗利目標(sales_target.target_gross_profit)が未設定ならNone(0円目標ではない)。
+    monthly_target_gross_profit: Decimal | None = None
+    achieved_gross_profit: Decimal = Decimal("0")
+    # モンテカルロシミュレーションによる月末達成確率(0-1)。planning.forecast()
+    # (backend/app/services/target_simulation.py)と同じエンジン・同じ意味。
+    sales_achievement_probability: float = 0
+    profit_achievement_probability: float | None = None
+    joint_achievement_probability: float = 0
+    warnings: list[str]
 
 
 class GeocodingBatchOut(BaseModel):

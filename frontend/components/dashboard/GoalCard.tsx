@@ -10,7 +10,16 @@ type GoalCardProps = {
   forecastProfitAmount: number;
   actualAchievedAmount: number;
   actualAchievementRate: number;
-  onSave: (input: { target_amount: number; target_deal_count: number }) => Promise<void> | void;
+  // モンテカルロシミュレーションによる月末達成"確率"(0-100)。予定の有無に関わらず
+  // 進行中の商談パイプライン全体から算出される、achievementRateとは別の指標。
+  salesAchievementProbability: number;
+  profitAchievementProbability: number | null;
+  jointAchievementProbability: number;
+  onSave: (input: {
+    target_amount: number;
+    target_deal_count: number;
+    target_gross_profit: number | null;
+  }) => Promise<void> | void;
   willGeneratePlan?: boolean;
 };
 
@@ -59,6 +68,10 @@ function AchievementRing({
   );
 }
 
+function formatProbability(rate: number | null): string {
+  return rate === null ? "—" : `${rate.toFixed(0)}%`;
+}
+
 export function GoalCard({
   rep,
   target,
@@ -66,28 +79,46 @@ export function GoalCard({
   forecastProfitAmount,
   actualAchievedAmount,
   actualAchievementRate,
+  salesAchievementProbability,
+  profitAchievementProbability,
+  jointAchievementProbability,
   onSave,
   willGeneratePlan = false,
 }: GoalCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [draftAmount, setDraftAmount] = useState(String(target.target_amount));
+  // 空文字列 = 粗利目標を設定しない(null)。0円目標とは区別する。
+  const [draftGrossProfit, setDraftGrossProfit] = useState(
+    target.target_gross_profit === null ? "" : String(target.target_gross_profit),
+  );
 
   const amountValue = Number(draftAmount);
   const isDraftValid = Number.isFinite(amountValue) && amountValue > 0;
+  const grossProfitValue = draftGrossProfit.trim() === "" ? null : Number(draftGrossProfit);
+  const isGrossProfitDraftValid =
+    grossProfitValue === null || (Number.isFinite(grossProfitValue) && grossProfitValue >= 0);
 
   function startEditing() {
     setDraftAmount(String(target.target_amount));
+    setDraftGrossProfit(target.target_gross_profit === null ? "" : String(target.target_gross_profit));
     setIsEditing(true);
   }
 
   async function handleSave() {
-    if (!isDraftValid) {
+    if (!isDraftValid || !isGrossProfitDraftValid) {
       return;
     }
     setIsSaving(true);
-    // 目標件数はこの画面では編集不可のため、既存値をそのまま引き継いで送信する
-    await onSave({ target_amount: amountValue, target_deal_count: target.target_deal_count });
+    // 目標件数はこの画面では編集不可のため、既存値をそのまま引き継いで送信する。
+    // target_gross_profit も、この保存で編集していなくても必ず現在値(または
+    // 上で編集した値)を送る -- バックエンドは全量upsertなので、省略すると
+    // 次の保存でNULLへ消えてしまう(saveSalesTargetのコメント参照)。
+    await onSave({
+      target_amount: amountValue,
+      target_deal_count: target.target_deal_count,
+      target_gross_profit: grossProfitValue,
+    });
     setIsSaving(false);
     setIsEditing(false);
   }
@@ -136,7 +167,7 @@ export function GoalCard({
                     <button
                       type="submit"
                       className="goal-card__save"
-                      disabled={!isDraftValid || isSaving}
+                      disabled={!isDraftValid || !isGrossProfitDraftValid || isSaving}
                     >
                       {isSaving ? "保存中..." : "保存"}
                     </button>
@@ -162,6 +193,32 @@ export function GoalCard({
               </dd>
             </div>
             <div>
+              <dt>粗利目標(任意)</dt>
+              <dd>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    placeholder="未設定"
+                    value={draftGrossProfit}
+                    onChange={(event) => setDraftGrossProfit(event.target.value)}
+                    disabled={isSaving}
+                    aria-label="粗利目標を変更する"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="goal-card__amount-button"
+                    onClick={startEditing}
+                    aria-label="粗利目標を変更する"
+                  >
+                    {target.target_gross_profit === null ? "未設定" : formatYen(target.target_gross_profit)}
+                  </button>
+                )}
+              </dd>
+            </div>
+            <div>
               <dt>見込み売上</dt>
               <dd className="goal-card__forecast">{formatYen(forecastAmount)}</dd>
             </div>
@@ -172,6 +229,18 @@ export function GoalCard({
             <div>
               <dt>現在の実績</dt>
               <dd className="goal-card__actual">{formatYen(actualAchievedAmount)}</dd>
+            </div>
+            <div>
+              <dt>売上達成確率</dt>
+              <dd>{formatProbability(salesAchievementProbability)}</dd>
+            </div>
+            <div>
+              <dt>粗利達成確率</dt>
+              <dd>{formatProbability(profitAchievementProbability)}</dd>
+            </div>
+            <div>
+              <dt>同時達成確率</dt>
+              <dd>{formatProbability(jointAchievementProbability)}</dd>
             </div>
           </dl>
           {isEditing && willGeneratePlan && (

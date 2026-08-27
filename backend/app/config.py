@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     route_phase_weight: int = 10
     route_target_gap_weight: int = 10
 
+    # Week/month batch planning: near-term days are solved in full detail,
+    # remaining days are geographically clustered and estimated cheaply.
+    route_batch_detailed_days: int = 3
+    route_batch_candidate_limit: int = 150
+    route_batch_pool_multiplier: int = 4
+    route_batch_assumed_speed_kmh: int = 25
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]
