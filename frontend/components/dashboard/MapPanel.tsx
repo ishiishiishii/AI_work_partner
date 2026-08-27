@@ -33,9 +33,10 @@ const JAPAN_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 // ピンを囲む余白(ピクセル指定なので、都市1つ分でも県またぎでも見た目の余白が揃う)。
-// maxZoomは、ピンが1件しかない・1箇所に密集している時に寄りすぎて建物レベルまで
-// 拡大されるのを防ぐための上限。
-const FIT_BOUNDS_OPTIONS = { padding: [32, 32] as [number, number], maxZoom: 11 };
+// maxZoomは、ピンが1件しかない・1箇所に密集している時にどこまで寄れるかの上限。
+// 今月の計画にある顧客だけに絞り込んだ後は数件に収まることが多く、低すぎると
+// (以前は11)県レベルの引きになって見づらいため、街区レベルまで寄れる値にしている。
+const FIT_BOUNDS_OPTIONS = { padding: [32, 32] as [number, number], maxZoom: 14 };
 
 export function MapPanel({ customers, territory, plans, targetMonth }: MapPanelProps) {
   // 担当エリア(担当営業所が管轄する都道府県)の企業のみに絞り込む。territory未取得中
