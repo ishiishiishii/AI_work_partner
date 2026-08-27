@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Orbitron } from "next/font/google";
 import { AppNav } from "@/components/AppNav";
+import { InitialPlanGenerationProvider } from "@/lib/initialPlanGenerationContext";
 import { QuickAddPlanProvider } from "@/lib/quickAddPlanContext";
 import { RepProvider } from "@/lib/repContext";
+import { RouteBatchPlanProvider } from "@/lib/routeBatchPlanContext";
 import "./globals.css";
 
 const orbitron = Orbitron({
@@ -27,8 +29,12 @@ export default function RootLayout({
       <body>
         <RepProvider>
           <QuickAddPlanProvider>
-            <AppNav />
-            {children}
+            <InitialPlanGenerationProvider>
+              <RouteBatchPlanProvider>
+                <AppNav />
+                {children}
+              </RouteBatchPlanProvider>
+            </InitialPlanGenerationProvider>
           </QuickAddPlanProvider>
         </RepProvider>
       </body>

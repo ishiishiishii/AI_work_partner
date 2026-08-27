@@ -226,6 +226,8 @@ export type ActivityPlan = {
   result_status: DealResultStatus;
   memo: string | null; // 企業訪問での自由メモ
   progress_percent: number; // 0-100。事務作業を確定した後の進捗表示に使う
+  week_number?: number; // 第○週(月内の月曜始まり週の連番)。APIから返らない場合はplan_dateから算出する
+  is_draft: boolean; // 月間営業スケジュールで週計算した直後、まだ「採用」前の下書き
 };
 
 export type TransitLeg = {

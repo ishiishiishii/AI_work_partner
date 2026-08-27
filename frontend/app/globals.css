@@ -965,6 +965,11 @@ a {
   background: color-mix(in srgb, var(--ai) 15%, transparent);
 }
 
+.badge--draft {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+}
+
 .badge--size-small {
   color: var(--muted);
   background: color-mix(in srgb, var(--muted) 18%, transparent);
