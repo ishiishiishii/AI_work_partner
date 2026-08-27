@@ -333,6 +333,174 @@ a {
   color: var(--muted);
 }
 
+.profile-section + .profile-section {
+  margin-top: 1.5rem;
+}
+
+.profile-section__hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.25rem 0 1rem;
+}
+
+.profile-weekday-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 0.6rem;
+}
+
+.profile-weekday-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.75rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.profile-weekday-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.profile-weekday-toggle.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.profile-weekday-toggle__label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.profile-weekday-toggle__state {
+  font-size: 0.75rem;
+}
+
+.profile-task-duration-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.profile-task-duration-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.profile-task-duration-list__name {
+  color: var(--ink);
+}
+
+.profile-task-duration-list__input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+
+.profile-task-duration-list__input input {
+  width: 5rem;
+  font-size: 1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: inherit;
+  background: var(--card);
+}
+
+.profile-task-duration-list__input input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.profile-task-duration-add {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.profile-task-duration-add input {
+  flex: 1;
+  font-size: 1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: inherit;
+  background: var(--card);
+}
+
+.profile-task-duration-add input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.team-month-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.5rem 0 1.25rem;
+}
+
+.team-month-select select {
+  font-size: 1rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--card);
+  font-family: inherit;
+}
+
+.team-summary {
+  margin-bottom: 1.5rem;
+}
+
+.team-member-table__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.team-member-table__table th,
+.team-member-table__table td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.team-member-table__table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+
+.team-member-table__table td {
+  color: var(--ink);
+}
+
+.team-member-table__no-target {
+  color: var(--muted);
+}
+
 .activity-plan-list__header {
   display: flex;
   align-items: center;

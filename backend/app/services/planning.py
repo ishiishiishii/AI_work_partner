@@ -27,7 +27,14 @@ def _format_target(row: dict) -> dict:
 
 
 def list_reps(conn: Connection) -> list[dict]:
-    rows = conn.execute("select rep_id, rep_name from sales_rep order by rep_id").fetchall()
+    rows = conn.execute(
+        """
+        select r.rep_id, r.rep_name, r.branch_id, b.branch_name
+        from sales_rep r
+        join branch b on b.branch_id = r.branch_id
+        order by r.rep_id
+        """
+    ).fetchall()
     return list(rows)
 
 

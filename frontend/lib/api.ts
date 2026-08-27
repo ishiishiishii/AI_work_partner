@@ -5,6 +5,7 @@ import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
   ActivityPlanCategory,
+  AdminTaskType,
   Customer,
   CustomerSuggestion,
   Deadline,
@@ -14,6 +15,7 @@ import type {
   Masters,
   Product,
   RepAffinity,
+  RepProfile,
   SalesRep,
   SalesTarget,
   StaleCustomer,
@@ -765,6 +767,59 @@ export async function recalculateRepAffinity(repId: number): Promise<void> {
     method: "POST",
   });
   if (!res.ok) throw new Error(`自己分析スコアの再計算に失敗しました (HTTP ${res.status})`);
+}
+
+export async function fetchAdminTaskTypes(): Promise<AdminTaskType[]> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin-task-types`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`事務作業タスク一覧の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function createAdminTaskType(taskName: string): Promise<AdminTaskType> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/admin-task-types`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task_name: taskName }),
+  });
+  if (!res.ok) throw new Error(`タスクの追加に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function fetchRepProfile(repId: number): Promise<RepProfile> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/profile`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`プロフィール(今後拡張予定)の取得に失敗しました (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function saveHomeOfficeAvailability(
+  repId: number,
+  dayOfWeek: number,
+  isHomeAvailable: boolean,
+): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/home-office`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ day_of_week: dayOfWeek, is_home_available: isHomeAvailable }),
+  });
+  if (!res.ok) throw new Error(`在宅可否の保存に失敗しました (HTTP ${res.status})`);
+}
+
+export async function saveAdminTaskDuration(
+  repId: number,
+  taskTypeId: number,
+  durationMinutes: number,
+): Promise<void> {
+  const base = getApiBaseUrl();
+  const res = await fetch(`${base}/api/reps/${repId}/task-durations/${taskTypeId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ duration_minutes: durationMinutes }),
+  });
+  if (!res.ok) throw new Error(`所要時間の保存に失敗しました (HTTP ${res.status})`);
 }
 
 export type AiChatHistoryMessage = {

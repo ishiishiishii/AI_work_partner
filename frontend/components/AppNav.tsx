@@ -61,6 +61,28 @@ const LINKS = [
       </svg>
     ),
   },
+  {
+    href: "/team",
+    label: "管理者画面(今後拡張予定)",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <circle cx="8" cy="8" r="3" />
+        <circle cx="17" cy="9" r="2.4" />
+        <path d="M3 20c0-3.3 2.2-5.7 5-5.7s5 2.4 5 5.7" />
+        <path d="M14 20c0-2.6 1.6-4.6 3.8-4.6s3.8 2 3.8 4.6" />
+      </svg>
+    ),
+  },
+  {
+    href: "/profile",
+    label: "プロフィール(今後拡張予定)",
+    icon: (
+      <svg {...ICON_PROPS}>
+        <circle cx="12" cy="8.2" r="3.7" />
+        <path d="M4.5 20c0-4.1 3.4-7 7.5-7s7.5 2.9 7.5 7" />
+      </svg>
+    ),
+  },
 ];
 
 export function AppNav() {

@@ -1,6 +1,8 @@
 export type SalesRep = {
   rep_id: number;
   rep_name: string;
+  branch_id: number;
+  branch_name: string;
 };
 
 // 担当者の営業所(branch)が管轄する都道府県一覧。GET /api/reps/{rep_id}/territory が返す。
@@ -39,6 +41,32 @@ export type RepAffinity = {
   win_rate: number; // 0-1
   avg_won_amount: number;
   affinity_score: number;
+};
+
+// 曜日ごとの在宅可否と、事務作業タスク種別ごとの所要時間見積もり。
+// 将来的にルート計画(work_start/work_end/turnaround_buffer_min)の初期値に
+// 反映する想定だが、現時点では表示・記録のみで route_planning 側は未連携。
+export type AdminTaskType = {
+  task_type_id: number;
+  task_name: string;
+  is_default: boolean;
+};
+
+export type RepHomeOfficeDay = {
+  day_of_week: number; // 0=月, 1=火, ... 6=日
+  is_home_available: boolean;
+};
+
+export type RepAdminTaskDuration = {
+  task_type_id: number;
+  task_name: string;
+  duration_minutes: number | null;
+};
+
+export type RepProfile = {
+  rep_id: number;
+  home_office: RepHomeOfficeDay[];
+  task_durations: RepAdminTaskDuration[];
 };
 
 // 見込み金額・成約確率・ステータスは deal（商談）側に移動したため、
