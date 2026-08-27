@@ -37,6 +37,9 @@ type ActivityPlanListProps = {
   onResultChange: (planId: number, status: DealResultStatus, activityTypeName: string) => void;
   onPostpone: (planId: number, newDate: string, activityTypeName: string) => void;
   onRequestAlternative: (planId: number) => void;
+  altPreview: { planId: number; label: string } | null;
+  onConfirmAlternative: () => void;
+  onCancelAlternative: () => void;
   onEditPlan: (planId: number, updates: PlanEditFields) => void;
   onAddPlan: (plan: ActivityPlan) => void;
   onConfirmPlan: (planId: number) => void;
@@ -316,6 +319,9 @@ export function ActivityPlanList({
   onResultChange,
   onPostpone,
   onRequestAlternative,
+  altPreview,
+  onConfirmAlternative,
+  onCancelAlternative,
   onEditPlan,
   onAddPlan,
   onConfirmPlan,
@@ -573,6 +579,29 @@ export function ActivityPlanList({
     );
   }
 
+  // 「対応が難しい」ボタン。押した瞬間にAIが差し替えを確定していた挙動を改め、
+  // 提案を確認してから確定/やめるを選べるようにしている(一覧行・詳細モーダル共通)
+  function renderAlternativeControl(planId: number, label: string) {
+    if (altPreview?.planId !== planId) {
+      return (
+        <button type="button" className="activity-plan-list__alt-button" onClick={() => onRequestAlternative(planId)}>
+          {label}
+        </button>
+      );
+    }
+    return (
+      <span className="activity-plan-list__alt-preview">
+        代わりに「{altPreview.label}」はどうですか？
+        <button type="button" className="activity-plan-list__result-button" onClick={onConfirmAlternative}>
+          この内容で差し替える
+        </button>
+        <button type="button" className="activity-plan-list__undo-button" onClick={onCancelAlternative}>
+          やめる
+        </button>
+      </span>
+    );
+  }
+
   // 一覧行・詳細モーダル・「月」表示(企業グループ)から共通で使う予定1件分の中身。
   // dateLabel は「日」の時刻・その他の日付表示用。月表示では日時を出さないため null を渡す。
   // hideCustomerName は「月」表示用: 企業名は既にグループ見出しに出ているため、行側は商品名を主表示にする
@@ -634,15 +663,7 @@ export function ActivityPlanList({
         {plan.category === "visit" && (
           <div className="activity-plan-list__result-buttons">
             {renderResultControls(plan)}
-            {plan.result_status === "pending" && (
-              <button
-                type="button"
-                className="activity-plan-list__alt-button"
-                onClick={() => onRequestAlternative(plan.plan_id)}
-              >
-                対応が難しい
-              </button>
-            )}
+            {plan.result_status === "pending" && renderAlternativeControl(plan.plan_id, "対応が難しい")}
           </div>
         )}
       </>
@@ -1233,13 +1254,7 @@ export function ActivityPlanList({
                       >
                         編集
                       </button>
-                      <button
-                        type="button"
-                        className="activity-plan-list__alt-button"
-                        onClick={() => onRequestAlternative(detailPlan.plan_id)}
-                      >
-                        AI作り直し
-                      </button>
+                      {renderAlternativeControl(detailPlan.plan_id, "AI作り直し")}
                       {detailPlan.category === "visit" && (
                         <button
                           type="button"

@@ -63,6 +63,24 @@ function getCurrentMonth(): string {
 
 const TARGET_MONTH = getCurrentMonth();
 
+// 「対応が難しい」ボタンの差し替え提案。ユーザーが確定するまでの一時的な状態
+type AltPreview =
+  | {
+      kind: "task";
+      planId: number;
+      foundInPlans: boolean;
+      changedPlan: ActivityPlan;
+      label: string;
+      candidateTask: (typeof mockTaskSuggestions)[number];
+    }
+  | {
+      kind: "deal";
+      planId: number;
+      changedPlan: ActivityPlan;
+      label: string;
+      candidateDeal: Deal;
+    };
+
 export default function DashboardPage() {
   const { selectedRep, isAuthLoading } = useRep();
   const REP_ID = selectedRep?.rep_id ?? null;
@@ -78,6 +96,9 @@ export default function DashboardPage() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [replan, setReplan] = useState<ReplanInfo | null>(null);
   const [altNotice, setAltNotice] = useState<string | null>(null);
+  // 「対応が難しい」の差し替え候補。押した直後はここに提案を溜めるだけで、
+  // ユーザーが確定するまでバックエンドには何も送らない
+  const [altPreview, setAltPreview] = useState<AltPreview | null>(null);
   const [isRegenerating, setIsRegenerating] = useState(false);
   // その月の訪問計画がまだ1件も無いか(目標保存時にAI生成を走らせるかの判定に使う)
   const [needsInitialPlan, setNeedsInitialPlan] = useState(false);
@@ -408,9 +429,12 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleRequestAlternative(planId: number) {
+  // 「対応が難しい」も、失注/延期と同じく「押した瞬間にAIが一方的に差し替えを確定する」
+  // 問題があったため、提案の計算(この関数)と確定(confirmAlternative)を分離した。
+  // ボタンを押した直後は候補を計算して見せるだけで、まだ何もバックエンドに送らない。
+  function handleRequestAlternative(planId: number) {
     const changedPlan = plans.find((plan) => plan.plan_id === planId) ?? dailyTasks.find((task) => task.plan_id === planId);
-    if (!changedPlan || !target || REP_ID === null) return;
+    if (!changedPlan) return;
     const foundInPlans = plans.some((plan) => plan.plan_id === planId);
     setAltNotice(null);
 
@@ -422,11 +446,50 @@ export default function DashboardPage() {
         setAltNotice("現在、差し替えられる事務作業の候補がありません。");
         return;
       }
+      setAltPreview({
+        kind: "task",
+        planId,
+        foundInPlans,
+        changedPlan,
+        label: candidateTask.title,
+        candidateTask,
+      });
+      return;
+    }
 
+    // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
+    const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
+    const candidateDeal = [...deals]
+      .filter((deal) => deal.deal_result_status === "ongoing" && !usedDealIds.has(deal.deal_id))
+      .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
+    if (!candidateDeal) {
+      setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
+      return;
+    }
+    setAltPreview({
+      kind: "deal",
+      planId,
+      changedPlan,
+      label: `${candidateDeal.customer_name}(${candidateDeal.product_name})`,
+      candidateDeal,
+    });
+  }
+
+  function cancelAlternativePreview() {
+    setAltPreview(null);
+  }
+
+  async function confirmAlternative() {
+    if (!altPreview || !target || REP_ID === null) return;
+    const preview = altPreview;
+    setAltPreview(null);
+    const { planId, changedPlan } = preview;
+
+    if (preview.kind === "task") {
+      const { candidateTask, foundInPlans } = preview;
       try {
-        // 商談側(下)と同じく、差し替え候補を実在の予定として登録し元の予定は取り消す
-        // (どちらもバックエンドに反映。以前はローカル専用の plan_id しか持たず、
-        // リロードすると消えていた)。
+        // 差し替え候補を実在の予定として登録し元の予定は取り消す(どちらもバックエンドに反映。
+        // 以前はローカル専用の plan_id しか持たず、リロードすると消えていた)。
         const created = await createPlan(REP_ID, {
           plan_date: changedPlan.plan_date,
           category: "task",
@@ -478,16 +541,7 @@ export default function DashboardPage() {
       return;
     }
 
-    // 現在計画に入っていない、進行中(未成約・未失注)の商談から候補を選ぶ
-    const usedDealIds = new Set(plans.map((plan) => plan.deal_id).filter((id): id is number => id !== null));
-    const candidateDeal = [...deals]
-      .filter((deal) => deal.deal_result_status === "ongoing" && !usedDealIds.has(deal.deal_id))
-      .sort((a, b) => b.estimated_amount * b.win_probability - a.estimated_amount * a.win_probability)[0];
-    if (!candidateDeal) {
-      setAltNotice("現在、差し替えられる進行中の商談がありません(すべて計画済みです)。");
-      return;
-    }
-
+    const { candidateDeal } = preview;
     const reasoningText = `対応が難しいとのことなので、進行中の商談「${candidateDeal.product_name}」(${candidateDeal.customer_name}様)への提案に差し替えました。`;
 
     try {
@@ -639,6 +693,9 @@ export default function DashboardPage() {
             onResultChange={handleResultChange}
             onPostpone={handlePostpone}
             onRequestAlternative={handleRequestAlternative}
+            altPreview={altPreview ? { planId: altPreview.planId, label: altPreview.label } : null}
+            onConfirmAlternative={confirmAlternative}
+            onCancelAlternative={cancelAlternativePreview}
             onEditPlan={handleEditPlan}
             onAddPlan={handleAddPlan}
             onConfirmPlan={handleConfirmPlan}

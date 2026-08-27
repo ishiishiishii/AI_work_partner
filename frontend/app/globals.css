@@ -1284,6 +1284,15 @@ a {
   color: var(--ink);
 }
 
+.activity-plan-list__alt-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .activity-plan-list__clickable {
   display: flex;
   align-items: center;
