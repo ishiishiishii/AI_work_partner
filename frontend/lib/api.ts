@@ -378,24 +378,6 @@ export async function generateActivityPlans(
   return body.plans.map((row) => mapPlan(row, customerNames));
 }
 
-export async function replanActivityPlans(
-  repId: number,
-  targetMonth: string,
-): Promise<ActivityPlan[]> {
-  const base = getApiBaseUrl();
-  const [replanRes, customerNames] = await Promise.all([
-    fetch(`${base}/api/plans/replan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rep_id: repId, target_month: targetMonth }),
-    }),
-    fetchCustomerNames(repId),
-  ]);
-  if (!replanRes.ok) throw new Error(`再計画に失敗しました (HTTP ${replanRes.status})`);
-  const body: { plans: ApiPlan[] } = await replanRes.json();
-  return body.plans.map((row) => mapPlan(row, customerNames));
-}
-
 // 予定の手動追加の保存。title/customer_id/deal_id の扱いは updatePlan と同じ考え方
 // (title があれば表示上そちらを優先するが、customer_id/deal_id が分かっていれば
 // 商談への紐付けとして残す)。createPlan(差し替え提案の永続化用。plan_id しか返らない)
@@ -502,6 +484,8 @@ export async function createPlan(
   repId: number,
   input: {
     plan_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
     category: ActivityPlanCategory;
     activity_type: string;
     customer_id: number | null;

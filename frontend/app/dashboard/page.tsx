@@ -20,6 +20,7 @@ export default function DashboardPage() {
     deals,
     replan,
     altNotice,
+    altPreview,
     isRegenerating,
     needsInitialPlan,
     isGeneratingInitialPlan,
@@ -31,12 +32,15 @@ export default function DashboardPage() {
     handleRouteApproved,
     handleRegenerate,
     handleResultChange,
+    handlePostpone,
     handleEditPlan,
     handleAddPlan,
     handleConfirmPlan,
     handleUpdateProgress,
     handleCommitProgress,
     handleRequestAlternative,
+    confirmAlternative,
+    cancelAlternativePreview,
   } = useDashboardData(REP_ID);
 
   if (isAuthLoading || (selectedRep && isLoading)) {
@@ -112,7 +116,11 @@ export default function DashboardPage() {
             dailyTasks={dailyTasks}
             deals={deals}
             onResultChange={handleResultChange}
+            onPostpone={handlePostpone}
             onRequestAlternative={handleRequestAlternative}
+            altPreview={altPreview ? { planId: altPreview.planId, label: altPreview.label } : null}
+            onConfirmAlternative={confirmAlternative}
+            onCancelAlternative={cancelAlternativePreview}
             onEditPlan={handleEditPlan}
             onAddPlan={handleAddPlan}
             onConfirmPlan={handleConfirmPlan}

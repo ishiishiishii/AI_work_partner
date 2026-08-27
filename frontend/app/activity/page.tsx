@@ -26,8 +26,12 @@ export default function ActivityPage() {
     territory,
     affinities,
     achievementRate,
+    altPreview,
     handleResultChange,
+    handlePostpone,
     handleRequestAlternative,
+    confirmAlternative,
+    cancelAlternativePreview,
     handleEditPlan,
     handleAddPlan,
     handleConfirmPlan,
@@ -78,7 +82,11 @@ export default function ActivityPage() {
             dailyTasks={dailyTasks}
             deals={deals}
             onResultChange={handleResultChange}
+            onPostpone={handlePostpone}
             onRequestAlternative={handleRequestAlternative}
+            altPreview={altPreview ? { planId: altPreview.planId, label: altPreview.label } : null}
+            onConfirmAlternative={confirmAlternative}
+            onCancelAlternative={cancelAlternativePreview}
             onEditPlan={handleEditPlan}
             onAddPlan={handleAddPlan}
             onConfirmPlan={handleConfirmPlan}
