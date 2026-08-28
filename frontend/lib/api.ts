@@ -1,6 +1,6 @@
 import type { DealEditFields } from "@/components/customers/DealHistoryList";
 import { getAccessToken } from "@/lib/supabase";
-import type { RoutePlanBatchPreview, RoutePlanPreview } from "@/types";
+import type { RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeekAlternative } from "@/types";
 import { DEAL_RESULT_STATUS_NAMES } from "@/lib/mockData";
 import type {
   ActivityPlan,
@@ -1006,6 +1006,28 @@ export async function approveSalesRoutePlan(
   return res.json();
 }
 
+export async function approveIdleSalesRouteDay(
+  batchId: number,
+  targetDate: string,
+): Promise<{
+  target_date: string;
+  status: "approved";
+  activity_plan_ids: number[];
+  summary: string;
+}> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/api/route-plans/idle-day/approve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ batch_id: batchId, target_date: targetDate }),
+  });
+  if (!res.ok) throw await routePlanError(res, "商談なし日のAI活動計画の採用に失敗しました");
+  return res.json();
+}
+
 export async function rejectSalesRoutePlan(planId: number): Promise<void> {
   const token = await getAccessToken();
   const res = await fetch(`${getApiBaseUrl()}/api/route-plans/${planId}/reject`, {
@@ -1052,5 +1074,21 @@ export async function previewSalesRouteBatch(input: {
     body: JSON.stringify(input),
   });
   if (!res.ok) throw await routePlanError(res, "週・月の営業ルート案の作成に失敗しました");
+  return res.json();
+}
+
+export async function selectSalesRouteWeekAlternative(
+  planIds: number[],
+): Promise<RoutePlanWeekAlternative> {
+  const token = await getAccessToken();
+  const res = await fetch(`${getApiBaseUrl()}/api/route-plans/week-alternative`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ plan_ids: planIds, minimum_economic_ratio: 0.9 }),
+  });
+  if (!res.ok) throw await routePlanError(res, "週の別案取得に失敗しました");
   return res.json();
 }

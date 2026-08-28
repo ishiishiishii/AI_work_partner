@@ -155,9 +155,55 @@ def test_month_customer_selection_stops_after_risk_buffer() -> None:
         capacity=10,
     )
 
-    # 1+2+3 = 1500, already >= target*1.30 (1300), so 4 is excluded.
+    # 1+2+3 = 1500, already >= target*1.20 (1200), so 4 is excluded.
     assert [candidate.customer_id for candidate in selected] == [1, 2, 3]
     assert sum(candidate.expected_sales for candidate in selected) == Decimal("1500")
+
+
+def test_month_customer_selection_keeps_prospecting_share_before_stopping() -> None:
+    ongoing_a = _candidate(1, 700, 100)
+    ongoing_b = _candidate(2, 700, 90)
+    new = _candidate(3, 100, 20)
+    new.customer_type = "new"
+
+    selected = _select_target_customers(
+        [ongoing_a, ongoing_b, new],
+        planning_target=Decimal("1000"),
+        capacity=10,
+    )
+
+    assert {candidate.customer_id for candidate in selected} == {1, 2, 3}
+    new_visits = sum(
+        candidate.planned_visit_count
+        for candidate in selected
+        if candidate.customer_type == "new"
+    )
+    total_visits = sum(candidate.planned_visit_count for candidate in selected)
+    assert Decimal(new_visits) / Decimal(total_visits) >= Decimal("0.30")
+
+
+def test_month_customer_selection_requires_sales_and_profit_safety_margin() -> None:
+    high_sales_low_profit = _candidate(1, 1500, 100)
+    high_sales_low_profit.economics = [
+        DealEconomics(
+            estimated_amount=Decimal("1500"),
+            cost=Decimal("1400"),
+            win_probability=Decimal("100"),
+        )
+    ]
+    profit_fill = _candidate(2, 1000, 90)
+
+    selected = _select_target_customers(
+        [high_sales_low_profit, profit_fill],
+        planning_target=Decimal("1000"),
+        planning_target_gross_profit=Decimal("800"),
+        capacity=10,
+    )
+
+    assert [candidate.customer_id for candidate in selected] == [1, 2]
+    assert sum(
+        candidate.expected_gross_profit or Decimal("0") for candidate in selected
+    ) >= Decimal("960")
 
 
 def test_month_customer_selection_mixes_new_and_ongoing_and_consumes_visit_capacity() -> None:
@@ -319,7 +365,7 @@ def test_required_meetings_relax_the_gap_rather_than_drop_a_visit_when_horizon_i
     assert len(set(assigned_dates)) == 4
 
 
-def test_monthly_ai_preferred_week_is_reflected_in_day_assignment() -> None:
+def test_daily_cadence_takes_priority_over_monthly_ai_preferred_week() -> None:
     candidate = _candidate(1, 1000, 100)
     business_days = _business_days(date(2026, 9, 1), "month")
     business_weeks = _business_weeks(business_days)
@@ -339,7 +385,9 @@ def test_monthly_ai_preferred_week_is_reflected_in_day_assignment() -> None:
     )
 
     assigned_day = next(day for day, values in assigned.items() if candidate in values)
-    assert week_number_by_day[assigned_day] == 2
+    # A preferred week is a soft tie-break. The operational requirement to
+    # build an adoptable cadence from the earliest business day wins first.
+    assert assigned_day == business_days[0]
 
 
 def test_apply_schedule_adjustments_moves_only_validated_suggestions() -> None:
@@ -505,7 +553,7 @@ def test_routing_infeasible_day_is_deferred_without_raw_error() -> None:
     assert "週内または月内の別日で補填" in result["warnings"][0]
 
 
-def test_target_gap_fill_options_use_unscheduled_single_visit_candidates() -> None:
+def test_target_gap_fill_options_include_pipeline_building_first_visits() -> None:
     scheduled = _candidate(1, 5_000, 100)
     multi_visit = _candidate(2, 4_000, 90)
     multi_visit.remaining_visit_count = 2
@@ -527,9 +575,13 @@ def test_target_gap_fill_options_use_unscheduled_single_visit_candidates() -> No
         max_visits=4,
     )
 
-    assert [candidate.customer_id for candidate in options] == [reserve.customer_id]
-    assert options[0].planned_visit_count == 1
-    assert options[0].expected_sales == Decimal("3000")
+    assert [candidate.customer_id for candidate in options] == [2, 3]
+    assert options[0].planned_visit_count == 2
+    assert options[0].visit_sequence == 1
+    assert options[0].expected_sales == Decimal("0")
+    assert options[0].opportunity_expected_sales == Decimal("4000")
+    assert options[1].planned_visit_count == 1
+    assert options[1].expected_sales == Decimal("3000")
 
 
 def test_recovery_payload_excludes_the_failed_day_and_marks_priority() -> None:

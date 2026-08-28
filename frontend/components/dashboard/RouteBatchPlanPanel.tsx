@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  approveIdleSalesRouteDay,
   approveSalesRoutePlan,
   previewSalesRouteBatch,
   rejectSalesRoutePlan,
+  selectSalesRouteWeekAlternative,
 } from "@/lib/api";
 import {
   TRAVEL_MODE_LABELS,
@@ -22,6 +24,7 @@ import type { RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeek } from "@/t
 
 type Props = {
   onApproved: () => Promise<void>;
+  onPlanCalculated?: (batch: RoutePlanBatchPreview | null) => void;
   // Bumped by the dashboard whenever a 商談結果 changes (won/lost/postponed/
   // etc.), so this panel's month/week numbers stay in sync with the day-level
   // plan's own auto-replan instead of only updating when the user clicks the
@@ -40,85 +43,45 @@ function dayLabel(dateStr: string): string {
 }
 
 function MonthlyPlanOutlook({ batch }: { batch: RoutePlanBatchPreview }) {
-  const salesTarget = batch.monthly_target_amount ?? 0;
-  const projectedSales = batch.achieved_amount + batch.portfolio_expected_sales;
-  const salesRate = salesTarget > 0 ? (projectedSales / salesTarget) * 100 : null;
-  const salesGap = Math.max(0, salesTarget - projectedSales);
-
-  const profitTarget = batch.monthly_target_gross_profit;
-  const projectedProfit = batch.achieved_gross_profit + (batch.totals.expected_gross_profit ?? 0);
-  const profitRate =
-    profitTarget !== null && profitTarget > 0 ? (projectedProfit / profitTarget) * 100 : null;
-  const profitGap = Math.max(0, (profitTarget ?? 0) - projectedProfit);
-  const expectedTargetsMet =
-    salesRate !== null && salesRate >= 100 && (profitRate === null || profitRate >= 100);
-  const jointProbability =
-    batch.joint_achievement_probability <= 1
-      ? batch.joint_achievement_probability * 100
-      : batch.joint_achievement_probability;
-
-  const outlook = expectedTargetsMet
-    ? jointProbability >= 60
-      ? {
-          level: "good",
-          label: "達成見込みは良好",
-          message: "期待値と商談確度の両面で、月末目標の達成圏内です。",
-        }
-      : {
-          level: "watch",
-          label: "金額は達成圏内・確度に注意",
-          message: "期待着地は目標以上ですが、成約確度を踏まえると継続フォローが必要です。",
-        }
-    : {
-        level: "risk",
-        label: "追加の補填が必要",
-        message: `期待値では${[
-          salesGap > 0 ? `売上${yen(salesGap)}` : null,
-          profitGap > 0 ? `粗利${yen(profitGap)}` : null,
-        ].filter(Boolean).join("・")}が不足する見込みです。`,
-      };
+  // PostgreSQL Decimal values may arrive through the API as JSON strings.
+  // Convert both operands explicitly so `+` performs arithmetic rather than
+  // concatenating values such as "2230000" + "46484836".
+  const projectedSales =
+    Number(batch.achieved_amount) +
+    Number(batch.existing_plan_expected_sales) +
+    Number(batch.portfolio_expected_sales);
+  const projectedProfit =
+    Number(batch.achieved_gross_profit) +
+    Number(batch.existing_plan_expected_gross_profit) +
+    Number(batch.totals.expected_gross_profit ?? 0);
 
   return (
-    <section className={`monthly-outlook monthly-outlook--${outlook.level}`}>
-      <div className="monthly-outlook__heading">
-        <div>
-          <small>この月間計画の総合判定</small>
-          <strong>{outlook.label}</strong>
-        </div>
-        <div className="monthly-outlook__probability">
-          <span>{jointProbability.toFixed(0)}%</span>
-          <small>売上・粗利の同時達成確率</small>
-        </div>
-      </div>
-      <p>{outlook.message}</p>
+    <section className="monthly-outlook" aria-label="月間計画の予想金額">
       <div className="monthly-outlook__metrics">
         <div>
-          <span><strong>売上 {salesRate?.toFixed(0) ?? "—"}%</strong><small>{yen(projectedSales)} / {yen(salesTarget)}</small></span>
-          <progress max={100} value={Math.min(salesRate ?? 0, 100)} />
+          <small>予想売上</small>
+          <strong>{yen(projectedSales)}</strong>
         </div>
-        {profitTarget !== null && (
-          <div>
-            <span><strong>粗利 {profitRate?.toFixed(0) ?? "—"}%</strong><small>{yen(projectedProfit)} / {yen(profitTarget)}</small></span>
-            <progress max={100} value={Math.min(profitRate ?? 0, 100)} />
-          </div>
-        )}
+        <div>
+          <small>予想粗利</small>
+          <strong>{yen(projectedProfit)}</strong>
+        </div>
       </div>
-      <small className="monthly-outlook__note">
-        期待着地は、成約済み実績と今回の計画に含まれる顧客の期待値を合算しています。
-      </small>
     </section>
   );
 }
 
-export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
+export function RouteBatchPlanPanel({ onApproved, onPlanCalculated, refreshSignal }: Props) {
   const [selectedMonth, setSelectedMonth] = useState(() => tomorrowInTokyo().slice(0, 7));
   const [policy, setPolicy] = useState<RouteEconomicPolicy>("balanced");
   const [maxVisits, setMaxVisits] = useState(4);
   const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>("driving");
   const [batch, setBatch] = useState<RoutePlanBatchPreview | null>(null);
   const [weekBatches, setWeekBatches] = useState<Record<number, RoutePlanBatchPreview>>({});
+  const [alternativeReasons, setAlternativeReasons] = useState<Record<number, string>>({});
   const [calculatingWeek, setCalculatingWeek] = useState<number | null>(null);
   const [decisions, setDecisions] = useState<Record<number, "approved" | "rejected">>({});
+  const [idleDayDecisions, setIdleDayDecisions] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const economicPolicy = routeEconomicPolicyConfig(policy);
@@ -147,10 +110,12 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
     setBusy(true);
     setError(null);
     setDecisions({});
+    setIdleDayDecisions({});
     setWeekBatches({});
+    setAlternativeReasons({});
+    onPlanCalculated?.(null);
     try {
-      setBatch(
-        await previewSalesRouteBatch({
+      const result = await previewSalesRouteBatch({
           start_date: `${selectedMonth}-01`,
           horizon: "month",
           outline_only: true,
@@ -170,8 +135,9 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
           travel_time_buffer_percent: 20,
           access_buffer_min: 10,
           return_buffer_min: 30,
-        }),
-      );
+        });
+      setBatch(result);
+      onPlanCalculated?.(result);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "月間営業スケジュールの作成に失敗しました");
     } finally {
@@ -238,6 +204,93 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
     }
   }
 
+  async function showWeekAlternative(weekNumber: number) {
+    const calculatedBatch = weekBatches[weekNumber];
+    if (!calculatedBatch) return;
+    const planIds = calculatedBatch.days
+      .map((day) => day.plan_id)
+      .filter((planId): planId is number => planId !== null && decisions[planId] === undefined);
+    if (planIds.length === 0) {
+      setError(`第${weekNumber}週には別案へ切り替えられる未採用の予定がありません。`);
+      return;
+    }
+
+    setCalculatingWeek(weekNumber);
+    setError(null);
+    try {
+      const alternative = await selectSalesRouteWeekAlternative(planIds);
+      const updatedDays = calculatedBatch.days.map((day) => {
+        if (day.plan_id !== alternative.change.plan_id) return day;
+        const expectedSales = alternative.change.totals.expected_sales;
+        return {
+          ...day,
+          totals: alternative.change.totals,
+          stops: alternative.change.stops,
+          shortfall_amount: Math.max(0, day.target_amount - expectedSales),
+          attainment_rate: day.target_amount > 0 ? expectedSales / day.target_amount : 0,
+        };
+      });
+      const expectedSales = updatedDays.reduce((sum, day) => sum + day.totals.expected_sales, 0);
+      const expectedGrossProfit = updatedDays.reduce(
+        (sum, day) => sum + (day.totals.expected_gross_profit ?? 0),
+        0,
+      );
+      const visitCount = updatedDays.reduce((sum, day) => sum + day.totals.visit_count, 0);
+      const updatedWeeks = calculatedBatch.weeks.map((week, index) =>
+        index === 0
+          ? {
+              ...week,
+              days: updatedDays,
+              expected_sales: expectedSales,
+              expected_gross_profit: expectedGrossProfit,
+              visit_count: visitCount,
+              shortfall_amount: Math.max(0, week.target_amount - expectedSales),
+              attainment_rate: week.target_amount > 0 ? expectedSales / week.target_amount : 0,
+            }
+          : week,
+      );
+      setWeekBatches((current) => ({
+        ...current,
+        [weekNumber]: {
+          ...calculatedBatch,
+          days: updatedDays,
+          weeks: updatedWeeks,
+          totals: {
+            ...calculatedBatch.totals,
+            planned_sales: updatedDays.reduce(
+              (sum, day) => sum + day.totals.planned_sales,
+              0,
+            ),
+            planned_gross_profit: updatedDays.reduce(
+              (sum, day) => sum + (day.totals.planned_gross_profit ?? 0),
+              0,
+            ),
+            expected_sales: expectedSales,
+            expected_gross_profit: expectedGrossProfit,
+            total_travel_min: updatedDays.reduce(
+              (sum, day) => sum + day.totals.total_travel_min,
+              0,
+            ),
+            total_distance_m: updatedDays.reduce(
+              (sum, day) => sum + day.totals.total_distance_m,
+              0,
+            ),
+            visit_count: visitCount,
+          },
+        },
+      }));
+      setAlternativeReasons((current) => ({ ...current, [weekNumber]: alternative.reason }));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : `第${weekNumber}週の別案取得に失敗しました`,
+      );
+    } finally {
+      setCalculatingWeek(null);
+    }
+  }
+
   async function approveDay(planId: number) {
     setBusy(true);
     setError(null);
@@ -247,6 +300,27 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
       await onApproved();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "承認に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveIdleDay(batchId: number, targetDate: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await approveIdleSalesRouteDay(batchId, targetDate);
+      setIdleDayDecisions((current) => ({
+        ...current,
+        [targetDate]: result.summary,
+      }));
+      await onApproved();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "商談なし日の予定採用に失敗しました",
+      );
     } finally {
       setBusy(false);
     }
@@ -391,7 +465,11 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                   <span>第{outlineWeek.week_number}週</span>
                   <strong>週目標 {yen(outlineWeek.target_amount)}</strong>
                   <span>
-                    期待売上 {yen(week.expected_sales)}・訪問{week.visit_count}件・
+                    期待売上 {yen(week.expected_sales)}・商談
+                    {week.visit_count + week.days.reduce(
+                      (sum, day) => sum + day.existing_visit_count,
+                      0,
+                    )}件・
                     達成見込み{Math.round(week.attainment_rate * 100)}%
                   </span>
                 </summary>
@@ -400,13 +478,19 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                     <button
                       type="button"
                       className="goal-card__save"
-                      onClick={() => calculateWeek(outlineWeek)}
+                      onClick={() =>
+                        isCalculated
+                          ? showWeekAlternative(outlineWeek.week_number)
+                          : calculateWeek(outlineWeek)
+                      }
                       disabled={busy || calculatingWeek !== null || assignedVisitCount === 0}
                     >
                       {calculatingWeek === outlineWeek.week_number
-                        ? `第${outlineWeek.week_number}週を計算中…`
+                        ? isCalculated
+                          ? `第${outlineWeek.week_number}週の別案を選定中…`
+                          : `第${outlineWeek.week_number}週を計算中…`
                         : isCalculated
-                          ? `第${outlineWeek.week_number}週を再計算`
+                          ? `第${outlineWeek.week_number}週の別案を表示`
                           : `第${outlineWeek.week_number}週を計算`}
                     </button>
                     <span>
@@ -417,6 +501,11 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                           : "この週の訪問割り当てはありません"}
                     </span>
                   </div>
+                  {alternativeReasons[outlineWeek.week_number] && (
+                    <p className="route-plan__success">
+                      AIが計算済み候補から選んだ別案：{alternativeReasons[outlineWeek.week_number]}
+                    </p>
+                  )}
                   <p>
                     {week.focus_is_ai_generated && (
                       <span className="route-plan-batch__badge route-plan-batch__badge--detailed">
@@ -455,15 +544,40 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                           </span>
                           <span className="route-plan-batch__day-figures">
                             日目標{yen(day.target_amount)}・期待売上{yen(day.totals.expected_sales)}・
-                            訪問{day.totals.visit_count}件
+                            商談合計{day.existing_visit_count + day.totals.visit_count}件
+                            （既存{day.existing_visit_count}・AI追加{day.totals.visit_count}）
                           </span>
                         </summary>
 
                         <div className="route-plan-batch__day-body">
                           {day.plan_id === null ? (
-                            <p className="route-plan-batch__day-empty">
-                              {day.warnings[0] ?? "この日の営業先候補はありません。"}
-                            </p>
+                            <div className="route-plan-batch__day-empty">
+                              <p>{day.warnings[0] ?? "この日の営業先候補はありません。"}</p>
+                              {day.existing_visit_count > 0 && (
+                                <p>
+                                  活動計画には既に商談が{day.existing_visit_count}件あります。
+                                  ここでは重複訪問を追加せず、空き時間をAIが補完します。
+                                </p>
+                              )}
+                              {idleDayDecisions[day.target_date] ? (
+                                <p className="route-plan__success">
+                                  {idleDayDecisions[day.target_date]}
+                                </p>
+                              ) : day.detail_level === "detailed" ? (
+                                <button
+                                  type="button"
+                                  className="goal-card__save"
+                                  onClick={() =>
+                                    approveIdleDay(calculatedBatch.batch_id, day.target_date)
+                                  }
+                                  disabled={busy || calculatingWeek !== null}
+                                >
+                                  この日の予定を採用（AIで空き時間補完）
+                                </button>
+                              ) : (
+                                <small>週の詳細計算後に予定を採用できます。</small>
+                              )}
+                            </div>
                           ) : (
                             <>
                               <ol className="route-plan__stops">
