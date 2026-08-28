@@ -412,6 +412,22 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal, existingPlans =
             <span>月間ポートフォリオ期待粗利 {yen(batch.totals.expected_gross_profit)}</span>
             <span>月間割当 {batch.totals.visit_count}訪問</span>
           </div>
+          {batch.selected_customers.length > 0 && (
+            <details className="route-plan-batch__customers">
+              <summary>この企業を選んだ理由（{batch.selected_customers.length}社）</summary>
+              <ul className="route-plan-batch__customer-reasons">
+                {batch.selected_customers.map((customer) => (
+                  <li key={customer.customer_id}>
+                    <strong>
+                      {customer.customer_name}（{customer.customer_type === "new" ? "新規" : "商談中"}）
+                    </strong>
+                    <br />
+                    <small>{customer.selection_reason}</small>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           <div className="route-plan-batch__weeks">
             {batch.weeks.map((outlineWeek) => {
               const calculatedBatch = weekBatches[outlineWeek.week_number];
