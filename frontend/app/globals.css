@@ -1023,6 +1023,12 @@ a {
   line-height: 1.5;
 }
 
+.ai-reasoning__empty {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 1.25rem;
+}
+
 .affinity-summary__totals {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
