@@ -6,6 +6,10 @@ from app.schemas.route_plans import (
     RoutePlanApproveOut,
     RoutePlanBatchPreviewOut,
     RoutePlanBatchPreviewRequest,
+    RoutePlanIdleDayApproveOut,
+    RoutePlanIdleDayApproveRequest,
+    RoutePlanWeekAlternativeOut,
+    RoutePlanWeekAlternativeRequest,
     RoutePlanPreviewOut,
     RoutePlanPreviewRequest,
     RoutePlanRejectOut,
@@ -30,6 +34,7 @@ def _raise_http(error: RoutePlanningError) -> None:
         "schedule_conflict",
         "invalid_plan_status",
         "coarse_plan_not_approvable",
+        "alternative_after_approval",
     }:
         status = 409
     raise HTTPException(
@@ -62,6 +67,48 @@ def preview_route_plan_batch(
         except RoutePlanningError as error:
             _raise_http(error)
     return RoutePlanBatchPreviewOut.model_validate(result)
+
+
+@router.post(
+    "/route-plans/week-alternative",
+    response_model=RoutePlanWeekAlternativeOut,
+)
+def choose_week_alternative(
+    body: RoutePlanWeekAlternativeRequest,
+    rep_id: int = Depends(get_authenticated_rep_id),
+) -> RoutePlanWeekAlternativeOut:
+    with get_connection() as conn:
+        try:
+            result = route_planning.select_week_alternative(
+                conn,
+                rep_id=rep_id,
+                plan_ids=body.plan_ids,
+                minimum_economic_ratio=body.minimum_economic_ratio,
+            )
+        except RoutePlanningError as error:
+            _raise_http(error)
+    return RoutePlanWeekAlternativeOut.model_validate(result)
+
+
+@router.post(
+    "/route-plans/idle-day/approve",
+    response_model=RoutePlanIdleDayApproveOut,
+)
+def approve_idle_route_day(
+    body: RoutePlanIdleDayApproveRequest,
+    rep_id: int = Depends(get_authenticated_rep_id),
+) -> RoutePlanIdleDayApproveOut:
+    with get_connection() as conn:
+        try:
+            result = route_planning.approve_idle_day(
+                conn,
+                rep_id=rep_id,
+                batch_id=body.batch_id,
+                target_date=body.target_date,
+            )
+        except RoutePlanningError as error:
+            _raise_http(error)
+    return RoutePlanIdleDayApproveOut.model_validate(result)
 
 
 @router.post("/route-plans/{plan_id}/approve", response_model=RoutePlanApproveOut)
