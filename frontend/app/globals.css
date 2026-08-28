@@ -254,10 +254,30 @@ a {
   min-width: 200px;
 }
 
-.goal-card__amount-form {
+.goal-card__target-form {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.goal-card__target-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.goal-card__target-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.goal-card__target-actions {
+  display: flex;
   gap: 0.5rem;
 }
 
@@ -265,9 +285,10 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.2rem 0.6rem;
+  padding: 0.35rem 0.6rem;
   border: 1px solid var(--line);
   border-radius: 6px;
+  background: var(--bg);
 }
 
 .goal-card__amount-input-wrap:focus-within {
@@ -275,8 +296,8 @@ a {
   outline-offset: 1px;
 }
 
-.goal-card__amount-form input {
-  width: 9ch;
+.goal-card__target-form input {
+  width: 100%;
   font-size: 1.1rem;
   font-weight: 600;
   font-family: inherit;
@@ -287,27 +308,13 @@ a {
   text-align: right;
 }
 
-.goal-card__amount-form input:focus {
+.goal-card__target-form input:focus {
   outline: none;
 }
 
 .goal-card__amount-suffix {
   font-size: 0.9rem;
   color: var(--muted);
-}
-
-.goal-card__amount-form button {
-  border-radius: 8px;
-  padding: 0.3rem 0.7rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-  border: 1px solid transparent;
-  font-family: inherit;
-}
-
-.goal-card__amount-form button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .goal-card__field {
@@ -339,6 +346,27 @@ a {
   font-size: 0.85rem;
   color: var(--muted);
   margin: 0;
+}
+
+/* GoalCardの目標編集フォームだけでなく、アプリ内の各種保存/キャンセル
+   ボタン(RouteBatchPlanPanel・ログイン画面・各種フォームなど)で幅広く
+   使い回しているため、このクラス自体に見た目一式(形・大きさ)を持たせる。
+   親要素側のスタイルに依存させると、GoalCardのフォーム外で使った時に
+   色だけついてブラウザ標準の形のまま、という崩れ方をしてしまう。 */
+.goal-card__save,
+.goal-card__cancel {
+  border-radius: 8px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.goal-card__save:disabled,
+.goal-card__cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .goal-card__save {
@@ -3178,6 +3206,32 @@ a {
   gap: 1rem;
 }
 
+/* 月間営業スケジュールを(再)生成する、このパネルで最も重要な操作なので、
+   他所で使い回している汎用の .regenerate-button より目立つプライマリボタンにする */
+.route-plan__generate-button {
+  justify-self: start;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.65rem 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--accent-ink);
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.35);
+  cursor: pointer;
+}
+
+.route-plan__generate-button:hover {
+  filter: brightness(1.08);
+}
+
+.route-plan__generate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .route-plan__controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -3289,6 +3343,18 @@ a {
 .route-plan__balance small {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.route-plan__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.route-plan__actions span {
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 
 .route-plan__check {

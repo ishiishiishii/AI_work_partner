@@ -99,6 +99,7 @@ export function GoalCard({
   const isGrossProfitDraftValid =
     grossProfitValue === null || (Number.isFinite(grossProfitValue) && grossProfitValue >= 0);
   const draftAmountDisplay = draftAmount ? Number(draftAmount).toLocaleString("ja-JP") : "";
+  const draftGrossProfitDisplay = draftGrossProfit ? Number(draftGrossProfit).toLocaleString("ja-JP") : "";
 
   function startEditing() {
     setDraftAmount(String(target.target_amount));
@@ -140,95 +141,107 @@ export function GoalCard({
         </div>
 
         <div className="goal-card__details">
-          <dl className="goal-card__numbers">
-            <div>
-              <dt>目標金額</dt>
-              <dd>
-                {isEditing ? (
-                  <form
-                    className="goal-card__amount-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      handleSave();
+          {isEditing && (
+            <form
+              className="goal-card__target-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleSave();
+              }}
+            >
+              <label className="goal-card__target-field">
+                <span className="goal-card__target-label">目標金額</span>
+                <span className="goal-card__amount-input-wrap">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={draftAmountDisplay}
+                    onChange={(event) => setDraftAmount(event.target.value.replace(/[^\d]/g, ""))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setIsEditing(false);
                     }}
-                  >
-                    <span className="goal-card__amount-input-wrap">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={draftAmountDisplay}
-                        onChange={(event) => setDraftAmount(event.target.value.replace(/[^\d]/g, ""))}
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") setIsEditing(false);
-                        }}
-                        disabled={isSaving}
-                        autoFocus
-                      />
-                      <span className="goal-card__amount-suffix">円</span>
-                    </span>
-                    <button
-                      type="submit"
-                      className="goal-card__save"
-                      disabled={!isDraftValid || !isGrossProfitDraftValid || isSaving}
-                    >
-                      {isSaving ? "保存中..." : "保存"}
-                    </button>
+                    disabled={isSaving}
+                    autoFocus
+                  />
+                  <span className="goal-card__amount-suffix">円</span>
+                </span>
+              </label>
+              <label className="goal-card__target-field">
+                <span className="goal-card__target-label">粗利目標(任意)</span>
+                <span className="goal-card__amount-input-wrap">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="未設定"
+                    value={draftGrossProfitDisplay}
+                    onChange={(event) => setDraftGrossProfit(event.target.value.replace(/[^\d]/g, ""))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setIsEditing(false);
+                    }}
+                    disabled={isSaving}
+                  />
+                  <span className="goal-card__amount-suffix">円</span>
+                </span>
+              </label>
+              <div className="goal-card__target-actions">
+                <button
+                  type="submit"
+                  className="goal-card__save"
+                  disabled={!isDraftValid || !isGrossProfitDraftValid || isSaving}
+                >
+                  {isSaving ? "保存中..." : "保存"}
+                </button>
+                <button
+                  type="button"
+                  className="goal-card__cancel"
+                  onClick={() => setIsEditing(false)}
+                  disabled={isSaving}
+                >
+                  キャンセル
+                </button>
+              </div>
+            </form>
+          )}
+          <dl className="goal-card__numbers">
+            {!isEditing && (
+              <>
+                <div>
+                  <dt>目標金額</dt>
+                  <dd>
                     <button
                       type="button"
-                      className="goal-card__cancel"
-                      onClick={() => setIsEditing(false)}
-                      disabled={isSaving}
+                      className="goal-card__amount-button"
+                      onClick={startEditing}
+                      aria-label="目標金額を変更する"
                     >
-                      キャンセル
+                      {formatYen(target.target_amount)}
+                      <svg className="goal-card__amount-edit-icon" viewBox="0 0 20 20" aria-hidden="true">
+                        <path
+                          d="M14.7 2.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L7.4 15.6l-3.5.7.7-3.5L14.7 2.3Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                     </button>
-                  </form>
-                ) : (
-                  <button
-                    type="button"
-                    className="goal-card__amount-button"
-                    onClick={startEditing}
-                    aria-label="目標金額を変更する"
-                  >
-                    {formatYen(target.target_amount)}
-                    <svg className="goal-card__amount-edit-icon" viewBox="0 0 20 20" aria-hidden="true">
-                      <path
-                        d="M14.7 2.3a1 1 0 0 1 1.4 0l1.6 1.6a1 1 0 0 1 0 1.4L7.4 15.6l-3.5.7.7-3.5L14.7 2.3Z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>粗利目標(任意)</dt>
-              <dd>
-                {isEditing ? (
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    placeholder="未設定"
-                    value={draftGrossProfit}
-                    onChange={(event) => setDraftGrossProfit(event.target.value)}
-                    disabled={isSaving}
-                    aria-label="粗利目標を変更する"
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    className="goal-card__amount-button"
-                    onClick={startEditing}
-                    aria-label="粗利目標を変更する"
-                  >
-                    {target.target_gross_profit === null ? "未設定" : formatYen(target.target_gross_profit)}
-                  </button>
-                )}
-              </dd>
-            </div>
+                  </dd>
+                </div>
+                <div>
+                  <dt>粗利目標(任意)</dt>
+                  <dd>
+                    <button
+                      type="button"
+                      className="goal-card__amount-button"
+                      onClick={startEditing}
+                      aria-label="粗利目標を変更する"
+                    >
+                      {target.target_gross_profit === null ? "未設定" : formatYen(target.target_gross_profit)}
+                    </button>
+                  </dd>
+                </div>
+              </>
+            )}
             <div>
               <dt>見込み売上</dt>
               <dd className="goal-card__forecast">{formatYen(forecastAmount)}</dd>

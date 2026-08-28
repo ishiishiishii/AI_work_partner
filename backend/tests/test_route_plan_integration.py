@@ -281,10 +281,21 @@ def test_candidate_area_also_expands_around_mandatory_appointments() -> None:
                 conn.commit()
 
 
-def _create_proposal(conn, *, rep_id: int, customer_id: int, deal_id: int) -> int:
+def _create_proposal(
+    conn, *, rep_id: int, customer_id: int, deal_id: int
+) -> tuple[int, list[int]]:
+    """route_plan/route_plan_option/route_plan_stop に加えて、本番の
+    _persist_preview -> _insert_draft_activities が行うのと同じ形で、
+    移動・訪問・準備・記録の plan_status='draft' な activity_plan 行と
+    route_plan_activity のリンクも作る。approve_plan は既存の下書きを
+    'scheduled' に昇格するだけの設計になっているため、ここで下書きを
+    用意しておかないと承認時に plan_not_found になる。"""
     branch_id = conn.execute(
         "select branch_id from sales_rep where rep_id = %s", (rep_id,)
     ).fetchone()["branch_id"]
+    customer_name = conn.execute(
+        "select customer_name from customer where customer_id = %s", (customer_id,)
+    ).fetchone()["customer_name"]
     plan_id = conn.execute(
         """
         insert into route_plan (
@@ -314,7 +325,9 @@ def _create_proposal(conn, *, rep_id: int, customer_id: int, deal_id: int) -> in
         """,
         (plan_id, Jsonb({})),
     ).fetchone()["option_id"]
-    conn.execute(
+    arrival_at = datetime(2099, 1, 15, 9, 0, tzinfo=TOKYO)
+    departure_at = datetime(2099, 1, 15, 10, 0, tzinfo=TOKYO)
+    stop_id = conn.execute(
         """
         insert into route_plan_stop (
           route_plan_id, option_id, visit_order, customer_id, deal_ids,
@@ -322,19 +335,64 @@ def _create_proposal(conn, *, rep_id: int, customer_id: int, deal_id: int) -> in
           leg_distance_m, economics
         )
         values (%s, %s, 1, %s, %s, %s, %s, 60, 10, 5000, %s)
+        returning stop_id
         """,
         (
             plan_id,
             option_id,
             customer_id,
             [deal_id],
-            datetime(2099, 1, 15, 9, 0, tzinfo=TOKYO),
-            datetime(2099, 1, 15, 10, 0, tzinfo=TOKYO),
+            arrival_at,
+            departure_at,
             Jsonb({"planned_sales": 100000, "expected_sales": 50000}),
         ),
-    )
+    ).fetchone()["stop_id"]
+
+    travel_start_at = arrival_at - timedelta(minutes=10)
+    turnaround_end_at = departure_at + timedelta(minutes=20)
+    draft_ids: list[int] = []
+    for category, title, start_at, end_at, activity_type in (
+        ("task", f"{customer_name}へ移動", travel_start_at, arrival_at, "移動"),
+        ("visit", customer_name, arrival_at, departure_at, "visit"),
+        ("task", f"{customer_name} 準備・記録", departure_at, turnaround_end_at, "準備・記録"),
+    ):
+        draft_id = conn.execute(
+            """
+            insert into activity_plan (
+              rep_id, plan_date, start_time, end_time, category, title,
+              customer_id, deal_id, activity_type, priority, expected_amount,
+              expected_probability, plan_status, is_ai_generated, rationale
+            )
+            values (
+              %s, %s,
+              to_char(%s::timestamptz at time zone 'Asia/Tokyo', 'HH24:MI'),
+              to_char(%s::timestamptz at time zone 'Asia/Tokyo', 'HH24:MI'),
+              %s, %s, %s, %s, %s, 1, 100000, 50, 'draft', true, 'テスト用下書き'
+            )
+            returning plan_id
+            """,
+            (
+                rep_id,
+                TEST_DATE,
+                start_at,
+                end_at,
+                category,
+                title,
+                customer_id,
+                deal_id,
+                activity_type,
+            ),
+        ).fetchone()["plan_id"]
+        conn.execute(
+            """
+            insert into route_plan_activity(route_plan_id, stop_id, activity_plan_id)
+            values (%s, %s, %s)
+            """,
+            (plan_id, stop_id, draft_id),
+        )
+        draft_ids.append(draft_id)
     conn.commit()
-    return plan_id
+    return plan_id, draft_ids
 
 
 @pytest.fixture
@@ -361,7 +419,7 @@ def test_approval_is_transactional_and_idempotent(owned_deal: tuple[int, int, in
     activity_ids: list[int] = []
     try:
         with get_connection() as conn:
-            plan_id = _create_proposal(
+            plan_id, _draft_ids = _create_proposal(
                 conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
             )
             first = approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
@@ -392,6 +450,7 @@ def test_approval_conflict_rolls_back_without_partial_activity(
     rep_id, customer_id, deal_id = owned_deal
     plan_id: int | None = None
     blocker_id: int | None = None
+    draft_ids: list[int] = []
     try:
         with get_connection() as conn:
             blocker_id = conn.execute(
@@ -407,23 +466,27 @@ def test_approval_conflict_rolls_back_without_partial_activity(
                 (rep_id, TEST_DATE),
             ).fetchone()["plan_id"]
             conn.commit()
-            plan_id = _create_proposal(
+            plan_id, draft_ids = _create_proposal(
                 conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
             )
             with pytest.raises(RoutePlanningError) as error:
                 approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
             assert error.value.code == "schedule_conflict"
-            linked = conn.execute(
-                "select count(*)::int as count from route_plan_activity where route_plan_id = %s",
-                (plan_id,),
-            ).fetchone()["count"]
-            assert linked == 0
+            # 下書きは _create_proposal の時点で先に作られているので、承認失敗時に
+            # 新たに何かが作られないこと(=下書きが 'draft' のまま)を確認する
+            draft_statuses = conn.execute(
+                "select plan_status from activity_plan where plan_id = any(%s)",
+                (draft_ids,),
+            ).fetchall()
+            assert all(row["plan_status"] == "draft" for row in draft_statuses)
             status = conn.execute(
                 "select status from route_plan where route_plan_id = %s", (plan_id,)
             ).fetchone()["status"]
             assert status == "proposed"
     finally:
         with get_connection() as conn:
+            if draft_ids:
+                conn.execute("delete from activity_plan where plan_id = any(%s)", (draft_ids,))
             if blocker_id is not None:
                 conn.execute("delete from activity_plan where plan_id = %s", (blocker_id,))
             if plan_id is not None:
@@ -437,6 +500,7 @@ def test_approval_rejects_second_visit_to_same_customer_on_same_day(
     rep_id, customer_id, deal_id = owned_deal
     plan_id: int | None = None
     existing_visit_id: int | None = None
+    draft_ids: list[int] = []
     try:
         with get_connection() as conn:
             existing_visit_id = conn.execute(
@@ -452,7 +516,7 @@ def test_approval_rejects_second_visit_to_same_customer_on_same_day(
                 (rep_id, TEST_DATE, customer_id, deal_id),
             ).fetchone()["plan_id"]
             conn.commit()
-            plan_id = _create_proposal(
+            plan_id, draft_ids = _create_proposal(
                 conn, rep_id=rep_id, customer_id=customer_id, deal_id=deal_id
             )
 
@@ -460,13 +524,17 @@ def test_approval_rejects_second_visit_to_same_customer_on_same_day(
                 approve_plan(conn, plan_id=plan_id, rep_id=rep_id)
 
             assert error.value.code == "duplicate_customer_visit"
-            linked = conn.execute(
-                "select count(*)::int as count from route_plan_activity where route_plan_id = %s",
-                (plan_id,),
-            ).fetchone()["count"]
-            assert linked == 0
+            # 下書きは _create_proposal の時点で先に作られているので、承認失敗時に
+            # 新たに何かが作られないこと(=下書きが 'draft' のまま)を確認する
+            draft_statuses = conn.execute(
+                "select plan_status from activity_plan where plan_id = any(%s)",
+                (draft_ids,),
+            ).fetchall()
+            assert all(row["plan_status"] == "draft" for row in draft_statuses)
     finally:
         with get_connection() as conn:
+            if draft_ids:
+                conn.execute("delete from activity_plan where plan_id = any(%s)", (draft_ids,))
             if existing_visit_id is not None:
                 conn.execute(
                     "delete from activity_plan where plan_id = %s", (existing_visit_id,)
