@@ -166,8 +166,8 @@ export function RouteBatchPlanPanel({
     }
   }
 
-  async function calculateWeek(week: RoutePlanWeek) {
-    if (!batch) return;
+  async function calculateWeek(week: RoutePlanWeek): Promise<RoutePlanBatchPreview | null> {
+    if (!batch) return null;
     const portfolioAssignments = batch.selected_customers
       .map((customer) => ({
         customer_id: customer.customer_id,
@@ -181,7 +181,7 @@ export function RouteBatchPlanPanel({
         ...prev,
         [week.week_number]: `第${week.week_number}週には月間最適化で割り当てられた訪問候補がありません。`,
       }));
-      return;
+      return null;
     }
 
     setCalculatingWeek(week.week_number);
@@ -225,6 +225,7 @@ export function RouteBatchPlanPanel({
       // 明示的に再取得しないと画面には反映されない(次のリロードまで表示が古いまま
       // になってしまう)。approveDay と同じ再取得を呼んでおく。
       await onApproved();
+      return result;
     } catch (requestError) {
       setWeekErrors((prev) => ({
         ...prev,
@@ -233,24 +234,68 @@ export function RouteBatchPlanPanel({
             ? requestError.message
             : `第${week.week_number}週の計算に失敗しました`,
       }));
+      return null;
     } finally {
       setCalculatingWeek(null);
     }
   }
 
   async function showWeekAlternative(weekNumber: number) {
-    const calculatedBatch = weekBatches[weekNumber];
-    if (!calculatedBatch) return;
-    const planIds = calculatedBatch.days
+    const outlineWeek = batch?.weeks.find((week) => week.week_number === weekNumber);
+    let calculatedBatch: RoutePlanBatchPreview | undefined = weekBatches[weekNumber];
+
+    // DBにAI予定があるだけでも画面上は「計算済み」と表示される。一方、再読み込み後は
+    // localStorageの軽量化によって別案APIに必要な日別plan_idが残っていない場合がある。
+    // その状態で無言returnせず、同じクリック内で週を再計算してから別案を取得する。
+    const hasLiveDayDetails =
+      calculatedBatch !== undefined &&
+      Array.isArray(calculatedBatch.days) &&
+      calculatedBatch.days.length > 0;
+    if (!hasLiveDayDetails) {
+      if (!outlineWeek) {
+        setWeekErrors((prev) => ({
+          ...prev,
+          [weekNumber]: `第${weekNumber}週の月間割り当てを確認できません。月の設計を作り直してください。`,
+        }));
+        return;
+      }
+      calculatedBatch = await calculateWeek(outlineWeek) ?? undefined;
+      if (!calculatedBatch) return;
+    }
+
+    let planIds = calculatedBatch.days
       .map((day) => day.plan_id)
       .filter((planId): planId is number => planId !== null && decisions[planId] === undefined);
+
+    // 全日を採用・却下済みの場合も、新しい下書きを作ってから別候補を探す。
     if (planIds.length === 0) {
-      setError(`第${weekNumber}週には別案へ切り替えられる未採用の予定がありません。`);
-      return;
+      if (!outlineWeek) {
+        setWeekErrors((prev) => ({
+          ...prev,
+          [weekNumber]: `第${weekNumber}週には別案へ切り替えられる予定がありません。`,
+        }));
+        return;
+      }
+      calculatedBatch = await calculateWeek(outlineWeek) ?? undefined;
+      if (!calculatedBatch) return;
+      planIds = calculatedBatch.days
+        .map((day) => day.plan_id)
+        .filter((planId): planId is number => planId !== null);
+      if (planIds.length === 0) {
+        setWeekErrors((prev) => ({
+          ...prev,
+          [weekNumber]: `第${weekNumber}週には別案を作れる訪問予定がありません。`,
+        }));
+        return;
+      }
     }
 
     setCalculatingWeek(weekNumber);
     setError(null);
+    setWeekErrors((prev) => {
+      const { [weekNumber]: _removed, ...rest } = prev;
+      return rest;
+    });
     try {
       const alternative = await selectSalesRouteWeekAlternative(planIds);
       const updatedDays = calculatedBatch.days.map((day) => {
@@ -315,11 +360,13 @@ export function RouteBatchPlanPanel({
       }));
       setAlternativeReasons((current) => ({ ...current, [weekNumber]: alternative.reason }));
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : `第${weekNumber}週の別案取得に失敗しました`,
-      );
+      setWeekErrors((prev) => ({
+        ...prev,
+        [weekNumber]:
+          requestError instanceof Error
+            ? requestError.message
+            : `第${weekNumber}週の別案取得に失敗しました`,
+      }));
     } finally {
       setCalculatingWeek(null);
     }

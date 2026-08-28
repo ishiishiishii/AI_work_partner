@@ -342,7 +342,9 @@ export function useDashboardData(repId: number | null) {
     try {
       // create_resultでwon/lostになった商談は候補SQLから除外される。再計画は未来の
       // AI予定だけを削除して、残った進行中案件と事務作業から組み直す。
-      await replanActivityPlans(repId, TARGET_MONTH);
+      // 実行日ではなく、結果を押した予定日を基準にする。過去日を使うデモでも、
+      // その日以降のAI予定が成約・失注後の残目標に合わせて更新される。
+      await replanActivityPlans(repId, TARGET_MONTH, changedPlan.plan_date);
       const [fetchedPlans, fetchedDeals, fetchedAffinities] = await Promise.all([
         fetchActivityPlans(repId),
         fetchDeals({ repId }),

@@ -376,7 +376,7 @@ def post_plans_replan(body: ReplanRequest) -> PlanGenerateResponse:
             conn,
             rep_id=body.rep_id,
             target_month=body.target_month,
-            start_date=date.today(),
+            start_date=body.start_date or date.today(),
         )
     return PlanGenerateResponse(
         plans=plans,
