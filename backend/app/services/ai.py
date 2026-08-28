@@ -158,7 +158,8 @@ def suggest_monthly_customer_portfolio(
     system_prompt = (
         "あなたはAI Work Partnerの月間顧客ポートフォリオ選定担当です。"
         "ルールベースが算出した評価値と基準案(currently_selected)を土台に、月末の"
-        "期待売上・期待粗利を最大化しやすい顧客と、その顧客を重点的に訪問する週を"
+        "期待売上・期待粗利の月目標を現実的な余裕をもって達成しやすい顧客と、"
+        "その顧客を重点的に訪問する週を"
         "提案してください。\n"
         "従うべきルール:\n"
         "- customer_idはcustomer_candidatesにある実在IDだけを使い、新しいIDを作らないこと\n"
@@ -167,8 +168,11 @@ def suggest_monthly_customer_portfolio(
         "必要訪問回数と移動負担を総合して選ぶこと\n"
         "- objective.policyはユーザーが選んだ収益方針であること。balancedは売上と粗利を"
         "同程度に、salesは売上を、gross_profitは粗利をより重く評価すること\n"
+        "- 既存商談だけへ偏らず、objective.minimum_new_visit_share_percentを目安に"
+        "新規開拓の訪問枠を確保すること\n"
         "- objectiveのsales_weightとgross_profit_weightを反映し、日目標の均等達成より"
-        "periodの残目標達成と月全体の成果最大化を優先すること\n"
+        "periodの残目標達成を優先すること。目標を大幅に超える顧客数を選ばず、"
+        "objective.target_safety_margin_percent程度の余裕を目安に訪問負担を抑えること\n"
         "- preferred_weekはweeksに存在するweek_numberから選ぶこと。期限・受注予定日・"
         "次アクションを踏まえ、特に根拠がなければ前半へ偏らせすぎないこと\n"
         "- 最大selection_limit社まで、優先度順に返すこと\n"
@@ -766,12 +770,17 @@ def suggest_target_gap_fill(
     system_prompt = (
         "あなたはAI Work Partnerの月末目標補填・営業日程再構築担当です。"
         "既存システムが作った日別計画を変更の土台とし、期間末の期待売上・期待粗利の"
-        "不足を埋めるか、実行不能になった訪問を実行可能な別日へ移す候補と日付を"
+        "不足を埋めるか、実行不能になった訪問を実行可能な別日へ移し、商談が少ない日は"
+        "新規・商談中の候補を補う日付を"
         "提案してください。\n"
         "従うべきルール:\n"
         "- period.schedule_recovery_required=trueの場合、sales_shortfallと"
         "gross_profit_shortfallが0でも再計画を止めないこと。reserve_candidatesの"
         "recovery_required=trueを優先し、failed_dates以外のeligible_datesへ再配置すること\n"
+        "- period.daily_capacity_fill_required=trueの場合、目標金額を既に満たしていても"
+        "補完を止めないこと。days.current_visit_countがperiod.minimum_daily_visits未満の日を"
+        "優先し、1日3件程度になるまで新規(customer_type=new)と商談中"
+        "(customer_type=ongoing)を偏りなく割り当てること\n"
         "- 日目標はソフト目標なので、日ごとの未達は許容すること。日目標を均等に"
         "達成させることより、periodのsales_shortfallとgross_profit_shortfallを"
         "期間末までに両方0へ近づけることを優先すること\n"
@@ -784,7 +793,7 @@ def suggest_target_gap_fill(
         "- daysのfixed_windows、current_visit_count、max_visitsと、候補の移動距離・"
         "訪問時間を考慮すること。ただし最終的な実行可能性は後段ソルバーが再検証する\n"
         "- reasonは期待売上・期待粗利と、なぜその日に補填するかを日本語で簡潔に書くこと\n"
-        "- 最大assignment_limit件まで、補填効果が高い順で返すこと\n"
+        "- 最大assignment_limit件まで、目標補填効果と空白日の商談数改善が高い順で返すこと\n"
         "- 出力は次のJSON配列のみとし、説明文やコードブロック記法を含めないこと:\n"
         '[{"customer_id": <int>, "target_date": "YYYY-MM-DD", "reason": "<text>"}]'
     )
@@ -873,6 +882,192 @@ def suggest_target_gap_fill(
     if not assignments:
         raise AiPlanningError("Qwenから有効な月末目標補填案を取得できませんでした。")
     return assignments
+
+
+def suggest_idle_day_activities(
+    conn: Connection,
+    *,
+    rep_id: int,
+    target_date: date,
+    ongoing_deals: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build useful non-route work for a day where no visit was feasible."""
+    payload = {
+        "target_date": target_date.isoformat(),
+        "ongoing_deals": ongoing_deals,
+    }
+    prompt_json = json.dumps(payload, ensure_ascii=False, default=str)
+    system_prompt = (
+        "あなたはAI Work Partnerの空白日補完担当です。実行可能な訪問ルートを作れなかった"
+        "営業日を、何もしない日にはせず、次の商談を生む活動と商談中案件の前進に使います。\n"
+        "4〜5件を次のバランスで提案してください:\n"
+        "- 顧客未紐づけの新規開拓を2件以上（新規候補リスト作成、業界調査、架電）\n"
+        "- ongoing_dealsから商談中案件の電話・メール・Web会議・資料作成を1〜2件\n"
+        "- 訪問はルート検証を通らなかった日のため作らないこと\n"
+        "deal_idはongoing_deals内のIDかnullだけを使うこと。activity_typeは"
+        "新規開拓, 電話, メール, Web会議, 資料作成のいずれか、duration_minutesは"
+        "30〜90分にすること。売上は活動時点では計上しないこと。\n"
+        "出力はJSON配列だけにしてください:\n"
+        '[{"activity_type":"新規開拓", "deal_id":null, "title":"具体的な活動", '
+        '"duration_minutes":60, "reason":"選定理由"}]'
+    )
+    try:
+        response = httpx.post(
+            f"{settings.ai_base_url.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.ai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.ai_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt_json},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 2500,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        content = _extract_content(response)
+        raw_items = _parse_plan_items(content)
+    except AiPlanningError:
+        log_response(
+            conn,
+            context="idle_day_activity_fill",
+            prompt=prompt_json,
+            response="(parse error)",
+            rep_id=rep_id,
+        )
+        raise
+    except Exception as error:
+        log_response(
+            conn,
+            context="idle_day_activity_fill",
+            prompt=prompt_json,
+            response=f"(error) {error}",
+            rep_id=rep_id,
+        )
+        raise AiPlanningError(f"Qwenへの接続に失敗しました: {error}") from error
+
+    valid_deal_ids = {int(deal["deal_id"]) for deal in ongoing_deals}
+    allowed_types = {"新規開拓", "電話", "メール", "Web会議", "資料作成"}
+    activities: list[dict[str, Any]] = []
+    signatures: set[tuple[str, int | None]] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            activity_type = str(item["activity_type"]).strip()
+            raw_deal_id = item.get("deal_id")
+            deal_id = None if raw_deal_id is None else int(raw_deal_id)
+            title = str(item["title"]).strip()
+            duration = max(30, min(90, int(item["duration_minutes"])))
+            reason = str(item["reason"]).strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        signature = (title, deal_id)
+        if (
+            activity_type not in allowed_types
+            or (deal_id is not None and deal_id not in valid_deal_ids)
+            or not title
+            or not reason
+            or signature in signatures
+        ):
+            continue
+        signatures.add(signature)
+        activities.append(
+            {
+                "activity_type": activity_type,
+                "deal_id": deal_id,
+                "title": title,
+                "duration_minutes": duration,
+                "reason": reason,
+            }
+        )
+        if len(activities) >= 5:
+            break
+    log_response(
+        conn,
+        context="idle_day_activity_fill",
+        prompt=prompt_json,
+        response=content,
+        rep_id=rep_id,
+    )
+    if not activities:
+        raise AiPlanningError("Qwenから有効な空白日補完案を取得できませんでした。")
+    return activities
+
+
+def choose_week_route_alternative(
+    conn: Connection,
+    *,
+    rep_id: int,
+    current_days: list[dict[str, Any]],
+    alternatives: list[dict[str, Any]],
+) -> tuple[int, str]:
+    """Choose one already-solved, constraint-valid alternative for a week."""
+    if not alternatives:
+        raise AiPlanningError("表示できる週の別案がありません。")
+    payload = {"current_days": current_days, "validated_alternatives": alternatives}
+    system_prompt = (
+        "あなたはAI Work Partnerの週次営業計画の別案選定担当です。"
+        "再計算はせず、validated_alternativesにある実行可能な計算済み候補から、"
+        "現在案と顧客構成が異なり、売上・粗利・移動負担のバランスが最も良い案を"
+        "1つ選んでください。候補にない案を作ってはいけません。\n"
+        "出力は次のJSONオブジェクトだけにしてください:\n"
+        '{"option_id": <int>, "reason": "<現在案との違いと選定理由>"}'
+    )
+    prompt_json = json.dumps(payload, ensure_ascii=False, default=str)
+    try:
+        response = httpx.post(
+            f"{settings.ai_base_url.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.ai_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.ai_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt_json},
+                ],
+                "temperature": 0.2,
+                "max_tokens": 800,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        content = _extract_content(response).strip()
+        if content.startswith("```"):
+            content = content.split("```")[1].removeprefix("json").strip()
+        parsed = json.loads(content)
+        option_id = int(parsed["option_id"])
+        reason = str(parsed["reason"]).strip()
+    except Exception as error:
+        log_response(
+            conn,
+            context="week_route_alternative",
+            prompt=prompt_json,
+            response=f"(error) {error}",
+            rep_id=rep_id,
+        )
+        raise AiPlanningError(f"週の別案選定に失敗しました: {error}") from error
+
+    valid_ids = {int(item["option_id"]) for item in alternatives}
+    if option_id not in valid_ids or not reason:
+        raise AiPlanningError("LLMが計算済み候補にない別案を選びました。")
+    log_response(
+        conn,
+        context="week_route_alternative",
+        prompt=prompt_json,
+        response=content,
+        rep_id=rep_id,
+    )
+    return option_id, reason
 
 
 def generate_week_narratives(

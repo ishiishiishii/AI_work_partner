@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
@@ -9,12 +9,14 @@ import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel"
 import { todayIsoLocal, type ViewMode } from "@/lib/dateRange";
 import { useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
+import type { RoutePlanBatchPreview } from "@/types";
 
 export default function DashboardPage() {
   const { selectedRep, isAuthLoading } = useRep();
   const REP_ID = selectedRep?.rep_id ?? null;
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState(() => todayIsoLocal());
+  const [aiMonthPlan, setAiMonthPlan] = useState<RoutePlanBatchPreview | null>(null);
   const {
     isLoading,
     loadError,
@@ -27,13 +29,6 @@ export default function DashboardPage() {
     altPreview,
     needsInitialPlan,
     isGeneratingInitialPlan,
-    forecastAmount,
-    forecastProfitAmount,
-    salesAchievementProbability,
-    profitAchievementProbability,
-    jointAchievementProbability,
-    actualAchievedAmount,
-    actualAchievementRate,
     routeRefreshRevision,
     handleTargetSave,
     handleRouteApproved,
@@ -48,6 +43,28 @@ export default function DashboardPage() {
     confirmAlternative,
     cancelAlternativePreview,
   } = useDashboardData(REP_ID);
+
+  useEffect(() => {
+    setAiMonthPlan(null);
+  }, [REP_ID]);
+
+  const probabilityPercent = (value: number): number =>
+    value <= 1 ? value * 100 : value;
+  const aiForecastAmount = aiMonthPlan
+    ? Number(aiMonthPlan.achieved_amount) +
+      Number(aiMonthPlan.existing_plan_expected_sales) +
+      Number(aiMonthPlan.portfolio_expected_sales)
+    : 0;
+  const aiForecastProfitAmount = aiMonthPlan
+    ? Number(aiMonthPlan.achieved_gross_profit) +
+      Number(aiMonthPlan.existing_plan_expected_gross_profit) +
+      Number(aiMonthPlan.totals.expected_gross_profit ?? 0)
+    : 0;
+  const aiActualAmount = aiMonthPlan ? Number(aiMonthPlan.achieved_amount) : 0;
+  const aiActualRate =
+    aiMonthPlan?.monthly_target_amount && Number(aiMonthPlan.monthly_target_amount) > 0
+      ? (aiActualAmount / Number(aiMonthPlan.monthly_target_amount)) * 100
+      : 0;
 
   if (isAuthLoading || (selectedRep && isLoading)) {
     return (
@@ -89,18 +106,33 @@ export default function DashboardPage() {
           <GoalCard
             rep={selectedRep}
             target={target}
-            forecastAmount={forecastAmount}
-            forecastProfitAmount={forecastProfitAmount}
-            actualAchievedAmount={actualAchievedAmount}
-            actualAchievementRate={actualAchievementRate}
-            salesAchievementProbability={salesAchievementProbability}
-            profitAchievementProbability={profitAchievementProbability}
-            jointAchievementProbability={jointAchievementProbability}
+            forecastAmount={aiForecastAmount}
+            forecastProfitAmount={aiForecastProfitAmount}
+            actualAchievedAmount={aiActualAmount}
+            actualAchievementRate={aiActualRate}
+            salesAchievementProbability={
+              aiMonthPlan ? probabilityPercent(aiMonthPlan.sales_achievement_probability) : 0
+            }
+            profitAchievementProbability={
+              aiMonthPlan
+                ? aiMonthPlan.profit_achievement_probability === null
+                  ? null
+                  : probabilityPercent(aiMonthPlan.profit_achievement_probability)
+                : 0
+            }
+            jointAchievementProbability={
+              aiMonthPlan ? probabilityPercent(aiMonthPlan.joint_achievement_probability) : 0
+            }
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
           <RouteBatchPlanPanel
             onApproved={handleRouteApproved}
+            onPlanCalculated={(calculated) => {
+              setAiMonthPlan(
+                calculated?.start_date.slice(0, 7) === target.target_month ? calculated : null,
+              );
+            }}
             refreshSignal={routeRefreshRevision}
             existingPlans={plans}
           />

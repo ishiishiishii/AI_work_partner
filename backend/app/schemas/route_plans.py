@@ -210,9 +210,45 @@ class RoutePlanApproveOut(BaseModel):
     activity_plan_ids: list[int]
 
 
+class RoutePlanIdleDayApproveRequest(BaseModel):
+    batch_id: int = Field(gt=0)
+    target_date: date
+
+
+class RoutePlanIdleDayApproveOut(BaseModel):
+    target_date: date
+    status: Literal["approved"]
+    activity_plan_ids: list[int]
+    summary: str
+
+
 class RoutePlanRejectOut(BaseModel):
     plan_id: int
     status: Literal["rejected"]
+
+
+class RoutePlanWeekAlternativeRequest(BaseModel):
+    plan_ids: list[int] = Field(min_length=1, max_length=7)
+    minimum_economic_ratio: float = Field(default=0.9, ge=0.5, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_unique_plan_ids(self) -> "RoutePlanWeekAlternativeRequest":
+        if len(set(self.plan_ids)) != len(self.plan_ids):
+            raise ValueError("plan_ids must be unique")
+        return self
+
+
+class RoutePlanAlternativeChangeOut(BaseModel):
+    plan_id: int
+    target_date: date
+    option_rank: int
+    totals: dict[str, Any]
+    stops: list[RoutePlanStopOut]
+
+
+class RoutePlanWeekAlternativeOut(BaseModel):
+    reason: str
+    change: RoutePlanAlternativeChangeOut
 
 
 class RoutePlanBatchDayOut(BaseModel):
@@ -223,6 +259,7 @@ class RoutePlanBatchDayOut(BaseModel):
     target_amount: Decimal = Decimal("0")
     shortfall_amount: Decimal = Decimal("0")
     attainment_rate: float = 0
+    existing_visit_count: int = Field(default=0, ge=0)
     # 0円 = 粗利目標が未設定/その日への配分が無いという意味(月全体で
     # 粗利目標がnullなら常に0)。売上のtarget_amountと同じ配分ロジックを流用。
     target_gross_profit: Decimal = Decimal("0")
@@ -301,11 +338,13 @@ class RoutePlanBatchPreviewOut(BaseModel):
     achieved_amount: Decimal = Decimal("0")
     remaining_target_amount: Decimal | None = None
     planning_target_amount: Decimal | None = None
+    existing_plan_expected_sales: Decimal = Decimal("0")
     portfolio_expected_sales: Decimal = Decimal("0")
     portfolio_coverage_rate: float = 0
     # 粗利目標(sales_target.target_gross_profit)が未設定ならNone(0円目標ではない)。
     monthly_target_gross_profit: Decimal | None = None
     achieved_gross_profit: Decimal = Decimal("0")
+    existing_plan_expected_gross_profit: Decimal = Decimal("0")
     # モンテカルロシミュレーションによる月末達成確率(0-1)。planning.forecast()
     # (backend/app/services/target_simulation.py)と同じエンジン・同じ意味。
     sales_achievement_probability: float = 0

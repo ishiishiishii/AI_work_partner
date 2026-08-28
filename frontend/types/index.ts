@@ -429,10 +429,22 @@ export type RoutePlanBatchDay = {
   target_amount: number;
   shortfall_amount: number;
   attainment_rate: number;
+  existing_visit_count: number;
   totals: RoutePlanBatchDayTotals;
   stops: RoutePlanStop[];
   warnings: string[];
   solver: { cp_sat?: string; routing?: string };
+};
+
+export type RoutePlanWeekAlternative = {
+  reason: string;
+  change: {
+    plan_id: number;
+    target_date: string;
+    option_rank: number;
+    totals: RoutePlanBatchDayTotals;
+    stops: RoutePlanStop[];
+  };
 };
 
 export type RiskLevel = "low" | "medium" | "high";
@@ -518,10 +530,12 @@ export type RoutePlanBatchPreview = {
   achieved_amount: number;
   remaining_target_amount: number | null;
   planning_target_amount: number | null;
+  existing_plan_expected_sales: number;
   portfolio_expected_sales: number;
   portfolio_coverage_rate: number;
   monthly_target_gross_profit: number | null;
   achieved_gross_profit: number;
+  existing_plan_expected_gross_profit: number;
   sales_achievement_probability: number;
   profit_achievement_probability: number | null;
   joint_achievement_probability: number;
