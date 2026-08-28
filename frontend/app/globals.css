@@ -317,20 +317,6 @@ a {
   color: var(--muted);
 }
 
-.goal-card__target-form button {
-  border-radius: 8px;
-  padding: 0.35rem 0.9rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-  border: 1px solid transparent;
-  font-family: inherit;
-}
-
-.goal-card__target-form button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .goal-card__field {
   display: flex;
   flex-direction: column;
@@ -360,6 +346,27 @@ a {
   font-size: 0.85rem;
   color: var(--muted);
   margin: 0;
+}
+
+/* GoalCardの目標編集フォームだけでなく、アプリ内の各種保存/キャンセル
+   ボタン(RouteBatchPlanPanel・ログイン画面・各種フォームなど)で幅広く
+   使い回しているため、このクラス自体に見た目一式(形・大きさ)を持たせる。
+   親要素側のスタイルに依存させると、GoalCardのフォーム外で使った時に
+   色だけついてブラウザ標準の形のまま、という崩れ方をしてしまう。 */
+.goal-card__save,
+.goal-card__cancel {
+  border-radius: 8px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.goal-card__save:disabled,
+.goal-card__cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .goal-card__save {
