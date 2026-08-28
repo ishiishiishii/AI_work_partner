@@ -17,6 +17,7 @@ import {
   routeEconomicPolicyConfig,
 } from "@/lib/routeEconomicPolicy";
 import { useRouteBatchPlan } from "@/lib/routeBatchPlanContext";
+import { LUNCH_BREAK_END, LUNCH_BREAK_START } from "@/lib/workHours";
 import type { RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeek } from "@/types";
 
 type Props = {
@@ -129,6 +130,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
   const [calculatingWeek, setCalculatingWeek] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [weekErrors, setWeekErrors] = useState<Record<number, string>>({});
   const economicPolicy = routeEconomicPolicyConfig(policy);
   const salesWeightPercent = economicPolicy.salesWeightPercent;
   const grossProfitWeightPercent = 100 - salesWeightPercent;
@@ -154,6 +156,7 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
     }
     setBusy(true);
     setError(null);
+    setWeekErrors({});
     setDecisions({});
     setWeekBatches({});
     try {
@@ -172,8 +175,8 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
           end_location: { kind: "branch" },
           search_area: { kind: "auto" },
           break_enabled: true,
-          break_start: "12:00",
-          break_end: "13:00",
+          break_start: LUNCH_BREAK_START,
+          break_end: LUNCH_BREAK_END,
           turnaround_buffer_min: 20,
           travel_time_buffer_percent: 20,
           access_buffer_min: 10,
@@ -198,12 +201,18 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
       }))
       .filter((assignment) => assignment.visit_count > 0);
     if (portfolioAssignments.length === 0) {
-      setError(`第${week.week_number}週には月間最適化で割り当てられた訪問候補がありません。`);
+      setWeekErrors((prev) => ({
+        ...prev,
+        [week.week_number]: `第${week.week_number}週には月間最適化で割り当てられた訪問候補がありません。`,
+      }));
       return;
     }
 
     setCalculatingWeek(week.week_number);
-    setError(null);
+    setWeekErrors((prev) => {
+      const { [week.week_number]: _removed, ...rest } = prev;
+      return rest;
+    });
     try {
       const economicsWeightTotal = batch.weights.sales + batch.weights.gross_profit;
       const monthlySalesWeightPercent =
@@ -227,20 +236,27 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
         end_location: { kind: "branch" },
         search_area: { kind: "auto" },
         break_enabled: true,
-        break_start: "12:00",
-        break_end: "13:00",
+        break_start: LUNCH_BREAK_START,
+        break_end: LUNCH_BREAK_END,
         turnaround_buffer_min: 20,
         travel_time_buffer_percent: 20,
         access_buffer_min: 10,
         return_buffer_min: 30,
       });
       setWeekBatches((current) => ({ ...current, [week.week_number]: result }));
+      // previewSalesRouteBatch は下書き(plan_status='draft')の活動計画も同じ
+      // リクエスト内でDBへ即時反映するため、ダッシュボード側の活動計画一覧を
+      // 明示的に再取得しないと画面には反映されない(次のリロードまで表示が古いまま
+      // になってしまう)。approveDay と同じ再取得を呼んでおく。
+      await onApproved();
     } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : `第${week.week_number}週の計算に失敗しました`,
-      );
+      setWeekErrors((prev) => ({
+        ...prev,
+        [week.week_number]:
+          requestError instanceof Error
+            ? requestError.message
+            : `第${week.week_number}週の計算に失敗しました`,
+      }));
     } finally {
       setCalculatingWeek(null);
     }
@@ -425,6 +441,9 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                           : "この週の訪問割り当てはありません"}
                     </span>
                   </div>
+                  {weekErrors[outlineWeek.week_number] && (
+                    <p className="new-customer-form__error">{weekErrors[outlineWeek.week_number]}</p>
+                  )}
                   <p>
                     {week.focus_is_ai_generated && (
                       <span className="route-plan-batch__badge route-plan-batch__badge--detailed">
@@ -435,8 +454,8 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
                   </p>
                   {week.deal_progress_goals.length > 0 && (
                     <ul className="route-plan-batch__progress-goals">
-                      {week.deal_progress_goals.map((goal) => (
-                        <li key={goal.deal_id ?? `new-${goal.customer_id}`}>
+                      {week.deal_progress_goals.map((goal, goalIndex) => (
+                        <li key={`${goal.deal_id ?? `new-${goal.customer_id}`}-${goalIndex}`}>
                           <strong>
                             {goal.customer_name}: {goal.current_phase_name} → {goal.target_phase_name}
                           </strong>
