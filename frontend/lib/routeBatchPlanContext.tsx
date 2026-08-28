@@ -94,21 +94,45 @@ export function RouteBatchPlanProvider({ children }: { children: React.ReactNode
         { weeks: weekBatch.weeks.slice(0, 1), warnings: weekBatch.warnings },
       ]),
     );
-    const state = {
+    const baseState = {
       selectedMonth,
       policy,
       maxVisits,
       travelMode,
       batch,
-      weekBatches: slimWeekBatches,
       decisions,
     };
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // 容量超過などで保存に失敗しても、直前まで保存できていた状態を消してしまうと
-      // かえって「計算済みのはずが再読み込みで消える」原因になる。保存済みキーは
-      // 触らず、今回分の書き込みだけ諦める(次回の状態変化で再度書き込みを試みる)。
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ ...baseState, weekBatches: slimWeekBatches }),
+      );
+    } catch (writeError) {
+      // 保存に失敗する場合、原因は主に容量超過(stops/乗換案内などを含む
+      // weekBatchesが大きい)と想定されるため、各週の日別詳細(days)を
+      // 削って「第N週は計算済み」という事実とヘッダー数値だけを残した
+      // 軽量版で再挑戦する。それでも失敗したら諦めて、直前まで保存できて
+      // いた状態を消さないようにする(保存済みキーには触らない)。
+      const headlineOnlyWeekBatches = Object.fromEntries(
+        Object.entries(slimWeekBatches).map(([weekNumber, weekBatch]) => [
+          weekNumber,
+          {
+            weeks: weekBatch.weeks.map((week) => ({ ...week, days: [] })),
+            warnings: weekBatch.warnings,
+          },
+        ]),
+      );
+      try {
+        window.localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ ...baseState, weekBatches: headlineOnlyWeekBatches }),
+        );
+      } catch {
+        console.warn(
+          "月間営業スケジュールの状態をlocalStorageへ保存できませんでした。次回の再読み込みで計算結果が消える可能性があります。",
+          writeError,
+        );
+      }
     }
   }, [selectedMonth, policy, maxVisits, travelMode, batch, weekBatches, decisions]);
 

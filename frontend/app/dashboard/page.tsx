@@ -131,6 +131,7 @@ export default function DashboardPage() {
               );
             }}
             refreshSignal={routeRefreshRevision}
+            existingPlans={plans}
           />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
