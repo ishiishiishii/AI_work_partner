@@ -956,8 +956,10 @@ def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> 
                 except RoutePlanningError as error:
                     assert error.code == "coarse_plan_not_approvable"
 
-            # The detailed day behaves like a normal single-day plan: approvable,
-            # and only then does activity_plan gain rows.
+            # The detailed day behaves like a normal single-day plan: approvable.
+            # Its activity_plan rows already exist as drafts (created up-front by
+            # the batch preview, mirroring _persist_preview), so approval only
+            # promotes them to 'scheduled' rather than inserting new rows.
             if detailed_day["plan_id"] is not None:
                 before_count = conn.execute(
                     "select count(*)::int as count from activity_plan where rep_id = %s",
@@ -971,7 +973,12 @@ def test_batch_preview_details_near_days_and_estimates_the_rest(monkeypatch) -> 
                     "select count(*)::int as count from activity_plan where rep_id = %s",
                     (rep_id,),
                 ).fetchone()["count"]
-                assert after_count == before_count + len(activity_ids)
+                assert after_count == before_count
+                statuses = conn.execute(
+                    "select plan_status from activity_plan where plan_id = any(%s)",
+                    (activity_ids,),
+                ).fetchall()
+                assert all(row["plan_status"] == "scheduled" for row in statuses)
     finally:
         with get_connection() as conn:
             if activity_ids:
