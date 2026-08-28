@@ -123,6 +123,43 @@ def test_monthly_target_context_counts_only_contracts_before_plan_start() -> Non
     assert context["remaining_target_gross_profit"] == Decimal("10000000")
 
 
+def test_monthly_target_context_cutoff_date_overrides_achieved_window() -> None:
+    """A dashboard regenerating a plan mid-month must still see contracts won
+    after the plan's nominal start date -- otherwise "achieved" stays frozen
+    at zero for the whole month even as deals close (the reported bug)."""
+
+    class _Result:
+        @staticmethod
+        def fetchone() -> dict:
+            return {
+                "target_amount": Decimal("40000000"),
+                "target_gross_profit": Decimal("10000000"),
+                "achieved": Decimal("5000000"),
+                "achieved_profit": Decimal("1000000"),
+            }
+
+    class _Connection:
+        query = ""
+        params: tuple = ()
+
+        def execute(self, query: str, params: tuple) -> _Result:
+            self.query = query
+            self.params = params
+            return _Result()
+
+    conn = _Connection()
+    month_start = date(2026, 9, 1)
+    cutoff = date(2026, 9, 16)  # mid-month "today"
+
+    context = _monthly_target_context(
+        conn, rep_id=10, target_date=month_start, cutoff_date=cutoff
+    )
+
+    assert conn.params == (cutoff, 10, month_start)
+    assert context["achieved_amount"] == Decimal("5000000")
+    assert context["remaining_target_amount"] == Decimal("35000000")
+
+
 def _candidate(customer_id: int, expected_sales: int, score: int) -> VisitCandidate:
     candidate = VisitCandidate(
         customer_id=customer_id,
