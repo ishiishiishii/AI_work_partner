@@ -1,10 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useState } from "react";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
+import { todayIsoLocal, type ViewMode } from "@/lib/dateRange";
 import { TARGET_MONTH, useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
 
@@ -17,6 +19,8 @@ const MapPanel = dynamic(() => import("@/components/dashboard/MapPanel").then((m
 export default function ActivityPage() {
   const { selectedRep, isAuthLoading } = useRep();
   const REP_ID = selectedRep?.rep_id ?? null;
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
+  const [selectedDate, setSelectedDate] = useState(() => todayIsoLocal());
   const {
     isLoading,
     loadError,
@@ -107,12 +111,16 @@ export default function ActivityPage() {
             onConfirmPlan={handleConfirmPlan}
             onUpdateProgress={handleUpdateProgress}
             onCommitProgress={handleCommitProgress}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            selectedDate={selectedDate}
+            onSelectedDateChange={setSelectedDate}
           />
         </div>
         <div className="dashboard-layout__sidebar">
           <AiChatPanel target={target} achievementRate={achievementRate} plans={plans} affinities={affinities} />
           <MapPanel customers={customers} territory={territory} plans={plans} targetMonth={TARGET_MONTH} />
-          <AiReasoningPanel plans={plans} />
+          <AiReasoningPanel plans={plans} viewMode={viewMode} selectedDate={selectedDate} />
         </div>
       </div>
     </main>

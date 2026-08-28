@@ -347,10 +347,9 @@ type ApiPlan = {
   progress_percent: number;
   memo: string | null;
   week_number: number;
+  result_status: DealResultStatus | null;
 };
 
-// plan_status からは成約/失注/延期の区別まではわからないため、
-// 取得直後は常に「未入力」として扱う。実際の結果はボタン操作で記録する。
 // customer_name は、顧客に紐づかない予定(category='task')では title を、
 // 商談に紐づく予定では customer_id から解決した名前を使う。
 function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan {
@@ -372,7 +371,7 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     expected_probability: row.expected_probability,
     is_ai_generated: row.is_ai_generated,
     reasoning_text: row.rationale ?? "",
-    result_status: "pending",
+    result_status: row.result_status ?? "pending",
     memo: row.memo,
     progress_percent: row.progress_percent,
     week_number: row.week_number,

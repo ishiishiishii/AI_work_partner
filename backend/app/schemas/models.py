@@ -264,6 +264,7 @@ class PlanOut(OrmModel):
     product_name: str | None = None
     progress_percent: int = 0
     memo: str | None = None
+    result_status: str | None = None
 
     @computed_field
     @property

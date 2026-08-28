@@ -640,28 +640,41 @@ def list_plans(
 ) -> list[dict]:
     # cancelled plans (e.g. replaced via '対応が難しい') are intentionally excluded --
     # they're kept in the table for history, but shouldn't reappear in the active list.
-    clauses = ["rep_id = %s", "plan_status != 'cancelled'"]
+    clauses = ["ap.rep_id = %s", "ap.plan_status != 'cancelled'"]
     params: list[object] = [rep_id]
     if from_date:
-        clauses.append("plan_date >= %s")
+        clauses.append("ap.plan_date >= %s")
         params.append(from_date)
     if to_date:
-        clauses.append("plan_date <= %s")
+        clauses.append("ap.plan_date <= %s")
         params.append(to_date)
     where = " and ".join(clauses)
     rows = conn.execute(
         f"""
-        select plan_id, rep_id, plan_date, start_time, end_time, category, title,
-               customer_id, deal_id, activity_type, priority, expected_amount,
-               expected_probability, plan_status, is_ai_generated, rationale, product_name,
-               progress_percent, memo
-        from ai.activity_plan
+        select ap.plan_id, ap.rep_id, ap.plan_date, ap.start_time, ap.end_time, ap.category,
+               ap.title, ap.customer_id, ap.deal_id, ap.activity_type, ap.priority,
+               ap.expected_amount, ap.expected_probability, ap.plan_status, ap.is_ai_generated,
+               ap.rationale, ap.product_name, ap.progress_percent, ap.memo, ar.outcome
+        from ai.activity_plan ap
+        left join lateral (
+            select outcome
+            from activity_result
+            where activity_result.plan_id = ap.plan_id
+            order by created_at desc
+            limit 1
+        ) ar on true
         where {where}
-        order by plan_date, priority
+        order by ap.plan_date, ap.priority
         """,
         params,
     ).fetchall()
-    return list(rows)
+    # outcome (won/lost/deferred) is recorded separately in activity_result; fold it
+    # into a result_status the frontend can render without a second round trip.
+    outcome_to_result_status = {"won": "won", "lost": "lost", "deferred": "postponed"}
+    return [
+        {**dict(row), "result_status": outcome_to_result_status.get(row["outcome"])}
+        for row in rows
+    ]
 
 
 def create_plan(

@@ -852,7 +852,7 @@ def selection_reason(candidate: VisitCandidate) -> str:
         )
     return (
         f"{visit_text}。案件期待売上{candidate.opportunity_expected_sales:,.0f}円、{profit_text}、"
-        f"{affinity_text}、候補エリア内の移動効率を総合評価しました。"
+        f"{affinity_text}、候補エリア内の移動効率も踏まえ、本日の訪問として提案しています。"
     )
 
 

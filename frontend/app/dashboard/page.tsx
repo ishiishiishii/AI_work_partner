@@ -1,18 +1,21 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel";
+import { todayIsoLocal, type ViewMode } from "@/lib/dateRange";
 import { useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
 import type { RoutePlanBatchPreview } from "@/types";
-import { useEffect, useState } from "react";
 
 export default function DashboardPage() {
   const { selectedRep, isAuthLoading } = useRep();
   const REP_ID = selectedRep?.rep_id ?? null;
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
+  const [selectedDate, setSelectedDate] = useState(() => todayIsoLocal());
   const [aiMonthPlan, setAiMonthPlan] = useState<RoutePlanBatchPreview | null>(null);
   const {
     isLoading,
@@ -158,10 +161,14 @@ export default function DashboardPage() {
             onConfirmPlan={handleConfirmPlan}
             onUpdateProgress={handleUpdateProgress}
             onCommitProgress={handleCommitProgress}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            selectedDate={selectedDate}
+            onSelectedDateChange={setSelectedDate}
           />
         </div>
         <div className="dashboard-layout__sidebar">
-          <AiReasoningPanel plans={plans} />
+          <AiReasoningPanel plans={plans} viewMode={viewMode} selectedDate={selectedDate} />
         </div>
       </div>
     </main>

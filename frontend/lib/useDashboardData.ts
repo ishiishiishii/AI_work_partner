@@ -350,8 +350,8 @@ export function useDashboardData(repId: number | null) {
         fetchDeals({ repId }),
         fetchRepAffinity(repId),
       ]);
-      // fetchActivityPlansのresult_statusはDBビュー上pending固定なので、この画面で
-      // 既に確定している結果をplan_id単位で戻してから表示を差し替える。
+      // 再計画のfetchActivityPlansがDBの最新状態を返すまでの間、この画面で既に
+      // 確定している結果を先に反映しておく(取得結果と一致すれば上書きは実質no-op)。
       const resultStatusByPlanId = new Map(
         updatedPlans.map((plan) => [plan.plan_id, plan.result_status]),
       );
