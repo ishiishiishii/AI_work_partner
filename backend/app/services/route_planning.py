@@ -4281,8 +4281,8 @@ def _deal_progress_goals(
     for candidate in week_candidates:
         if candidate.customer_type == "new":
             rationale = (
-                f"新規開拓先です。過去の同業種・同規模企業の実績から、初回接触までに"
-                f"平均{candidate.required_visit_count}回の訪問が必要と推定しています。"
+                f"新規開拓先のため今週の訪問を提案します。過去の同業種・同規模企業の実績から、"
+                f"初回接触までに平均{candidate.required_visit_count}回の訪問が必要と推定しています。"
             )
             entries.append(
                 {
@@ -4307,7 +4307,10 @@ def _deal_progress_goals(
                 target_phase = "受注(契約締結)"
             else:
                 target_phase = phase_name_by_sort_order.get(sort_order + 1, "次フェーズ")
-            rationale = f"現在「{phase_name}」のため、今週中に「{target_phase}」へ進めることを目指します。"
+            rationale = (
+                f"案件期待売上{economics.expected_sales:,.0f}円、現在「{phase_name}」のため、"
+                f"今週中に「{target_phase}」へ進めることを目指し訪問を提案します。"
+            )
             risk = target_simulation.assess_deal_risk(
                 win_probability=economics.win_probability,
                 days_since_contact=None,
@@ -5492,13 +5495,10 @@ def create_batch_preview(
             "assigned_date": assigned_dates_by_customer[candidate.customer_id][0],
             "assigned_dates": assigned_dates_by_customer[candidate.customer_id],
             "selection_reason": (
-                selection_reason(candidate)
-                + (
-                    " ／AIが月目標・粗利・商談状況を踏まえて月間候補に選定: "
-                    f"{monthly_ai_reasons[candidate.customer_id]}"
-                    if candidate.customer_id in monthly_ai_reasons
-                    else ""
-                )
+                f"{monthly_ai_reasons[candidate.customer_id]}"
+                f"（{selection_reason(candidate)}）"
+                if candidate.customer_id in monthly_ai_reasons
+                else selection_reason(candidate)
             ),
             **_candidate_deal_risk(candidate, today=today),
         }
@@ -5539,7 +5539,8 @@ def create_batch_preview(
         ))[:3]
         if focus_names:
             focus = (
-                f"{', '.join(focus_names)}を中心に、日別目標へ合わせて訪問順を最適化します。"
+                f"期待売上の大きい{', '.join(focus_names)}への訪問を優先的に提案し、"
+                f"日別目標へ合わせて訪問順を最適化します。"
             )
         else:
             focus = "この週に割り当てられる営業先候補がないため、候補追加または目標配分の見直しが必要です。"
