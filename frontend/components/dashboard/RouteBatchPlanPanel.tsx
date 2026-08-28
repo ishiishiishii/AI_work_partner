@@ -18,7 +18,7 @@ import {
 } from "@/lib/routeEconomicPolicy";
 import { useRouteBatchPlan } from "@/lib/routeBatchPlanContext";
 import { LUNCH_BREAK_END, LUNCH_BREAK_START } from "@/lib/workHours";
-import type { RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeek } from "@/types";
+import type { ActivityPlan, RoutePlanBatchPreview, RoutePlanPreview, RoutePlanWeek } from "@/types";
 
 type Props = {
   onApproved: () => Promise<void>;
@@ -27,6 +27,11 @@ type Props = {
   // plan's own auto-replan instead of only updating when the user clicks the
   // generate button again.
   refreshSignal?: number;
+  // その週の活動計画(DB上の確定データ)。ブラウザのlocalStorageに保存した
+  // weekBatchesは容量超過等で失われることがあるため、リロード直後で
+  // weekBatchesが空でも「activity_planに既にAI生成の訪問予定がある週」は
+  // 「計算する」ではなく「再計算」として扱う判定に使う。
+  existingPlans?: ActivityPlan[];
 };
 
 function dayLabel(dateStr: string): string {
@@ -110,7 +115,7 @@ function MonthlyPlanOutlook({ batch }: { batch: RoutePlanBatchPreview }) {
   );
 }
 
-export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
+export function RouteBatchPlanPanel({ onApproved, refreshSignal, existingPlans = [] }: Props) {
   const {
     selectedMonth,
     setSelectedMonth,
@@ -382,7 +387,22 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
             <article>
               <small>3. 週ごとに詳細計算</small>
               <strong>{batch.weeks.length}週・{batch.days.length}営業日</strong>
-              <span>計算済み {Object.keys(weekBatches).length}/{batch.weeks.length}週</span>
+              <span>
+                計算済み{" "}
+                {
+                  batch.weeks.filter(
+                    (week) =>
+                      weekBatches[week.week_number] !== undefined ||
+                      existingPlans.some(
+                        (plan) =>
+                          plan.is_ai_generated &&
+                          plan.plan_date >= week.start_date &&
+                          plan.plan_date <= week.end_date,
+                      ),
+                  ).length
+                }
+                /{batch.weeks.length}週
+              </span>
             </article>
           </div>
 
@@ -396,7 +416,16 @@ export function RouteBatchPlanPanel({ onApproved, refreshSignal }: Props) {
             {batch.weeks.map((outlineWeek) => {
               const calculatedBatch = weekBatches[outlineWeek.week_number];
               const week = calculatedBatch?.weeks[0] ?? outlineWeek;
-              const isCalculated = calculatedBatch !== undefined;
+              // weekBatches(localStorage経由で復元)がリロードで失われていても、
+              // 活動計画側に既にAI生成の訪問予定が保存されていれば「計算済みの週」
+              // として扱い、「計算する」ではなく「再計算」を表示する。
+              const hasExistingPlans = existingPlans.some(
+                (plan) =>
+                  plan.is_ai_generated &&
+                  plan.plan_date >= outlineWeek.start_date &&
+                  plan.plan_date <= outlineWeek.end_date,
+              );
+              const isCalculated = calculatedBatch !== undefined || hasExistingPlans;
               const activeWarnings = calculatedBatch?.warnings ?? batch.warnings;
               const assignedVisitCount = batch.selected_customers.reduce(
                 (count, customer) => count + customer.assigned_dates.filter(

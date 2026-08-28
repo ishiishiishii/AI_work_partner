@@ -95,7 +95,11 @@ export default function DashboardPage() {
             onSave={handleTargetSave}
             willGeneratePlan={needsInitialPlan}
           />
-          <RouteBatchPlanPanel onApproved={handleRouteApproved} refreshSignal={routeRefreshRevision} />
+          <RouteBatchPlanPanel
+            onApproved={handleRouteApproved}
+            refreshSignal={routeRefreshRevision}
+            existingPlans={plans}
+          />
           {replan && <ReplanBanner info={replan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
           {needsInitialPlan && (
