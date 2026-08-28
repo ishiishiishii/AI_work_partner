@@ -12,6 +12,7 @@ import {
   routeEconomicPolicyLabel,
   type RouteEconomicPolicy,
 } from "@/lib/routeEconomicPolicy";
+import { LUNCH_BREAK_END, LUNCH_BREAK_START } from "@/lib/workHours";
 import type { RoutePlanPreview, TransitItinerary } from "@/types";
 
 type Props = {
@@ -151,8 +152,8 @@ export function RoutePlanPanel({ plan, onPlanChange, onApproved }: Props) {
           end_location: { kind: "branch" },
           search_area: { kind: "auto" },
           break_enabled: true,
-          break_start: "12:00",
-          break_end: "13:00",
+          break_start: LUNCH_BREAK_START,
+          break_end: LUNCH_BREAK_END,
           turnaround_buffer_min: turnaroundBuffer,
           travel_time_buffer_percent: travelBufferPercent,
           access_buffer_min: accessBuffer,

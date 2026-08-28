@@ -12,6 +12,7 @@ import { calcForecastAmount } from "@/lib/forecast";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import { useQuickAddPlan } from "@/lib/quickAddPlanContext";
 import { ADD_TYPE_LABELS, type AddType } from "@/lib/quickAddTypes";
+import { LUNCH_BREAK_END, LUNCH_BREAK_START, WORK_DAY_END, WORK_DAY_START } from "@/lib/workHours";
 import type { ActivityPlan, ActivityPlanCategory, Deal, DealResultStatus } from "@/types";
 
 export type PlanEditFields = {
@@ -119,6 +120,17 @@ function formatISODate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// new Date() は「現在の実時刻」であり UTC 起点のカレンダー日付ではないため、
+// formatISODate(new Date()) はJST 0:00〜8:59の間UTC基準で前日を返してしまう。
+// 「今日」はローカル(ブラウザ)の暦日で判定する。
+function todayIsoLocal(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function addDays(date: Date, amount: number): Date {
   const next = new Date(date);
   next.setUTCDate(next.getUTCDate() + amount);
@@ -176,6 +188,12 @@ type CalendarDay = { date: string; inRange: boolean };
 function getWeekDays(dateStr: string): CalendarDay[] {
   const monday = parseISODate(getWeekRange(dateStr).start);
   return Array.from({ length: 7 }, (_, i) => ({ date: formatISODate(addDays(monday, i)), inRange: true }));
+}
+
+// 土日を除く平日かどうか。活動計画が1件もない日を「空き時間」として補うかの判定に使う
+function isWeekday(dateStr: string): boolean {
+  const day = parseISODate(dateStr).getUTCDay();
+  return day >= 1 && day <= 5;
 }
 
 // 月表示の簡易カレンダー用: 月の1日を含む週の月曜〜末日を含む週の日曜までを埋める。
@@ -285,11 +303,12 @@ function getOverlappingPlanIds(items: ActivityPlan[]): Set<number> {
   return overlapping;
 }
 
-// 営業担当者の勤務時間(9:00〜17:00)。空き時間・お昼休憩の計算はこの枠内で行う
-const WORK_DAY_START_MIN = 9 * 60;
-const WORK_DAY_END_MIN = 17 * 60;
-const LUNCH_START_MIN = 12 * 60;
-const LUNCH_END_MIN = 13 * 60;
+// 営業担当者の勤務時間・お昼休憩(lib/workHoursで一元管理、バックエンドのデフォルトと揃える)。
+// 空き時間・お昼休憩の計算はこの枠内で行う
+const WORK_DAY_START_MIN = parseTimeToMinutes(WORK_DAY_START);
+const WORK_DAY_END_MIN = parseTimeToMinutes(WORK_DAY_END);
+const LUNCH_START_MIN = parseTimeToMinutes(LUNCH_BREAK_START);
+const LUNCH_END_MIN = parseTimeToMinutes(LUNCH_BREAK_END);
 
 type Gap = { kind: "gap" | "lunch"; minutes: number; start: string; end: string };
 
@@ -365,7 +384,9 @@ export function ActivityPlanList({
   // 顧客/期限/商談)をこのパネルの見出しにも出し、予定以外もここから作れるように
   // する。作成パネルを開き直すたびに「予定」に戻す。
   const [addType, setAddType] = useState<AddType>("plan");
-  const [gapPicker, setGapPicker] = useState<{ start: string; maxEnd: string; end: string } | null>(null);
+  const [gapPicker, setGapPicker] = useState<{ date: string; start: string; maxEnd: string; end: string } | null>(
+    null,
+  );
   // 「延期」ボタンを押した予定について、その場で延期先の日付を選ぶための状態
   const [postponingPlanId, setPostponingPlanId] = useState<number | null>(null);
   const [postponeDate, setPostponeDate] = useState("");
@@ -386,7 +407,7 @@ export function ActivityPlanList({
       cancelled = true;
     };
   }, []);
-  const [selectedDate, setSelectedDate] = useState(() => formatISODate(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() => todayIsoLocal());
 
   const range = getRange(viewMode, selectedDate);
   const filteredPlans = plans.filter(
@@ -416,7 +437,7 @@ export function ActivityPlanList({
   const calendarDays =
     viewMode === "week" ? getWeekDays(selectedDate) : viewMode === "month" ? getMonthGridDays(selectedDate) : [];
   const visitsByDate = viewMode === "day" ? new Map<string, string[]>() : groupVisitsByDate(plans);
-  const todayIso = formatISODate(new Date());
+  const todayIso = todayIsoLocal();
 
   const detailPlan =
     newPlanDraft && detailPlanId === newPlanDraft.plan_id
@@ -430,6 +451,29 @@ export function ActivityPlanList({
   const overlappingPlanIds = viewMode === "day" ? getOverlappingPlanIds(filtered) : new Set<number>();
   const { before: gapBeforePlanId, trailing: trailingGaps } =
     viewMode === "day" ? getDaySegments(filtered) : { before: new Map<number, Gap[]>(), trailing: [] };
+  // 「日」表示で選択日が平日かつ活動が1件もない場合は、勤務時間まるごとを空き時間として出す
+  const isEmptyWeekday = viewMode === "day" && filtered.length === 0 && isWeekday(selectedDate);
+
+  // 「週」表示で、土日以外なのに活動が1件もない日を空き時間として補う。
+  // 訪問・タスクどちらも無い日だけを対象にする
+  const datesWithContent = new Set(filtered.map((item) => item.plan_date));
+  const emptyWeekdayDates =
+    viewMode === "week"
+      ? getWeekDays(selectedDate)
+        .map((day) => day.date)
+        .filter((date) => isWeekday(date) && !datesWithContent.has(date))
+      : [];
+  const weekRows: ({ kind: "plan"; plan: ActivityPlan } | { kind: "empty-day"; date: string })[] =
+    viewMode === "week"
+      ? [
+        ...filtered.map((plan) => ({ kind: "plan" as const, plan })),
+        ...emptyWeekdayDates.map((date) => ({ kind: "empty-day" as const, date })),
+      ].sort((a, b) => {
+        const dateA = a.kind === "plan" ? a.plan.plan_date : a.date;
+        const dateB = b.kind === "plan" ? b.plan.plan_date : b.date;
+        return dateA.localeCompare(dateB);
+      })
+      : [];
 
   // 空き時間にできる事務作業の候補(プランA/B/C…)。既にその日の計画で使われている
   // 候補は除外し、固定プールの中で未使用のものを件数の制限なく全て出す
@@ -437,11 +481,12 @@ export function ActivityPlanList({
   const gapCandidates = mockTaskSuggestions.filter((task) => !usedTaskTitles.has(task.title));
 
   // 空き時間(gap)はダブルクリックで作業候補を提案できるが、お昼休憩(lunch)はクリック不可の表示のみ
-  function renderGapSegment(segment: Gap, key: string) {
+  function renderGapSegment(segment: Gap, key: string, date: string, dateLabel?: string) {
+    const prefix = dateLabel ? `${dateLabel} ` : "";
     if (segment.kind === "lunch") {
       return (
         <li key={key} className="activity-plan-list__lunch">
-          昼休憩 {segment.start}〜{segment.end}
+          {prefix}昼休憩 {segment.start}〜{segment.end}
         </li>
       );
     }
@@ -449,10 +494,10 @@ export function ActivityPlanList({
       <li
         key={key}
         className="activity-plan-list__gap"
-        onDoubleClick={() => openGapPicker(segment.start, segment.end)}
+        onDoubleClick={() => openGapPicker(date, segment.start, segment.end)}
         title="ダブルクリックでこの時間にできる作業を提案"
       >
-        空き時間 {formatDurationMinutes(segment.minutes)}
+        {prefix}空き時間 {formatDurationMinutes(segment.minutes)}
       </li>
     );
   }
@@ -469,8 +514,8 @@ export function ActivityPlanList({
     router.push(`/products/${productId}`);
   }
 
-  function openGapPicker(start: string, end: string) {
-    setGapPicker({ start, maxEnd: end, end });
+  function openGapPicker(date: string, start: string, end: string) {
+    setGapPicker({ date, start, maxEnd: end, end });
   }
 
   function closeGapPicker() {
@@ -487,7 +532,7 @@ export function ActivityPlanList({
     onAddPlan({
       plan_id: -Date.now(),
       rep_id: repId,
-      plan_date: selectedDate,
+      plan_date: gapPicker.date,
       start_time: gapPicker.start,
       end_time: gapPicker.end > gapPicker.start ? gapPicker.end : gapPicker.maxEnd,
       category: "task",
@@ -654,14 +699,13 @@ export function ActivityPlanList({
                 >
                   {plan.product_name}
                 </span>
-                {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
+                {plan.is_ai_generated && <span className="badge badge--ai">AI提案(未採用)</span>}
               </div>
             ) : (
               <>
                 <div className="activity-plan-list__customer">
                   {plan.customer_name}
-                  {plan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
-                  {plan.is_draft && <span className="badge badge--draft">下書き(未採用)</span>}
+                  {plan.is_ai_generated && <span className="badge badge--ai">AI提案(未採用)</span>}
                 </div>
                 {plan.category === "visit" && plan.product_name && (
                   <div className="activity-plan-list__product">商品: {plan.product_name}</div>
@@ -670,9 +714,8 @@ export function ActivityPlanList({
             )}
             <div className="activity-plan-list__meta">
               <span
-                className={`activity-plan-list__type ${
-                  ACTIVITY_TYPE_CLASS[plan.activity_type_name] ?? "activity-plan-list__type--default"
-                }`}
+                className={`activity-plan-list__type ${ACTIVITY_TYPE_CLASS[plan.activity_type_name] ?? "activity-plan-list__type--default"
+                  }`}
               >
                 {plan.activity_type_name}
               </span>
@@ -760,40 +803,40 @@ export function ActivityPlanList({
     setAddType("plan");
     const draft: ActivityPlan = base
       ? {
-          ...base,
-          plan_id: -Date.now(),
-          plan_date: selectedDate,
-          start_time: null,
-          end_time: null,
-          is_ai_generated: false,
-          reasoning_text: "",
-          result_status: "pending",
-          memo: null,
-          progress_percent: 0,
-          is_draft: false,
-        }
+        ...base,
+        plan_id: -Date.now(),
+        plan_date: selectedDate,
+        start_time: null,
+        end_time: null,
+        is_ai_generated: false,
+        reasoning_text: "",
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+        is_draft: false,
+      }
       : {
-          plan_id: -Date.now(),
-          rep_id: repId,
-          plan_date: selectedDate,
-          start_time: null,
-          end_time: null,
-          category: "task",
-          customer_id: null,
-          customer_name: "",
-          deal_id: null,
-          product_name: null,
-          activity_type_name: "資料作成",
-          priority: 3,
-          expected_amount: 0,
-          expected_probability: 0,
-          is_ai_generated: false,
-          reasoning_text: "",
-          result_status: "pending",
-          memo: null,
-          progress_percent: 0,
-          is_draft: false,
-        };
+        plan_id: -Date.now(),
+        rep_id: repId,
+        plan_date: selectedDate,
+        start_time: null,
+        end_time: null,
+        category: "task",
+        customer_id: null,
+        customer_name: "",
+        deal_id: null,
+        product_name: null,
+        activity_type_name: "資料作成",
+        priority: 3,
+        expected_amount: 0,
+        expected_probability: 0,
+        is_ai_generated: false,
+        reasoning_text: "",
+        result_status: "pending",
+        memo: null,
+        progress_percent: 0,
+        is_draft: false,
+      };
     setNewPlanDraft(draft);
     setDetailPlanId(draft.plan_id);
     setEditDraft({
@@ -884,566 +927,578 @@ export function ActivityPlanList({
 
   return (
     <>
-    <section className="panel activity-plan-list">
-      <div className="activity-plan-list__header">
-        <h2>{formatRangeLabel(viewMode, range)}</h2>
-        <div className="activity-plan-list__tabs">
-          {(Object.keys(VIEW_LABELS) as ViewMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={`activity-plan-list__tab${viewMode === mode ? " is-active" : ""}`}
-              onClick={() => setViewMode(mode)}
-            >
-              {VIEW_LABELS[mode]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="activity-plan-list__nav">
-        <button type="button" onClick={() => handleShift(-1)}>
-          ← 前へ
-        </button>
-        <button
-          type="button"
-          className="activity-plan-list__today-button"
-          onClick={jumpToToday}
-          disabled={selectedDate === todayIso}
-        >
-          今日
-        </button>
-        <button type="button" onClick={() => handleShift(1)}>
-          次へ →
-        </button>
-      </div>
-
-      {viewMode !== "day" && (
-        <div className="mini-calendar">
-          <div className="mini-calendar__weekdays">
-            {["月", "火", "水", "木", "金", "土", "日"].map((label) => (
-              <div key={label} className="mini-calendar__weekday">
-                {label}
-              </div>
+      <section className="panel activity-plan-list">
+        <div className="activity-plan-list__header">
+          <h2>{formatRangeLabel(viewMode, range)}</h2>
+          <div className="activity-plan-list__tabs">
+            {(Object.keys(VIEW_LABELS) as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`activity-plan-list__tab${viewMode === mode ? " is-active" : ""}`}
+                onClick={() => setViewMode(mode)}
+              >
+                {VIEW_LABELS[mode]}
+              </button>
             ))}
           </div>
-          <div className={`mini-calendar__grid mini-calendar__grid--${viewMode}`}>
-            {calendarDays.map((day) => {
-              const companies = visitsByDate.get(day.date) ?? [];
-              const visibleCompanies = companies.slice(0, 2);
-              const dayNumber = Number(day.date.split("-")[2]);
-              return (
-                <button
-                  type="button"
-                  key={day.date}
-                  className={`mini-calendar__day${day.inRange ? "" : " mini-calendar__day--outside"}${
-                    day.date === selectedDate ? " is-selected" : ""
-                  }${day.date === todayIso ? " is-today" : ""}`}
-                  onClick={() => jumpToDay(day.date)}
-                  title={`クリックで${formatDate(day.date)}の予定へ`}
-                >
-                  <span className="mini-calendar__day-number">{dayNumber}</span>
-                  {visibleCompanies.length > 0 && (
-                    <span className="mini-calendar__day-companies">
-                      {visibleCompanies.map((name) => (
-                        <span key={name} className="mini-calendar__company-chip">
-                          {name}
-                        </span>
-                      ))}
-                      {companies.length > visibleCompanies.length && (
-                        <span className="mini-calendar__more">+{companies.length - visibleCompanies.length}</span>
-                      )}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
         </div>
-      )}
 
-      {viewMode === "month" ? (
-        monthGroups.length === 0 ? (
-          <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
-        ) : (
-          <div className="activity-plan-list__groups">
-            {monthGroups.map((group) => (
-              <div key={group.customerName} className="activity-plan-list__group">
-                <h3 className="activity-plan-list__group-title">
-                  <span
-                    className="activity-plan-list__link"
-                    onClick={() => openCustomerDetail(group.customerId)}
-                    title="クリックで顧客詳細へ"
-                  >
-                    {group.customerName}
-                  </span>
-                  <span className="activity-plan-list__group-total">
-                    見込み合計 {formatYen(Math.round(group.totalValue))}
-                  </span>
-                </h3>
-                <ul className="activity-plan-list__items">
-                  {group.items.map((plan) => (
-                    <li key={plan.plan_id} className="activity-plan-list__item">
-                      {renderPlanRow(plan, null, false, true)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )
-      ) : filtered.length === 0 ? (
-        <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
-      ) : (
-        <ul className="activity-plan-list__items">
-          {filtered.map((plan) => {
-            const gapSegments = gapBeforePlanId.get(plan.plan_id) ?? [];
-            const isOverlapping = overlappingPlanIds.has(plan.plan_id);
-            const dateLabel =
-              viewMode === "day" && plan.start_time
-                ? plan.end_time
-                  ? `${plan.start_time}〜${plan.end_time}`
-                  : plan.start_time
-                : formatDate(plan.plan_date);
-            return (
-              <Fragment key={plan.plan_id}>
-                {gapSegments.map((segment, index) => renderGapSegment(segment, `before-${plan.plan_id}-${index}`))}
-                <li
-                  className={`activity-plan-list__item${
-                    isOverlapping ? " activity-plan-list__item--overlap" : ""
-                  }`}
-                >
-                  {renderPlanRow(plan, dateLabel, isOverlapping)}
-                </li>
-              </Fragment>
-            );
-          })}
-          {trailingGaps.map((segment, index) => renderGapSegment(segment, `trailing-${index}`))}
-        </ul>
-      )}
-    </section>
+        <div className="activity-plan-list__nav">
+          <button type="button" onClick={() => handleShift(-1)}>
+            ← 前へ
+          </button>
+          <button
+            type="button"
+            className="activity-plan-list__today-button"
+            onClick={jumpToToday}
+            disabled={selectedDate === todayIso}
+          >
+            今日
+          </button>
+          <button type="button" onClick={() => handleShift(1)}>
+            次へ →
+          </button>
+        </div>
 
-    {detailPlan && (
-      <div className="plan-modal-overlay" onClick={closeDetail}>
-        <div
-          className="plan-modal"
-          style={{ "--type-accent": ACTIVITY_TYPE_ACCENT[detailPlan.activity_type_name] ?? "var(--accent)" } as CSSProperties}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="plan-modal__header">
-            <div className="plan-modal__header-text">
-              <span className="plan-modal__eyebrow">
-                {isCreating ? "新規作成" : CATEGORY_LABELS[detailPlan.category]}
-              </span>
-              {isCreating ? (
-                <h3 className="quick-add-fab__title">
-                  <select
-                    className="quick-add-fab__type-select"
-                    value={addType}
-                    onChange={(event) => setAddType(event.target.value as AddType)}
-                    aria-label="追加する種類"
-                  >
-                    {Object.entries(ADD_TYPE_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  を追加
-                </h3>
-              ) : (
-                <h3>{detailPlan.customer_name || "予定の詳細"}</h3>
-              )}
-            </div>
-            <button type="button" className="plan-modal__close" onClick={closeDetail} aria-label="閉じる">
-              ×
-            </button>
-          </div>
-
-          {isCreating && addType !== "plan" ? (
-            <div className="plan-modal__detail">
-              {addType === "customer" && (
-                <NewCustomerForm
-                  onCreate={async (input) => {
-                    await createCustomer(repId, input);
-                    closeDetail();
-                  }}
-                />
-              )}
-              {addType === "deadline" && <QuickDeadlineForm repId={repId} onDone={closeDetail} />}
-              {addType === "deal" && <QuickDealForm repId={repId} onDone={closeDetail} />}
-            </div>
-          ) : (
-            (() => {
-            const isEditing = editDraft !== null && editDraft.planId === detailPlan.plan_id;
-            const effectiveCategory = isEditing ? editDraft.category : detailPlan.category;
-            return (
-              <div className="plan-modal__detail">
-                {!isEditing && (
-                  <div className="plan-modal__stats">
-                    <span
-                      className={`activity-plan-list__type ${
-                        ACTIVITY_TYPE_CLASS[detailPlan.activity_type_name] ?? "activity-plan-list__type--default"
-                      }`}
-                    >
-                      {detailPlan.activity_type_name}
-                    </span>
-                    {detailPlan.is_ai_generated && <span className="badge badge--ai">AI提案</span>}
-                    {effectiveCategory === "visit" && (
-                      <span className="plan-modal__stat-chip">優先度{detailPlan.priority}</span>
-                    )}
-                    {effectiveCategory === "visit" && (
-                      <span className="plan-modal__stat-chip">
-                        成約確率{detailPlan.expected_probability.toFixed(0)}%
-                      </span>
-                    )}
-                    {detailPlan.category === "visit" && detailPlan.expected_amount > 0 && (
-                      <span className="plan-modal__stat-amount">商談見込 {formatYen(detailPlan.expected_amount)}</span>
-                    )}
-                  </div>
-                )}
-                {/* 日付・時間は常に表示。種別/内容/会社名は編集時のみ(閲覧時はヘッダーと上の統計行に既に出ているため) */}
-                <dl className="plan-modal__fields">
-                  <dt>日付</dt>
-                  <dd>
-                    {isEditing ? (
-                      <input
-                        type="date"
-                        value={editDraft.plan_date}
-                        onChange={(event) => setEditDraft({ ...editDraft, plan_date: event.target.value })}
-                      />
-                    ) : (
-                      formatDate(detailPlan.plan_date)
-                    )}
-                  </dd>
-
-                  {isEditing && (
-                    <>
-                      <dt>種別</dt>
-                      <dd>
-                        <select
-                          value={editDraft.category}
-                          onChange={(event) =>
-                            setEditDraft({ ...editDraft, category: event.target.value as ActivityPlanCategory })
-                          }
-                        >
-                          <option value="visit">{CATEGORY_LABELS.visit}</option>
-                          <option value="task">{CATEGORY_LABELS.task}</option>
-                        </select>
-                      </dd>
-                    </>
-                  )}
-
-                  <dt>時間</dt>
-                  <dd>
-                    {isEditing ? (
-                      <span className="plan-modal__time-inputs">
-                        <input
-                          type="time"
-                          value={editDraft.start_time ?? ""}
-                          onChange={(event) =>
-                            setEditDraft({ ...editDraft, start_time: event.target.value || null })
-                          }
-                        />
-                        〜
-                        <input
-                          type="time"
-                          value={editDraft.end_time ?? ""}
-                          onChange={(event) =>
-                            setEditDraft({ ...editDraft, end_time: event.target.value || null })
-                          }
-                        />
-                      </span>
-                    ) : detailPlan.start_time ? (
-                      `${detailPlan.start_time}${detailPlan.end_time ? `〜${detailPlan.end_time}` : ""}`
-                    ) : (
-                      "未設定"
-                    )}
-                  </dd>
-
-                  {isEditing && (
-                    <>
-                      <dt>内容</dt>
-                      <dd>
-                        <select
-                          value={editDraft.activity_type_name}
-                          onChange={(event) =>
-                            setEditDraft({ ...editDraft, activity_type_name: event.target.value })
-                          }
-                        >
-                          {EDITABLE_ACTIVITY_TYPES.map((type) => (
-                            <option key={type} value={type}>
-                              {type}
-                            </option>
-                          ))}
-                        </select>
-                      </dd>
-
-                      <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
-                      <dd>
-                        {effectiveCategory === "visit" && isCreating ? (
-                          <CompanyAutocompleteField
-                            repId={repId}
-                            value={{ customerId: editDraft.customer_id, customerName: editDraft.customer_name }}
-                            onChange={({ customerId, customerName }) =>
-                              setEditDraft({ ...editDraft, customer_id: customerId, customer_name: customerName })
-                            }
-                            placeholder="例: D工業株式会社"
-                          />
-                        ) : (
-                          <input
-                            type="text"
-                            value={editDraft.customer_name}
-                            onChange={(event) =>
-                              setEditDraft({ ...editDraft, customer_name: event.target.value })
-                            }
-                          />
-                        )}
-                      </dd>
-                    </>
-                  )}
-
-                  {effectiveCategory === "visit" && (
-                    <>
-                      <dt>商品</dt>
-                      <dd>
-                        {isEditing ? (
-                          <ProductAutocompleteField
-                            value={editDraft.product_name ?? ""}
-                            onChange={(productName) =>
-                              setEditDraft({ ...editDraft, product_name: productName })
-                            }
-                          />
-                        ) : (
-                          (detailPlan.product_name ?? "(未設定)")
-                        )}
-                      </dd>
-                    </>
-                  )}
-
-                  {effectiveCategory === "visit" && isEditing && (
-                    <>
-                      <dt>金額</dt>
-                      <dd>
-                        <span className="plan-modal__amount-input">
-                          <input
-                            type="number"
-                            min={0}
-                            step={10000}
-                            value={editDraft.expected_amount}
-                            onChange={(event) =>
-                              setEditDraft({
-                                ...editDraft,
-                                expected_amount: Number(event.target.value),
-                              })
-                            }
-                          />
-                          円
-                        </span>
-                      </dd>
-                    </>
-                  )}
-
-                  {effectiveCategory === "visit" && isEditing && (
-                    <>
-                      <dt>成約確率</dt>
-                      <dd>
-                        <span className="plan-modal__percent-input">
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={5}
-                            value={editDraft.expected_probability}
-                            onChange={(event) =>
-                              setEditDraft({
-                                ...editDraft,
-                                expected_probability: Number(event.target.value),
-                              })
-                            }
-                          />
-                          %
-                        </span>
-                      </dd>
-                    </>
-                  )}
-
-                  {effectiveCategory === "visit" && (
-                    <>
-                      <dt>メモ</dt>
-                      <dd>
-                        {isEditing ? (
-                          <textarea
-                            className="plan-modal__memo-input"
-                            value={editDraft.memo ?? ""}
-                            onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })}
-                            rows={3}
-                          />
-                        ) : (
-                          <span className="plan-modal__memo-display">{detailPlan.memo ?? "(メモなし)"}</span>
-                        )}
-                      </dd>
-
-                      <dt>ステータス</dt>
-                      <dd className="plan-modal__status-controls">{renderResultControls(detailPlan)}</dd>
-                    </>
-                  )}
-                  {effectiveCategory === "task" && !detailPlan.is_ai_generated && !isCreating && (
-                    <>
-                      <dt>進捗</dt>
-                      <dd>
-                        <div className="plan-modal__progress">
-                          <svg className="plan-modal__progress-ring" viewBox="0 0 80 80" width="64" height="64">
-                            <circle cx="40" cy="40" r={PROGRESS_RING_RADIUS} className="plan-modal__progress-ring-track" />
-                            <circle
-                              cx="40"
-                              cy="40"
-                              r={PROGRESS_RING_RADIUS}
-                              className="plan-modal__progress-ring-value"
-                              strokeDasharray={PROGRESS_RING_CIRCUMFERENCE}
-                              strokeDashoffset={
-                                PROGRESS_RING_CIRCUMFERENCE * (1 - detailPlan.progress_percent / 100)
-                              }
-                            />
-                            <text x="40" y="45" textAnchor="middle" className="plan-modal__progress-ring-label">
-                              {detailPlan.progress_percent}%
-                            </text>
-                          </svg>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            step={5}
-                            value={detailPlan.progress_percent}
-                            onChange={(event) => onUpdateProgress(detailPlan.plan_id, Number(event.target.value))}
-                            onMouseUp={(event) =>
-                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
-                            }
-                            onTouchEnd={(event) =>
-                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
-                            }
-                            onKeyUp={(event) =>
-                              onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
-                            }
-                          />
-                        </div>
-                      </dd>
-                    </>
-                  )}
-                </dl>
-                {detailPlan.reasoning_text && (
-                  <div className="plan-modal__reasoning">
-                    <h4>AIの提案理由</h4>
-                    <p>{detailPlan.reasoning_text}</p>
-                  </div>
-                )}
-                <div className="activity-plan-list__edit-actions plan-modal__actions">
-                  {isEditing ? (
-                    <>
-                      <button
-                        type="button"
-                        className="activity-plan-list__result-button plan-modal__primary-button"
-                        onClick={saveEdit}
-                      >
-                        保存
-                      </button>
-                      <button type="button" className="activity-plan-list__undo-button" onClick={cancelEdit}>
-                        キャンセル
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {detailPlan.is_ai_generated && (
-                        <button
-                          type="button"
-                          className="activity-plan-list__result-button plan-modal__primary-button"
-                          onClick={() => onConfirmPlan(detailPlan.plan_id)}
-                        >
-                          確定する
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="activity-plan-list__result-button"
-                        onClick={() => startEdit(detailPlan)}
-                      >
-                        編集
-                      </button>
-                      {renderAlternativeControl(detailPlan.plan_id, "AI作り直し")}
-                      {detailPlan.category === "visit" && (
-                        <button
-                          type="button"
-                          className="activity-plan-list__result-button"
-                          onClick={() => startCreate(detailPlan)}
-                        >
-                          次回の予定を作成
-                        </button>
-                      )}
-                      <button type="button" className="activity-plan-list__undo-button" onClick={closeDetail}>
-                        閉じる
-                      </button>
-                    </>
-                  )}
+        {viewMode !== "day" && (
+          <div className="mini-calendar">
+            <div className="mini-calendar__weekdays">
+              {["月", "火", "水", "木", "金", "土", "日"].map((label) => (
+                <div key={label} className="mini-calendar__weekday">
+                  {label}
                 </div>
-              </div>
-            );
-            })()
-          )}
-        </div>
-      </div>
-    )}
-
-    {gapPicker && (
-      <div className="plan-modal-overlay" onClick={closeGapPicker}>
-        <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
-          <div className="plan-modal__header">
-            <h3>{gapPicker.start}〜にできる作業</h3>
-            <button type="button" className="plan-modal__close" onClick={closeGapPicker} aria-label="閉じる">
-              ×
-            </button>
-          </div>
-          <label className="gap-picker__end-field">
-            終了時間
-            <input
-              type="time"
-              value={gapPicker.end}
-              min={gapPicker.start}
-              max={gapPicker.maxEnd}
-              onChange={(event) => setGapPickerEnd(event.target.value)}
-            />
-          </label>
-          {gapCandidates.length === 0 ? (
-            <p className="activity-plan-list__empty">現在、提案できる候補がありません。</p>
-          ) : (
-            <ul className="gap-picker__options">
-              {gapCandidates.map((candidate, index) => (
-                <li key={candidate.title} className="gap-picker__option">
-                  <div className="gap-picker__option-header">
-                    <span className="badge badge--ai">プラン{String.fromCharCode(65 + index)}</span>
-                    <span
-                      className={`activity-plan-list__type ${
-                        ACTIVITY_TYPE_CLASS[candidate.activityTypeName] ?? "activity-plan-list__type--default"
-                      }`}
-                    >
-                      {candidate.activityTypeName}
-                    </span>
-                  </div>
-                  <div className="gap-picker__option-title">{candidate.title}</div>
-                  <p className="gap-picker__option-reason">{candidate.reasoningText}</p>
+              ))}
+            </div>
+            <div className={`mini-calendar__grid mini-calendar__grid--${viewMode}`}>
+              {calendarDays.map((day) => {
+                const companies = visitsByDate.get(day.date) ?? [];
+                const visibleCompanies = companies.slice(0, 2);
+                const dayNumber = Number(day.date.split("-")[2]);
+                return (
                   <button
                     type="button"
-                    className="activity-plan-list__result-button"
-                    onClick={() => pickGapCandidate(candidate)}
+                    key={day.date}
+                    className={`mini-calendar__day${day.inRange ? "" : " mini-calendar__day--outside"}${day.date === selectedDate ? " is-selected" : ""
+                      }${day.date === todayIso ? " is-today" : ""}`}
+                    onClick={() => jumpToDay(day.date)}
+                    title={`クリックで${formatDate(day.date)}の予定へ`}
                   >
-                    この作業にする
+                    <span className="mini-calendar__day-number">{dayNumber}</span>
+                    {visibleCompanies.length > 0 && (
+                      <span className="mini-calendar__day-companies">
+                        {visibleCompanies.map((name) => (
+                          <span key={name} className="mini-calendar__company-chip">
+                            {name}
+                          </span>
+                        ))}
+                        {companies.length > visibleCompanies.length && (
+                          <span className="mini-calendar__more">+{companies.length - visibleCompanies.length}</span>
+                        )}
+                      </span>
+                    )}
                   </button>
-                </li>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {viewMode === "month" ? (
+          monthGroups.length === 0 ? (
+            <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
+          ) : (
+            <div className="activity-plan-list__groups">
+              {monthGroups.map((group) => (
+                <div key={group.customerName} className="activity-plan-list__group">
+                  <h3 className="activity-plan-list__group-title">
+                    <span
+                      className="activity-plan-list__link"
+                      onClick={() => openCustomerDetail(group.customerId)}
+                      title="クリックで顧客詳細へ"
+                    >
+                      {group.customerName}
+                    </span>
+                    <span className="activity-plan-list__group-total">
+                      見込み合計 {formatYen(Math.round(group.totalValue))}
+                    </span>
+                  </h3>
+                  <ul className="activity-plan-list__items">
+                    {group.items.map((plan) => (
+                      <li key={plan.plan_id} className="activity-plan-list__item">
+                        {renderPlanRow(plan, null, false, true)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
-          )}
+            </div>
+          )
+        ) : filtered.length === 0 && !isEmptyWeekday && emptyWeekdayDates.length === 0 ? (
+          <p className="activity-plan-list__empty">この期間の活動計画はありません</p>
+        ) : (
+          <ul className="activity-plan-list__items">
+            {(viewMode === "week" ? weekRows : filtered.map((plan) => ({ kind: "plan" as const, plan }))).map(
+              (row) => {
+                if (row.kind === "empty-day") {
+                  return (
+                    <Fragment key={`empty-${row.date}`}>
+                      {splitByLunch(WORK_DAY_START_MIN, WORK_DAY_END_MIN).map((segment, index) =>
+                        renderGapSegment(segment, `empty-${row.date}-${index}`, row.date, formatDate(row.date)),
+                      )}
+                    </Fragment>
+                  );
+                }
+                const plan = row.plan;
+                const gapSegments = gapBeforePlanId.get(plan.plan_id) ?? [];
+                const isOverlapping = overlappingPlanIds.has(plan.plan_id);
+                const dateLabel =
+                  viewMode === "day" && plan.start_time
+                    ? plan.end_time
+                      ? `${plan.start_time}〜${plan.end_time}`
+                      : plan.start_time
+                    : formatDate(plan.plan_date);
+                return (
+                  <Fragment key={plan.plan_id}>
+                    {gapSegments.map((segment, index) =>
+                      renderGapSegment(segment, `before-${plan.plan_id}-${index}`, plan.plan_date),
+                    )}
+                    <li
+                      className={`activity-plan-list__item${isOverlapping ? " activity-plan-list__item--overlap" : ""
+                        }`}
+                    >
+                      {renderPlanRow(plan, dateLabel, isOverlapping)}
+                    </li>
+                  </Fragment>
+                );
+              },
+            )}
+            {trailingGaps.map((segment, index) => renderGapSegment(segment, `trailing-${index}`, selectedDate))}
+          </ul>
+        )}
+      </section>
+
+      {detailPlan && (
+        <div className="plan-modal-overlay" onClick={closeDetail}>
+          <div
+            className="plan-modal"
+            style={{ "--type-accent": ACTIVITY_TYPE_ACCENT[detailPlan.activity_type_name] ?? "var(--accent)" } as CSSProperties}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="plan-modal__header">
+              <div className="plan-modal__header-text">
+                <span className="plan-modal__eyebrow">
+                  {isCreating ? "新規作成" : CATEGORY_LABELS[detailPlan.category]}
+                </span>
+                {isCreating ? (
+                  <h3 className="quick-add-fab__title">
+                    <select
+                      className="quick-add-fab__type-select"
+                      value={addType}
+                      onChange={(event) => setAddType(event.target.value as AddType)}
+                      aria-label="追加する種類"
+                    >
+                      {Object.entries(ADD_TYPE_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    を追加
+                  </h3>
+                ) : (
+                  <h3>{detailPlan.customer_name || "予定の詳細"}</h3>
+                )}
+              </div>
+              <button type="button" className="plan-modal__close" onClick={closeDetail} aria-label="閉じる">
+                ×
+              </button>
+            </div>
+
+            {isCreating && addType !== "plan" ? (
+              <div className="plan-modal__detail">
+                {addType === "customer" && (
+                  <NewCustomerForm
+                    onCreate={async (input) => {
+                      await createCustomer(repId, input);
+                      closeDetail();
+                    }}
+                  />
+                )}
+                {addType === "deadline" && <QuickDeadlineForm repId={repId} onDone={closeDetail} />}
+                {addType === "deal" && <QuickDealForm repId={repId} onDone={closeDetail} />}
+              </div>
+            ) : (
+              (() => {
+                const isEditing = editDraft !== null && editDraft.planId === detailPlan.plan_id;
+                const effectiveCategory = isEditing ? editDraft.category : detailPlan.category;
+                return (
+                  <div className="plan-modal__detail">
+                    {!isEditing && (
+                      <div className="plan-modal__stats">
+                        <span
+                          className={`activity-plan-list__type ${ACTIVITY_TYPE_CLASS[detailPlan.activity_type_name] ?? "activity-plan-list__type--default"
+                            }`}
+                        >
+                          {detailPlan.activity_type_name}
+                        </span>
+                        {detailPlan.is_ai_generated && <span className="badge badge--ai">AI提案(未採用)</span>}
+                        {effectiveCategory === "visit" && (
+                          <span className="plan-modal__stat-chip">優先度{detailPlan.priority}</span>
+                        )}
+                        {effectiveCategory === "visit" && (
+                          <span className="plan-modal__stat-chip">
+                            成約確率{detailPlan.expected_probability.toFixed(0)}%
+                          </span>
+                        )}
+                        {detailPlan.category === "visit" && detailPlan.expected_amount > 0 && (
+                          <span className="plan-modal__stat-amount">商談見込 {formatYen(detailPlan.expected_amount)}</span>
+                        )}
+                      </div>
+                    )}
+                    {/* 日付・時間は常に表示。種別/内容/会社名は編集時のみ(閲覧時はヘッダーと上の統計行に既に出ているため) */}
+                    <dl className="plan-modal__fields">
+                      <dt>日付</dt>
+                      <dd>
+                        {isEditing ? (
+                          <input
+                            type="date"
+                            value={editDraft.plan_date}
+                            onChange={(event) => setEditDraft({ ...editDraft, plan_date: event.target.value })}
+                          />
+                        ) : (
+                          formatDate(detailPlan.plan_date)
+                        )}
+                      </dd>
+
+                      {isEditing && (
+                        <>
+                          <dt>種別</dt>
+                          <dd>
+                            <select
+                              value={editDraft.category}
+                              onChange={(event) =>
+                                setEditDraft({ ...editDraft, category: event.target.value as ActivityPlanCategory })
+                              }
+                            >
+                              <option value="visit">{CATEGORY_LABELS.visit}</option>
+                              <option value="task">{CATEGORY_LABELS.task}</option>
+                            </select>
+                          </dd>
+                        </>
+                      )}
+
+                      <dt>時間</dt>
+                      <dd>
+                        {isEditing ? (
+                          <span className="plan-modal__time-inputs">
+                            <input
+                              type="time"
+                              value={editDraft.start_time ?? ""}
+                              onChange={(event) =>
+                                setEditDraft({ ...editDraft, start_time: event.target.value || null })
+                              }
+                            />
+                            〜
+                            <input
+                              type="time"
+                              value={editDraft.end_time ?? ""}
+                              onChange={(event) =>
+                                setEditDraft({ ...editDraft, end_time: event.target.value || null })
+                              }
+                            />
+                          </span>
+                        ) : detailPlan.start_time ? (
+                          `${detailPlan.start_time}${detailPlan.end_time ? `〜${detailPlan.end_time}` : ""}`
+                        ) : (
+                          "未設定"
+                        )}
+                      </dd>
+
+                      {isEditing && (
+                        <>
+                          <dt>内容</dt>
+                          <dd>
+                            <select
+                              value={editDraft.activity_type_name}
+                              onChange={(event) =>
+                                setEditDraft({ ...editDraft, activity_type_name: event.target.value })
+                              }
+                            >
+                              {EDITABLE_ACTIVITY_TYPES.map((type) => (
+                                <option key={type} value={type}>
+                                  {type}
+                                </option>
+                              ))}
+                            </select>
+                          </dd>
+
+                          <dt>{effectiveCategory === "visit" ? "会社" : "件名"}</dt>
+                          <dd>
+                            {effectiveCategory === "visit" && isCreating ? (
+                              <CompanyAutocompleteField
+                                repId={repId}
+                                value={{ customerId: editDraft.customer_id, customerName: editDraft.customer_name }}
+                                onChange={({ customerId, customerName }) =>
+                                  setEditDraft({ ...editDraft, customer_id: customerId, customer_name: customerName })
+                                }
+                                placeholder="例: D工業株式会社"
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                value={editDraft.customer_name}
+                                onChange={(event) =>
+                                  setEditDraft({ ...editDraft, customer_name: event.target.value })
+                                }
+                              />
+                            )}
+                          </dd>
+                        </>
+                      )}
+
+                      {effectiveCategory === "visit" && (
+                        <>
+                          <dt>商品</dt>
+                          <dd>
+                            {isEditing ? (
+                              <ProductAutocompleteField
+                                value={editDraft.product_name ?? ""}
+                                onChange={(productName) =>
+                                  setEditDraft({ ...editDraft, product_name: productName })
+                                }
+                              />
+                            ) : (
+                              (detailPlan.product_name ?? "(未設定)")
+                            )}
+                          </dd>
+                        </>
+                      )}
+
+                      {effectiveCategory === "visit" && isEditing && (
+                        <>
+                          <dt>金額</dt>
+                          <dd>
+                            <span className="plan-modal__amount-input">
+                              <input
+                                type="number"
+                                min={0}
+                                step={10000}
+                                value={editDraft.expected_amount}
+                                onChange={(event) =>
+                                  setEditDraft({
+                                    ...editDraft,
+                                    expected_amount: Number(event.target.value),
+                                  })
+                                }
+                              />
+                              円
+                            </span>
+                          </dd>
+                        </>
+                      )}
+
+                      {effectiveCategory === "visit" && isEditing && (
+                        <>
+                          <dt>成約確率</dt>
+                          <dd>
+                            <span className="plan-modal__percent-input">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={editDraft.expected_probability}
+                                onChange={(event) =>
+                                  setEditDraft({
+                                    ...editDraft,
+                                    expected_probability: Number(event.target.value),
+                                  })
+                                }
+                              />
+                              %
+                            </span>
+                          </dd>
+                        </>
+                      )}
+
+                      {effectiveCategory === "visit" && (
+                        <>
+                          <dt>メモ</dt>
+                          <dd>
+                            {isEditing ? (
+                              <textarea
+                                className="plan-modal__memo-input"
+                                value={editDraft.memo ?? ""}
+                                onChange={(event) => setEditDraft({ ...editDraft, memo: event.target.value })}
+                                rows={3}
+                              />
+                            ) : (
+                              <span className="plan-modal__memo-display">{detailPlan.memo ?? "(メモなし)"}</span>
+                            )}
+                          </dd>
+
+                          <dt>ステータス</dt>
+                          <dd className="plan-modal__status-controls">{renderResultControls(detailPlan)}</dd>
+                        </>
+                      )}
+                      {effectiveCategory === "task" && !detailPlan.is_ai_generated && !isCreating && (
+                        <>
+                          <dt>進捗</dt>
+                          <dd>
+                            <div className="plan-modal__progress">
+                              <svg className="plan-modal__progress-ring" viewBox="0 0 80 80" width="64" height="64">
+                                <circle cx="40" cy="40" r={PROGRESS_RING_RADIUS} className="plan-modal__progress-ring-track" />
+                                <circle
+                                  cx="40"
+                                  cy="40"
+                                  r={PROGRESS_RING_RADIUS}
+                                  className="plan-modal__progress-ring-value"
+                                  strokeDasharray={PROGRESS_RING_CIRCUMFERENCE}
+                                  strokeDashoffset={
+                                    PROGRESS_RING_CIRCUMFERENCE * (1 - detailPlan.progress_percent / 100)
+                                  }
+                                />
+                                <text x="40" y="45" textAnchor="middle" className="plan-modal__progress-ring-label">
+                                  {detailPlan.progress_percent}%
+                                </text>
+                              </svg>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={5}
+                                value={detailPlan.progress_percent}
+                                onChange={(event) => onUpdateProgress(detailPlan.plan_id, Number(event.target.value))}
+                                onMouseUp={(event) =>
+                                  onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                                }
+                                onTouchEnd={(event) =>
+                                  onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                                }
+                                onKeyUp={(event) =>
+                                  onCommitProgress(detailPlan.plan_id, Number(event.currentTarget.value))
+                                }
+                              />
+                            </div>
+                          </dd>
+                        </>
+                      )}
+                    </dl>
+                    {detailPlan.reasoning_text && (
+                      <div className="plan-modal__reasoning">
+                        <h4>AIの提案理由</h4>
+                        <p>{detailPlan.reasoning_text}</p>
+                      </div>
+                    )}
+                    <div className="activity-plan-list__edit-actions plan-modal__actions">
+                      {isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            className="activity-plan-list__result-button plan-modal__primary-button"
+                            onClick={saveEdit}
+                          >
+                            保存
+                          </button>
+                          <button type="button" className="activity-plan-list__undo-button" onClick={cancelEdit}>
+                            キャンセル
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {detailPlan.is_ai_generated && (
+                            <button
+                              type="button"
+                              className="activity-plan-list__result-button plan-modal__primary-button"
+                              onClick={() => onConfirmPlan(detailPlan.plan_id)}
+                            >
+                              確定する
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="activity-plan-list__result-button"
+                            onClick={() => startEdit(detailPlan)}
+                          >
+                            編集
+                          </button>
+                          {renderAlternativeControl(detailPlan.plan_id, "AI作り直し")}
+                          {detailPlan.category === "visit" && (
+                            <button
+                              type="button"
+                              className="activity-plan-list__result-button"
+                              onClick={() => startCreate(detailPlan)}
+                            >
+                              次回の予定を作成
+                            </button>
+                          )}
+                          <button type="button" className="activity-plan-list__undo-button" onClick={closeDetail}>
+                            閉じる
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
+            )}
+          </div>
         </div>
-      </div>
-    )}
+      )}
+
+      {gapPicker && (
+        <div className="plan-modal-overlay" onClick={closeGapPicker}>
+          <div className="plan-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="plan-modal__header">
+              <h3>
+                {formatDate(gapPicker.date)} {gapPicker.start}〜にできる作業
+              </h3>
+              <button type="button" className="plan-modal__close" onClick={closeGapPicker} aria-label="閉じる">
+                ×
+              </button>
+            </div>
+            <label className="gap-picker__end-field">
+              終了時間
+              <input
+                type="time"
+                value={gapPicker.end}
+                min={gapPicker.start}
+                max={gapPicker.maxEnd}
+                onChange={(event) => setGapPickerEnd(event.target.value)}
+              />
+            </label>
+            {gapCandidates.length === 0 ? (
+              <p className="activity-plan-list__empty">現在、提案できる候補がありません。</p>
+            ) : (
+              <ul className="gap-picker__options">
+                {gapCandidates.map((candidate, index) => (
+                  <li key={candidate.title} className="gap-picker__option">
+                    <div className="gap-picker__option-header">
+                      <span className="badge badge--ai">プラン{String.fromCharCode(65 + index)}</span>
+                      <span
+                        className={`activity-plan-list__type ${ACTIVITY_TYPE_CLASS[candidate.activityTypeName] ?? "activity-plan-list__type--default"
+                          }`}
+                      >
+                        {candidate.activityTypeName}
+                      </span>
+                    </div>
+                    <div className="gap-picker__option-title">{candidate.title}</div>
+                    <p className="gap-picker__option-reason">{candidate.reasoningText}</p>
+                    <button
+                      type="button"
+                      className="activity-plan-list__result-button"
+                      onClick={() => pickGapCandidate(candidate)}
+                    >
+                      この作業にする
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
     </>
   );

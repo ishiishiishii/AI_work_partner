@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { tomorrowInTokyo } from "@/components/dashboard/RoutePlanPanel";
 import type { RouteEconomicPolicy } from "@/lib/routeEconomicPolicy";
 import type { RoutePlanBatchPreview, RoutePlanPreview } from "@/types";
@@ -10,7 +10,15 @@ import type { RoutePlanBatchPreview, RoutePlanPreview } from "@/types";
 // useState の中身(設計済みの月間計画)が消え、戻るたびに作り直しになってしまう。
 // QuickAddPlanContext と同様にルートレイアウトへ状態を引き上げ、ページ遷移を
 // またいでも設計結果を保持できるようにする。
-type RouteBatchPlanState = {
+// さらにブラウザの再読み込み(F5)でもJSのメモリ状態は消えるため、
+// localStorage にも複製し、ユーザーが明示的に「月の設計を作り直す」を押す
+// (= createMonthOutline が新しい結果で上書きする)までは復元し続ける。
+// v1時代(容量超過時に保存済みキーごと削除してしまうバグがあった)に一部の週だけ
+// 保存された壊れた状態がブラウザに残っている可能性があるため、キーをv2にして
+// 古い保存内容を無視させる。
+const STORAGE_KEY = "routeBatchPlan:v2";
+
+type PersistedRouteBatchPlanState = {
   selectedMonth: string;
   policy: RouteEconomicPolicy;
   maxVisits: number;
@@ -20,7 +28,18 @@ type RouteBatchPlanState = {
   decisions: Record<number, "approved" | "rejected">;
 };
 
-type RouteBatchPlanContextValue = RouteBatchPlanState & {
+function loadPersistedState(): PersistedRouteBatchPlanState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedRouteBatchPlanState;
+  } catch {
+    return null;
+  }
+}
+
+type RouteBatchPlanContextValue = PersistedRouteBatchPlanState & {
   setSelectedMonth: (value: string) => void;
   setPolicy: (value: RouteEconomicPolicy) => void;
   setMaxVisits: (value: number) => void;
@@ -39,13 +58,59 @@ type RouteBatchPlanContextValue = RouteBatchPlanState & {
 const RouteBatchPlanContext = createContext<RouteBatchPlanContextValue | null>(null);
 
 export function RouteBatchPlanProvider({ children }: { children: React.ReactNode }) {
-  const [selectedMonth, setSelectedMonth] = useState(() => tomorrowInTokyo().slice(0, 7));
-  const [policy, setPolicy] = useState<RouteEconomicPolicy>("balanced");
-  const [maxVisits, setMaxVisits] = useState(4);
-  const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>("driving");
-  const [batch, setBatch] = useState<RoutePlanBatchPreview | null>(null);
-  const [weekBatches, setWeekBatches] = useState<Record<number, RoutePlanBatchPreview>>({});
-  const [decisions, setDecisions] = useState<Record<number, "approved" | "rejected">>({});
+  const persistedRef = useRef<PersistedRouteBatchPlanState | null | undefined>(undefined);
+  if (persistedRef.current === undefined) {
+    persistedRef.current = loadPersistedState();
+  }
+  const persisted = persistedRef.current;
+
+  const [selectedMonth, setSelectedMonth] = useState(
+    () => persisted?.selectedMonth ?? tomorrowInTokyo().slice(0, 7),
+  );
+  const [policy, setPolicy] = useState<RouteEconomicPolicy>(() => persisted?.policy ?? "balanced");
+  const [maxVisits, setMaxVisits] = useState(() => persisted?.maxVisits ?? 4);
+  const [travelMode, setTravelMode] = useState<RoutePlanPreview["travel_mode"]>(
+    () => persisted?.travelMode ?? "driving",
+  );
+  const [batch, setBatch] = useState<RoutePlanBatchPreview | null>(() => persisted?.batch ?? null);
+  const [weekBatches, setWeekBatches] = useState<Record<number, RoutePlanBatchPreview>>(
+    () => persisted?.weekBatches ?? {},
+  );
+  const [decisions, setDecisions] = useState<Record<number, "approved" | "rejected">>(
+    () => persisted?.decisions ?? {},
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // weekBatches の各要素は previewSalesRouteBatch のレスポンスをそのまま保持して
+    // おり、月間batchと重複する選択顧客一覧などを含むため、週の数だけ保存すると
+    // 容量が膨らみやすい。パネル側が実際に使うのは weeks[0] と warnings だけなので、
+    // 永続化時はその2つだけに絞って保存する(メモリ上のweekBatchesはフル構造のまま、
+    // UIの型はそのまま満たす)。batch(月アウトラインのみ、outline_only=trueで取得済み
+    // でstops等の詳細を含まない)はそのまま保存してよい。
+    const slimWeekBatches = Object.fromEntries(
+      Object.entries(weekBatches).map(([weekNumber, weekBatch]) => [
+        weekNumber,
+        { weeks: weekBatch.weeks.slice(0, 1), warnings: weekBatch.warnings },
+      ]),
+    );
+    const state = {
+      selectedMonth,
+      policy,
+      maxVisits,
+      travelMode,
+      batch,
+      weekBatches: slimWeekBatches,
+      decisions,
+    };
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // 容量超過などで保存に失敗しても、直前まで保存できていた状態を消してしまうと
+      // かえって「計算済みのはずが再読み込みで消える」原因になる。保存済みキーは
+      // 触らず、今回分の書き込みだけ諦める(次回の状態変化で再度書き込みを試みる)。
+    }
+  }, [selectedMonth, policy, maxVisits, travelMode, batch, weekBatches, decisions]);
 
   return (
     <RouteBatchPlanContext.Provider
