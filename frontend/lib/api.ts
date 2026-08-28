@@ -408,15 +408,23 @@ export async function generateActivityPlans(
   return body.plans.map((row) => mapPlan(row, customerNames));
 }
 
-// 成約・失注などの実績確定後に、当日以降のAI生成予定だけを残目標から組み直す。
+// 成約・失注などの実績確定後に、指定した基準日以降のAI生成予定だけを残目標から組み直す。
 // 手動予定はバックエンド側で保持されるため、結果入力による自動再計画専用として
 // /plans/generate と呼び分ける。
-export async function replanActivityPlans(repId: number, targetMonth: string): Promise<void> {
+export async function replanActivityPlans(
+  repId: number,
+  targetMonth: string,
+  startDate?: string,
+): Promise<void> {
   const base = getApiBaseUrl();
   const res = await fetch(`${base}/api/plans/replan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rep_id: repId, target_month: targetMonth }),
+    body: JSON.stringify({
+      rep_id: repId,
+      target_month: targetMonth,
+      ...(startDate ? { start_date: startDate } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`自動再計画に失敗しました (HTTP ${res.status})`);
 }

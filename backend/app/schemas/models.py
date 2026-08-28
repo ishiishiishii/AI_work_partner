@@ -357,6 +357,9 @@ class ProductOut(OrmModel):
 class ReplanRequest(BaseModel):
     rep_id: int
     target_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    # 結果を入力した予定日から将来計画を組み直せるよう、画面側が基準日を渡す。
+    # 未指定の既存クライアントは従来どおりAPI実行日を基準にする。
+    start_date: date | None = None
 
 
 class ForecastOut(BaseModel):
@@ -411,4 +414,3 @@ class AiChatRequest(BaseModel):
 class AiChatResponse(BaseModel):
     answer: str
     model: str
-

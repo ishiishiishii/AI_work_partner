@@ -2566,14 +2566,22 @@ def _monthly_target_context(
     *,
     rep_id: int,
     target_date: date,
+    cutoff_date: date | None = None,
 ) -> dict[str, Decimal | None]:
-    """Return the target and month-to-date results as of ``target_date``.
+    """Return the target and month-to-date results as of ``cutoff_date``.
 
-    A plan generated for the first day of a month must start with zero
-    achieved sales/profit.  Only contracts from earlier days in the same
-    month are therefore counted; contracts dated on or after the planning
-    start date are future results from that plan's point of view.
+    ``target_date`` selects which month's target to use. A plan generated
+    for the first day of a month must start with zero achieved sales/profit,
+    so by default (``cutoff_date`` omitted) only contracts strictly before
+    ``target_date`` are counted as already achieved -- contracts dated on or
+    after the planning start date are future results from that plan's point
+    of view. Callers that need "achieved so far, regardless of when the plan
+    itself starts" (e.g. a dashboard showing this month's actual progress)
+    should pass an explicit ``cutoff_date`` (typically tomorrow) so contracts
+    won after the plan's nominal start date are still counted.
     """
+    if cutoff_date is None:
+        cutoff_date = target_date
     row = conn.execute(
         """
         select st.target_amount, st.target_gross_profit,
@@ -2593,7 +2601,7 @@ def _monthly_target_context(
           and st.target_month = date_trunc('month', %s::date)::date
         group by st.target_amount, st.target_gross_profit
         """,
-        (target_date, rep_id, target_date),
+        (cutoff_date, rep_id, target_date),
     ).fetchone()
     if not row:
         return {
@@ -4374,7 +4382,10 @@ def create_batch_preview(
         conn, rep_id=rep_id, business_days=business_days
     )
     target_context = _monthly_target_context(
-        conn, rep_id=rep_id, target_date=business_days[0]
+        conn,
+        rep_id=rep_id,
+        target_date=business_days[0],
+        cutoff_date=max(business_days[0], today + timedelta(days=1)),
     )
     planning_target = (
         request.target_amount_override
