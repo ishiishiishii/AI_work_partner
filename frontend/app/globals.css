@@ -3199,6 +3199,32 @@ a {
   gap: 1rem;
 }
 
+/* 月間営業スケジュールを(再)生成する、このパネルで最も重要な操作なので、
+   他所で使い回している汎用の .regenerate-button より目立つプライマリボタンにする */
+.route-plan__generate-button {
+  justify-self: start;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.65rem 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--accent-ink);
+  background: var(--accent);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.35);
+  cursor: pointer;
+}
+
+.route-plan__generate-button:hover {
+  filter: brightness(1.08);
+}
+
+.route-plan__generate-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .route-plan__controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

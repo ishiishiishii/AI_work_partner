@@ -480,7 +480,12 @@ export function RouteBatchPlanPanel({
         </small>
       </fieldset>
 
-      <button type="button" className="regenerate-button" onClick={createMonthOutline} disabled={busy || calculatingWeek !== null}>
+      <button
+        type="button"
+        className="route-plan__generate-button"
+        onClick={createMonthOutline}
+        disabled={busy || calculatingWeek !== null}
+      >
         {busy ? "月の顧客・週配分を計算中…" : batch ? "月の設計を作り直す" : "月の設計を作る"}
       </button>
 
