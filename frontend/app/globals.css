@@ -3345,6 +3345,18 @@ a {
   font-size: 0.8rem;
 }
 
+.route-plan__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.route-plan__actions span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .route-plan__check {
   display: flex;
   align-items: center;
