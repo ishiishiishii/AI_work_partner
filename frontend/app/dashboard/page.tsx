@@ -25,6 +25,7 @@ export default function DashboardPage() {
     dailyTasks,
     deals,
     replan,
+    dismissReplan,
     altNotice,
     altPreview,
     needsInitialPlan,
@@ -136,7 +137,7 @@ export default function DashboardPage() {
             refreshSignal={routeRefreshRevision}
             existingPlans={plans}
           />
-          {replan && <ReplanBanner info={replan} />}
+          {replan && <ReplanBanner info={replan} onClose={dismissReplan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
           {needsInitialPlan && (
             <p className="activity-plan-list__empty">

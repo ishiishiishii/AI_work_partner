@@ -32,6 +32,7 @@ export default function ActivityPage() {
     territory,
     affinities,
     replan,
+    dismissReplan,
     altNotice,
     achievementRate,
     altPreview,
@@ -86,7 +87,7 @@ export default function ActivityPage() {
       <h1>活動計画</h1>
       <div className="dashboard-layout">
         <div className="dashboard-layout__primary">
-          {replan && <ReplanBanner info={replan} />}
+          {replan && <ReplanBanner info={replan} onClose={dismissReplan} />}
           {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
           {needsInitialPlan && (
             <p className="activity-plan-list__empty">

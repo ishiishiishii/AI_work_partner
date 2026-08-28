@@ -554,10 +554,26 @@ export type Deadline = {
   memo: string | null;
 };
 
+export type PlanChange = {
+  type: "added" | "removed" | "moved";
+  customer_name: string;
+  activity_type_name: string;
+  before_date?: string; // "YYYY-MM-DD"
+  after_date?: string; // "YYYY-MM-DD"
+  // "added"/"moved" は変更後にAIが選んだ予定の中身。何を根拠にこの予定を
+  // 入れたか(見込み金額・成約確度・AIの選定理由)をそのまま表示するために持たせる
+  expected_amount?: number;
+  expected_probability?: number;
+  reasoning_text?: string;
+};
+
 export type ReplanInfo = {
   before_achievement_rate: number;
   after_achievement_rate: number;
+  target_amount: number;
+  after_forecast_amount: number;
   reason: string;
   outcome?: "won" | "lost" | "manual";
   steps?: string[];
+  changes?: PlanChange[];
 };

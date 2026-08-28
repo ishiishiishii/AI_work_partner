@@ -1866,17 +1866,20 @@ a {
   filter: brightness(1.08);
 }
 
+.replan-banner-overlay {
+  z-index: 120;
+}
+
 .replan-banner {
+  --type-accent: var(--ai);
   border-color: var(--ai);
-  background: color-mix(in srgb, var(--ai) 6%, var(--card));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ai) 8%, var(--card)) 0%, var(--card) 9rem);
 }
 
 .replan-banner__badge {
-  display: inline-block;
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.85rem;
+  font-weight: 700;
   color: var(--ai);
-  margin-bottom: 0.5rem;
 }
 
 .replan-banner__reason {
@@ -1906,6 +1909,67 @@ a {
 
 .replan-banner__after {
   color: var(--ai);
+}
+
+.replan-banner__goal-explainer {
+  margin: 0.6rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--ai) 8%, transparent);
+  color: var(--ink);
+}
+
+.replan-banner__changes-heading {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.replan-banner__changes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.replan-banner__change {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border-left: 3px solid var(--line);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.replan-banner__change-headline {
+  font-weight: 600;
+}
+
+.replan-banner__change-detail {
+  margin-top: 0.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.replan-banner__change--added {
+  border-left-color: var(--ok);
+}
+
+.replan-banner__change--removed {
+  border-left-color: var(--warn);
+}
+
+.replan-banner__change--moved {
+  border-left-color: var(--ai);
 }
 
 .plan-variant-selector h2 {
