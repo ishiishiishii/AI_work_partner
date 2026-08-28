@@ -346,6 +346,7 @@ type ApiPlan = {
   product_name: string | null;
   progress_percent: number;
   memo: string | null;
+  week_number: number;
 };
 
 // plan_status からは成約/失注/延期の区別まではわからないため、
@@ -374,6 +375,8 @@ function mapPlan(row: ApiPlan, customerNames: Map<number, string>): ActivityPlan
     result_status: "pending",
     memo: row.memo,
     progress_percent: row.progress_percent,
+    week_number: row.week_number,
+    is_draft: row.plan_status === "draft",
   };
 }
 

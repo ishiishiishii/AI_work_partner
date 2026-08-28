@@ -1,22 +1,14 @@
 "use client";
 
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
-import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
 import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { GoalCard } from "@/components/dashboard/GoalCard";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { RouteBatchPlanPanel } from "@/components/dashboard/RouteBatchPlanPanel";
-import { TARGET_MONTH, useDashboardData } from "@/lib/useDashboardData";
+import { useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
 import type { RoutePlanBatchPreview } from "@/types";
-import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-
-// leafletはブラウザのwindow/documentに直接依存しておりSSR不可なため、
-// Next.jsのサーバー描画パスに乗らないよう動的import(ssr:false)にする。
-const MapPanel = dynamic(() => import("@/components/dashboard/MapPanel").then((m) => m.MapPanel), {
-  ssr: false,
-});
 
 export default function DashboardPage() {
   const { selectedRep, isAuthLoading } = useRep();
@@ -29,15 +21,11 @@ export default function DashboardPage() {
     plans,
     dailyTasks,
     deals,
-    customers,
-    territory,
-    affinities,
     replan,
     altNotice,
     altPreview,
     needsInitialPlan,
     isGeneratingInitialPlan,
-    achievementRate,
     routeRefreshRevision,
     handleTargetSave,
     handleRouteApproved,
@@ -172,8 +160,6 @@ export default function DashboardPage() {
           />
         </div>
         <div className="dashboard-layout__sidebar">
-          <AiChatPanel target={target} achievementRate={achievementRate} plans={plans} affinities={affinities} />
-          <MapPanel customers={customers} territory={territory} plans={plans} targetMonth={TARGET_MONTH} />
           <AiReasoningPanel plans={plans} />
         </div>
       </div>

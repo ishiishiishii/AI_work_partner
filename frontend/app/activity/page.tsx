@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { ActivityPlanList } from "@/components/dashboard/ActivityPlanList";
 import { AiChatPanel } from "@/components/dashboard/AiChatPanel";
+import { AiReasoningPanel } from "@/components/dashboard/AiReasoningPanel";
 import { ReplanBanner } from "@/components/dashboard/ReplanBanner";
 import { TARGET_MONTH, useDashboardData } from "@/lib/useDashboardData";
 import { useRep } from "@/lib/repContext";
@@ -27,8 +28,11 @@ export default function ActivityPage() {
     territory,
     affinities,
     replan,
+    altNotice,
     achievementRate,
     altPreview,
+    needsInitialPlan,
+    isGeneratingInitialPlan,
     handleResultChange,
     handlePostpone,
     handleRequestAlternative,
@@ -79,6 +83,14 @@ export default function ActivityPage() {
       <div className="dashboard-layout">
         <div className="dashboard-layout__primary">
           {replan && <ReplanBanner info={replan} />}
+          {altNotice && <p className="activity-plan-list__empty">{altNotice}</p>}
+          {needsInitialPlan && (
+            <p className="activity-plan-list__empty">
+              {isGeneratingInitialPlan
+                ? "AIが今月の活動計画を作成しています(数分かかる場合があります)..."
+                : "目標を保存すると、AIが今月の活動計画を作成します。"}
+            </p>
+          )}
           <ActivityPlanList
             repId={selectedRep.rep_id}
             plans={plans}
@@ -100,6 +112,7 @@ export default function ActivityPage() {
         <div className="dashboard-layout__sidebar">
           <AiChatPanel target={target} achievementRate={achievementRate} plans={plans} affinities={affinities} />
           <MapPanel customers={customers} territory={territory} plans={plans} targetMonth={TARGET_MONTH} />
+          <AiReasoningPanel plans={plans} />
         </div>
       </div>
     </main>

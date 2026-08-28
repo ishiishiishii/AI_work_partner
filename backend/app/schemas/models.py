@@ -1,12 +1,26 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class OrmModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+
+def _business_week_number(plan_date: date) -> int:
+    """月内の月曜始まり週を、その月の最初の営業日から連番で数える。
+    route_planning.py の _business_weeks と同じ週の区切り方だが、activity_plan には
+    week_number を永続化していないため plan_date から都度算出する。"""
+    first_of_month = plan_date.replace(day=1)
+    first_business_day = first_of_month
+    while first_business_day.weekday() >= 5:
+        first_business_day += timedelta(days=1)
+    monday_of_date = plan_date - timedelta(days=plan_date.weekday())
+    monday_of_first = first_business_day - timedelta(days=first_business_day.weekday())
+    diff_days = (monday_of_date - monday_of_first).days
+    return max(1, diff_days // 7 + 1)
 
 
 class SalesRepOut(OrmModel):
@@ -250,6 +264,11 @@ class PlanOut(OrmModel):
     product_name: str | None = None
     progress_percent: int = 0
     memo: str | None = None
+
+    @computed_field
+    @property
+    def week_number(self) -> int:
+        return _business_week_number(self.plan_date)
 
 
 class PlanCreate(BaseModel):
