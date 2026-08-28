@@ -290,11 +290,13 @@ class PlanCreate(BaseModel):
 
 
 class PlanUpdate(BaseModel):
+    plan_date: date
     start_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     end_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     category: str = Field(pattern=r"^(visit|task)$")
     activity_type: str
     title: str | None = None
+    customer_id: int | None = None
     product_name_override: str | None = None
     expected_amount: Decimal = Field(default=Decimal("0"), ge=0)
     expected_probability: int = Field(default=0, ge=0, le=100)

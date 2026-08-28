@@ -29,6 +29,7 @@ import {
   calcForecastAmount,
   calcForecastProfit,
 } from "@/lib/forecast";
+import { todayIsoLocal } from "@/lib/dateRange";
 import { useInitialPlanGeneration } from "@/lib/initialPlanGenerationContext";
 import { mockTaskSuggestions } from "@/lib/mockData";
 import type {
@@ -38,10 +39,83 @@ import type {
   DealResultStatus,
   Forecast,
   RepAffinity,
+  PlanChange,
   ReplanInfo,
   SalesTarget,
   Territory,
 } from "@/types";
+
+// replanActivityPlansは未来のAI予定を全て削除して作り直すため、plan_idでは
+// before/afterを突き合わせられない。同じ顧客の予定が消えて別日に現れていれば
+// 「移動」、片方にしか無ければ「追加/削除」とみなして差分を組み立てる。
+function diffFuturePlans(before: ActivityPlan[], after: ActivityPlan[]): PlanChange[] {
+  const today = todayIsoLocal();
+  const isFutureAiPending = (plan: ActivityPlan) =>
+    plan.is_ai_generated && plan.result_status === "pending" && plan.plan_date >= today;
+
+  const beforeFuture = before.filter(isFutureAiPending);
+  const afterFuture = after.filter(isFutureAiPending);
+
+  const identityKey = (plan: ActivityPlan) => `${plan.customer_id ?? plan.customer_name}:${plan.plan_date}`;
+  const afterKeys = new Set(afterFuture.map(identityKey));
+  const beforeKeys = new Set(beforeFuture.map(identityKey));
+
+  const unmatchedBefore = beforeFuture.filter((plan) => !afterKeys.has(identityKey(plan)));
+  const unmatchedAfter = afterFuture.filter((plan) => !beforeKeys.has(identityKey(plan)));
+
+  const customerKey = (plan: ActivityPlan) => String(plan.customer_id ?? plan.customer_name);
+  const unmatchedAfterByCustomer = new Map<string, ActivityPlan[]>();
+  unmatchedAfter.forEach((plan) => {
+    const key = customerKey(plan);
+    unmatchedAfterByCustomer.set(key, [...(unmatchedAfterByCustomer.get(key) ?? []), plan]);
+  });
+
+  const changes: PlanChange[] = [];
+  const consumedAfterPlanIds = new Set<number>();
+
+  for (const beforePlan of unmatchedBefore) {
+    const candidates = (unmatchedAfterByCustomer.get(customerKey(beforePlan)) ?? []).filter(
+      (plan) => !consumedAfterPlanIds.has(plan.plan_id),
+    );
+    const match = candidates[0];
+    if (match) {
+      consumedAfterPlanIds.add(match.plan_id);
+      changes.push({
+        type: "moved",
+        customer_name: beforePlan.customer_name,
+        activity_type_name: match.activity_type_name,
+        before_date: beforePlan.plan_date,
+        after_date: match.plan_date,
+        expected_amount: match.expected_amount,
+        expected_probability: match.expected_probability,
+        reasoning_text: match.reasoning_text,
+      });
+    } else {
+      changes.push({
+        type: "removed",
+        customer_name: beforePlan.customer_name,
+        activity_type_name: beforePlan.activity_type_name,
+        before_date: beforePlan.plan_date,
+      });
+    }
+  }
+
+  for (const afterPlan of unmatchedAfter) {
+    if (consumedAfterPlanIds.has(afterPlan.plan_id)) continue;
+    changes.push({
+      type: "added",
+      customer_name: afterPlan.customer_name,
+      activity_type_name: afterPlan.activity_type_name,
+      after_date: afterPlan.plan_date,
+      expected_amount: afterPlan.expected_amount,
+      expected_probability: afterPlan.expected_probability,
+      reasoning_text: afterPlan.reasoning_text,
+    });
+  }
+
+  changes.sort((a, b) => (a.after_date ?? a.before_date ?? "").localeCompare(b.after_date ?? b.before_date ?? ""));
+  return changes;
+}
 
 // 以前は "2026-08" にハードコードされており、実際の日付とズレていた
 // (AIチャットにも「今日」を伝えていなかった。backend/app/services/qwen_chat.py 参照)。
@@ -256,6 +330,8 @@ export function useDashboardData(repId: number | null) {
       setReplan({
         before_achievement_rate: before,
         after_achievement_rate: after,
+        target_amount: target.target_amount,
+        after_forecast_amount: calcForecastAmount(freshVisits, deals),
         reason: "手動でAIに残り期間の計画を組み直してもらいました",
       });
       await refreshForecast(rid);
@@ -365,6 +441,7 @@ export function useDashboardData(repId: number | null) {
 
       const customerName = changedPlan.customer_name;
       const isLost = status === "lost";
+      const afterForecastAmount = calcForecastAmount(replannedVisits, fetchedDeals);
       setReplan({
         before_achievement_rate: beforeReplanRate,
         after_achievement_rate: calcAchievementRate(
@@ -372,6 +449,8 @@ export function useDashboardData(repId: number | null) {
           target.target_amount,
           fetchedDeals,
         ),
+        target_amount: target.target_amount,
+        after_forecast_amount: afterForecastAmount,
         outcome: status,
         reason: isLost
           ? `${customerName}の失注を反映し、月末目標の不足分を補うようAIが計画を組み直しました。`
@@ -388,6 +467,7 @@ export function useDashboardData(repId: number | null) {
               "目標に対して余分になった将来のAI訪問を整理",
               "空いた時間へ別案件のフォローや事務作業を配置",
             ],
+        changes: diffFuturePlans(updatedPlans, replannedVisits),
       });
     } catch (error) {
       // 結果登録は既に成功しているのでロールバックしない。月間ルート側はこの後の
@@ -633,6 +713,8 @@ export function useDashboardData(repId: number | null) {
         setReplan({
           before_achievement_rate: calcAchievementRate(plans, target.target_amount, deals),
           after_achievement_rate: calcAchievementRate(plans, target.target_amount, deals),
+          target_amount: target.target_amount,
+          after_forecast_amount: calcForecastAmount(plans, deals),
           reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが「${candidate.customer_name}」に差し替えました`,
         });
       } catch (error) {
@@ -693,6 +775,8 @@ export function useDashboardData(repId: number | null) {
       setReplan({
         before_achievement_rate: before,
         after_achievement_rate: after,
+        target_amount: target.target_amount,
+        after_forecast_amount: calcForecastAmount(nextPlans, deals),
         reason: `${changedPlan.customer_name}への対応が難しいとのことなので、AIが${candidate.customer_name}への提案に差し替えました`,
       });
     } catch (error) {
@@ -736,6 +820,7 @@ export function useDashboardData(repId: number | null) {
     territory,
     affinities,
     replan,
+    dismissReplan: () => setReplan(null),
     altNotice,
     altPreview,
     isRegenerating,

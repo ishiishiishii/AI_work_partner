@@ -765,11 +765,13 @@ def update_plan(
     *,
     plan_id: int,
     rep_id: int,
+    plan_date: date,
     start_time: str | None,
     end_time: str | None,
     category: str,
     activity_type: str,
     title: str | None,
+    customer_id: int | None,
     product_name_override: str | None,
     expected_amount: Decimal,
     expected_probability: int,
@@ -778,11 +780,13 @@ def update_plan(
     row = conn.execute(
         """
         update activity_plan ap
-        set start_time = %s,
+        set plan_date = %s,
+            start_time = %s,
             end_time = %s,
             category = %s,
             activity_type = %s,
             title = %s,
+            customer_id = %s,
             product_name_override = %s,
             expected_amount = %s,
             expected_probability = %s,
@@ -806,11 +810,13 @@ def update_plan(
                   ap.memo
         """,
         (
+            plan_date,
             start_time,
             end_time,
             category,
             activity_type,
             title,
+            customer_id,
             product_name_override,
             expected_amount,
             expected_probability,
@@ -1534,6 +1540,9 @@ def create_result(
     # without closing the deal, so it stays a candidate for future plans.
     if deal_id and outcome in {"won", "lost"}:
         contract_date = result_date if outcome == "won" else None
+        # lost へ遷移する際は既存の actual_amount(過去にwon→取り消し等で入っていた値)を
+        # 明示的にnullへ戻す。enforce_deal_contract_dateトリガーがwon以外での
+        # actual_amount残存を拒否するため、放置すると更新自体が失敗する。
         conn.execute(
             """
             update deal
@@ -1542,10 +1551,11 @@ def create_result(
                   from deal_result_status
                   where status_code = %s
                 ),
-                contract_date = %s
+                contract_date = %s,
+                actual_amount = case when %s = 'won' then actual_amount else null end
             where deal_id = %s and rep_id = %s
             """,
-            (outcome, contract_date, deal_id, rep_id),
+            (outcome, contract_date, outcome, deal_id, rep_id),
         )
         # deal just closed (won/lost) -> this rep's track record changed.
         affinity.recalculate_rep_affinity(conn, rep_id)

@@ -477,10 +477,12 @@ export async function updatePlan(
   repId: number,
   planId: number,
   updates: {
+    plan_date: string;
     start_time: string | null;
     end_time: string | null;
     category: ActivityPlanCategory;
     activity_type_name: string;
+    customer_id: number | null;
     customer_name: string;
     product_name: string | null;
     expected_amount: number;
@@ -493,11 +495,13 @@ export async function updatePlan(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      plan_date: updates.plan_date,
       start_time: updates.start_time,
       end_time: updates.end_time,
       category: updates.category,
       activity_type: updates.activity_type_name,
       title: updates.customer_name,
+      customer_id: updates.customer_id,
       product_name_override: updates.product_name,
       expected_amount: updates.expected_amount,
       expected_probability: updates.expected_probability,
