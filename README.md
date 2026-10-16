@@ -217,3 +217,14 @@ supabase stop
   公共交通は`docker compose ps otp`と`docker compose logs otp`でOpenTripPlannerの起動状態を確認します。
 - **AIチャットが `Qwen APIに接続できませんでした` を返す**: `.env` の `AI_BASE_URL` が未設定、
   または自分のPCに向いたままになっていないか確認してください。
+
+
+## デモ動画
+営業計画支援AIの操作イメージをご覧いただけます。
+
+
+https://github.com/user-attachments/assets/b2871134-4816-4df6-a2ed-64f58fb239c1
+
+
+
+
